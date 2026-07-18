@@ -19,8 +19,9 @@ email-rendering, or release-layout changes.
   documentation. Public Free Library branch names, addresses, phone numbers,
   URLs, and feed identifiers are allowed as integration source metadata.
 - Never embed maintainer-private values in public guards, tests, fixtures, or
-  metadata, including split, encoded, reversed, or hashed forms. Supply exact
-  private denylist values only through the trusted publication environment.
+  metadata, including split, encoded, reversed, or hashed forms. Run exact-value
+  scans only from a maintainer-controlled local publication gate; do not upload
+  those private values as GitHub Actions secrets.
 - Run `python scripts/check_public_safety.py` before publishing changes to
   code, tests, documentation, workflows, scripts, or metadata.
 

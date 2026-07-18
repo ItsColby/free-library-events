@@ -9,9 +9,3 @@ render_digest:
       default: true
       selector:
         boolean:
-    reference_date:
-      name: Reference date
-      description: Optional date used to preview or test a specific upcoming week.
-      required: false
-      selector:
-        date:

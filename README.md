@@ -1,13 +1,15 @@
 # Free Library Events for Home Assistant
 
 Free Library Events is a Home Assistant custom integration that turns selected
-Free Library of Philadelphia branch feeds into an age-aware calendar and a
-response action for weekly email digests.
+Free Library of Philadelphia branches into an age-aware calendar and a response
+action for weekly email digests.
 
 The integration currently supports:
 
 - Charles Santore Library (`SWK`)
 - Independence Library (`IND`)
+- Parkway Central Library (`CEN`)
+- Philadelphia City Institute (`PCI`)
 
 It uses deterministic parsing and age-matching rules. No LLM or external AI
 service is used at runtime.
@@ -20,16 +22,18 @@ service is used at runtime.
 - Configurable child name and birth date
 - Configurable branch selection, refresh interval, and placeholder duration
 - Manual refresh button and diagnostic status sensor
-- Partial-source operation when one selected branch feed is unavailable
+- Custom official branch-and-age RSS queries with duplicate consolidation
+- Coverage-aware partial operation when a selected source is unavailable or its
+  result boundary cannot prove the full digest week was returned
 - Redacted integration diagnostics
 - Response-only `free_library_events.render_digest` action returning:
   - subject
   - plain-text message
   - responsive HTML email
   - bounded generation metadata
-- Each included event contains the official description, branch contact
-  details, registration/cost disclosures, directions, official event link,
-  and a prefilled Google Calendar link
+- Each included event leads with the official description and includes a linked
+  location name, linked title and image, and a prefilled Google Calendar link
+- Event images preserve their published aspect ratio rather than being cropped
 
 ## Installation through HACS
 
@@ -57,15 +61,17 @@ The setup flow asks for:
 
 - the child's first name
 - the child's birth date
-- one or both supported library branches
+- one or more supported library branches
 - the age-match mode
 - the placeholder event duration
 - the feed refresh interval
 
 The child name and birth date stay in the Home Assistant config entry and are
 used only for local filtering and rendering. They are redacted from
-downloadable diagnostics. Network requests download only the selected official
-branch feeds.
+downloadable diagnostics. Network requests download official custom RSS feeds
+for each selected branch and relevant published age category. The birth date
+and child name are not included in those requests. All supported branches are
+enabled by default and can be disabled individually.
 
 ### Match modes
 
@@ -73,7 +79,9 @@ branch feeds.
 - **Recommended** adds clearly inclusive and likely-fit children's events.
 - **Broad** also includes general child/family events without a specific age.
 
-Published numeric age ranges override general wording such as “all ages.”
+Published numeric age ranges override the official feed category and general
+wording such as “all ages.” When an event appears in more than one relevant
+official age feed, it is shown once and retains all of those classifications.
 
 ## Calendar
 
@@ -82,8 +90,6 @@ configured child and mode. Each calendar event includes:
 
 - the official title and description
 - the branch address
-- the deterministic fit explanation
-- the child's age on the event date
 - the official event page
 - a disclosed placeholder end time when the feed omits one
 
@@ -93,6 +99,14 @@ The calendar entity does not send email or create Google Calendar events.
 
 `free_library_events.render_digest` refreshes the selected feeds by default and
 returns a complete email payload. It must be called with `response_variable`.
+
+The digest states the child's conversational age once: weeks before 2 completed
+months, months through 23 months, half-years near the half-year mark below age
+5, and years thereafter. Each event keeps its description primary without
+repeating the matching rationale. An end time
+appears beside the start time only when the RSS description contains an explicit
+range matching the published start; otherwise it is omitted. The location name
+links to Google Maps, while the title and image link to the official event.
 
 Example automation fragment:
 
@@ -116,32 +130,39 @@ The automation or script calling the action owns its schedule, recipient, and
 email notifier. This integration deliberately does not store email addresses
 or send mail directly.
 
-For previews and deterministic tests, the action also accepts an optional
-`reference_date`. Normal automations should omit it.
-
 ## Diagnostics and failures
 
 The status sensor reports:
 
-- `ok` when every selected feed loaded
-- `partial` when at least one feed loaded and another failed
+- `ok` when every selected source loaded and coverage evidence reaches beyond
+  the upcoming digest week
+- `partial` when at least one source loaded but another failed, parsed
+  incompletely, or reached its item limit before full-week coverage was proven
 - `error` after a complete refresh failure
 
 If one selected feed fails, the calendar and digest retain the successful
 branch and disclose the unavailable source. If every selected feed fails,
 `render_digest` raises an error before returning an email payload.
 
-Diagnostics redact the child name and birth date. They include source counts,
+Diagnostics redact the child name and birth date. They include per-branch and
+age-category published/parsed counts, ordering and coverage-boundary evidence,
 source availability, bounded errors, last refresh time, and cached event count.
 
 ## Source limitations
 
-- The official branch RSS feeds may expose only their most recent items. The
-  digest warns when a feed returns ten items and links the full branch calendar.
-- The feeds currently provide start times but no structured end times. Calendar
-  entries therefore use the configured placeholder duration and disclose it.
-- Registration, cost, and age information are inferred only from published
-  event text. Missing information remains labeled as missing.
+- The official custom RSS feeds return at most ten items. The integration uses
+  the narrowest relevant branch-and-age feeds, consolidates duplicate events,
+  and treats a capped feed as complete only when its final ordered event is
+  after the digest week. Otherwise the status becomes `partial` and the digest
+  names the unresolved source while retaining full-calendar links.
+- The feeds provide start times but no structured end times, topic tags,
+  registration links, or cost fields. The public event pages are protected by a
+  browser challenge and are not a reliable Home Assistant data source. The
+  digest therefore uses an explicit time range from the RSS description when
+  available, omits unavailable fields, and keeps the official event link. Google
+  Calendar links disclose any configured placeholder duration they use.
+- The Home Assistant calendar is feed-backed and therefore continues to use and
+  disclose the configured placeholder duration.
 - Age matching is a deterministic convenience filter, not developmental or
   medical advice. Check the official event page before attending.
 

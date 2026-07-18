@@ -15,13 +15,13 @@ from .config import entry_config
 from .const import (
     CONF_BIRTH_DATE,
     CONF_CALENDAR_DURATION,
-    CONF_CHILD_NAME,
     CONF_FILTER_MODE,
     DOMAIN,
 )
-from .digest import TIMEZONE, Event, classify_event, format_age, include_fit
+from .coordinator import LibraryDataCoordinator
+from .digest import TIMEZONE, Event, classify_event, include_fit
 from .entity import service_device_info
-from .runtime import LibraryConfigEntry, LibraryRuntime
+from .runtime import LibraryConfigEntry
 
 PARALLEL_UPDATES = 0
 LIBRARY_TIME_ZONE = ZoneInfo(TIMEZONE)
@@ -44,8 +44,10 @@ class LibraryCalendar(CoordinatorEntity, CalendarEntity):
     _attr_translation_key = "events"
     _attr_icon = "mdi:library"
 
-    def __init__(self, entry: LibraryConfigEntry, runtime: LibraryRuntime) -> None:
-        super().__init__(runtime.coordinator)
+    def __init__(
+        self, entry: LibraryConfigEntry, coordinator: LibraryDataCoordinator
+    ) -> None:
+        super().__init__(coordinator)
         self._entry = entry
         self._attr_unique_id = f"{DOMAIN}_calendar"
 
@@ -64,23 +66,31 @@ class LibraryCalendar(CoordinatorEntity, CalendarEntity):
         birth_date = date.fromisoformat(config[CONF_BIRTH_DATE])
         filter_mode = config[CONF_FILTER_MODE]
         duration = config[CONF_CALENDAR_DURATION]
-        child_name = config[CONF_CHILD_NAME]
         events: list[CalendarEvent] = []
         for event in self.coordinator.data.events if self.coordinator.data else ():
             fit = classify_event(event, birth_date)
             if not include_fit(fit, filter_mode):
                 continue
             start = event.starts_at.replace(tzinfo=LIBRARY_TIME_ZONE)
+            if event.end_at:
+                end = event.end_at.replace(tzinfo=LIBRARY_TIME_ZONE)
+                end_note = ""
+            else:
+                end = start + timedelta(minutes=duration)
+                end_note = (
+                    "\n"
+                    f"End time not published in the feed; using a {duration}-minute "
+                    "placeholder."
+                )
             events.append(
                 CalendarEvent(
                     start=start,
-                    end=start + timedelta(minutes=duration),
+                    end=end,
                     summary=event.title,
                     description=(
-                        f"{fit.label}: {fit.reason}\n"
-                        f"{child_name} will be {format_age(birth_date, event.event_date)} old.\n\n"
-                        f"{event.description}\n\nOfficial details: {event.link}\n"
-                        f"End time not published; using a {duration}-minute placeholder."
+                        f"{event.description}\n\n"
+                        f"Official details: {event.link}"
+                        f"{end_note}"
                     ),
                     location=f"{event.branch.name}, {event.branch.address}",
                     uid=event.link or self._event_uid(event),

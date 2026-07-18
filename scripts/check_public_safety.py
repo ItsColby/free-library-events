@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import argparse
-import json
-import os
 from pathlib import Path
 import re
 import subprocess
@@ -33,7 +30,6 @@ TEXT_SUFFIXES = {
     ".yml",
 }
 TEXT_FILENAMES = {"LICENSE", "MANIFEST.in"}
-PRIVATE_DENYLIST_ENV = "PUBLIC_PRIVACY_DENYLIST_JSON"
 ALLOWED_EMAILS = {"noreply@github.com"}
 ALLOWED_EMAIL_DOMAINS = {
     "example.com",
@@ -65,9 +61,7 @@ PUBLIC_SAFETY_PATTERNS = (
     ),
     (
         "local hostname",
-        re.compile(
-            r"(?i)(?:[a-z0-9_-]+\x2e)+(?:home|lan|local)(?![a-z0-9_-])"
-        ),
+        re.compile(r"(?i)(?:[a-z0-9_-]+\x2e)+(?:home|lan|local)(?![a-z0-9_-])"),
     ),
     (
         "private key",
@@ -92,21 +86,34 @@ def _is_text_candidate(path: Path) -> bool:
 
 
 def _candidate_files(root: Path = ROOT) -> list[Path]:
-    tracked = subprocess.run(
-        [
-            "git",
-            "-C",
-            str(root),
-            "ls-files",
-            "-z",
-            "--cached",
-            "--others",
-            "--exclude-standard",
-        ],
+    top_level = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
         check=False,
         capture_output=True,
     )
-    if tracked.returncode == 0:
+    is_repository_root = (
+        top_level.returncode == 0
+        and Path(top_level.stdout.decode("utf-8").strip()).resolve() == root.resolve()
+    )
+    tracked = (
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(root),
+                "ls-files",
+                "-z",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+            ],
+            check=False,
+            capture_output=True,
+        )
+        if is_repository_root
+        else None
+    )
+    if tracked is not None and tracked.returncode == 0:
         paths = [
             root / raw.decode("utf-8") for raw in tracked.stdout.split(b"\0") if raw
         ]
@@ -124,29 +131,7 @@ def _candidate_files(root: Path = ROOT) -> list[Path]:
     )
 
 
-def _private_denylist(require: bool) -> tuple[str, ...]:
-    raw = os.environ.get(PRIVATE_DENYLIST_ENV, "")
-    if not raw:
-        if require:
-            raise SystemExit(
-                f"{PRIVATE_DENYLIST_ENV} is required for trusted publication checks."
-            )
-        return ()
-
-    try:
-        values = json.loads(raw)
-    except json.JSONDecodeError as err:
-        raise SystemExit(f"{PRIVATE_DENYLIST_ENV} must contain valid JSON.") from err
-    if not isinstance(values, list) or not values:
-        raise SystemExit(f"{PRIVATE_DENYLIST_ENV} must be a non-empty JSON list.")
-    if any(not isinstance(value, str) or len(value.strip()) < 4 for value in values):
-        raise SystemExit(
-            f"{PRIVATE_DENYLIST_ENV} entries must be strings of at least 4 characters."
-        )
-    return tuple(dict.fromkeys(value.casefold() for value in values))
-
-
-def _text_failures(text: str, private_denylist: tuple[str, ...]) -> set[str]:
+def _text_failures(text: str) -> set[str]:
     failures = {
         label for label, pattern in PUBLIC_SAFETY_PATTERNS if pattern.search(text)
     }
@@ -155,16 +140,10 @@ def _text_failures(text: str, private_denylist: tuple[str, ...]) -> set[str]:
         domain = match.group(1).casefold()
         if address not in ALLOWED_EMAILS and domain not in ALLOWED_EMAIL_DOMAINS:
             failures.add("non-example email address")
-    folded = text.casefold()
-    if any(literal in folded for literal in private_denylist):
-        failures.add("private denylist match")
     return failures
 
 
-def run_guard(
-    root: Path = ROOT, *, require_private_denylist: bool = False
-) -> tuple[int, list[str]]:
-    private_denylist = _private_denylist(require_private_denylist)
+def run_guard(root: Path = ROOT) -> tuple[int, list[str]]:
     files = _candidate_files(root)
     failures: set[str] = set()
     for path in files:
@@ -174,18 +153,13 @@ def run_guard(
         except UnicodeDecodeError:
             failures.add(f"{relative}: invalid UTF-8 text")
             continue
-        for label in _text_failures(text, private_denylist):
+        for label in _text_failures(text):
             failures.add(f"{relative}: {label}")
     return len(files), sorted(failures)
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--require-private-denylist", action="store_true")
-    args = parser.parse_args()
-    file_count, failures = run_guard(
-        require_private_denylist=args.require_private_denylist
-    )
+    file_count, failures = run_guard()
     if failures:
         raise SystemExit("Public safety guard failed:\n" + "\n".join(failures))
     print(f"Public safety guard passed for {file_count} text files.")

@@ -9,8 +9,8 @@ from homeassistant.core import HomeAssistant
 
 from .config import entry_config
 from .const import CONF_BIRTH_DATE, CONF_CHILD_NAME
-from .digest import BRANCHES
-from .runtime import LibraryConfigEntry, LibraryRuntime
+from .coordinator import LibraryDataCoordinator, source_label
+from .runtime import LibraryConfigEntry
 
 TO_REDACT = {CONF_CHILD_NAME, CONF_BIRTH_DATE}
 
@@ -22,31 +22,43 @@ async def async_get_config_entry_diagnostics(
     """Return source health and counts without the child's identity or birth date."""
 
     del hass
-    runtime: LibraryRuntime | None = getattr(entry, "runtime_data", None)
-    data = runtime.coordinator.data if runtime else None
+    coordinator: LibraryDataCoordinator | None = getattr(entry, "runtime_data", None)
+    data = coordinator.data if coordinator else None
     diagnostics = {
         "config": entry_config(entry.data, entry.options),
         "coordinator": {
-            "last_update_success": runtime.coordinator.last_update_success
-            if runtime
+            "last_update_success": coordinator.last_update_success
+            if coordinator
             else None,
-            "last_exception": str(runtime.coordinator.last_exception)
-            if runtime and runtime.coordinator.last_exception
+            "last_exception": str(coordinator.last_exception)
+            if coordinator and coordinator.last_exception
             else None,
             "fetched_at": data.fetched_at.isoformat() if data else None,
         },
         "sources": {
-            BRANCHES[code].name: {
-                "published_item_count": data.source_counts.get(code),
-                "available": code not in data.source_errors,
-                "error": data.source_errors.get(code),
+            source_label(key): {
+                "published_item_count": data.source_statuses[key].source_count
+                if key in data.source_statuses
+                else None,
+                "parsed_item_count": data.source_statuses[key].parsed_count
+                if key in data.source_statuses
+                else None,
+                "last_event_date": data.source_statuses[key].last_event_date.isoformat()
+                if key in data.source_statuses
+                and data.source_statuses[key].last_event_date
+                else None,
+                "ordered": data.source_statuses[key].ordered
+                if key in data.source_statuses
+                else None,
+                "available": key not in data.source_errors,
+                "error": data.source_errors.get(key),
             }
-            for code in BRANCHES
-            if code
-            in {
-                *(data.source_counts if data else {}),
-                *(data.source_errors if data else {}),
-            }
+            for key in dict.fromkeys(
+                (
+                    *(data.source_statuses if data else {}),
+                    *(data.source_errors if data else {}),
+                )
+            )
         },
         "cached_event_count": len(data.events) if data else 0,
     }

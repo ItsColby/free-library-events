@@ -9,8 +9,9 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
+from .coordinator import LibraryDataCoordinator
 from .entity import service_device_info
-from .runtime import LibraryConfigEntry, LibraryRuntime
+from .runtime import LibraryConfigEntry
 
 PARALLEL_UPDATES = 1
 
@@ -26,15 +27,15 @@ async def async_setup_entry(
 
 
 class LibraryRefreshButton(CoordinatorEntity, ButtonEntity):
-    """Request an immediate refresh of both selected branch feeds."""
+    """Request an immediate refresh of the selected branch feeds."""
 
     _attr_has_entity_name = True
     _attr_translation_key = "refresh_events"
     _attr_icon = "mdi:refresh"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
-    def __init__(self, runtime: LibraryRuntime) -> None:
-        super().__init__(runtime.coordinator)
+    def __init__(self, coordinator: LibraryDataCoordinator) -> None:
+        super().__init__(coordinator)
         self._attr_unique_id = f"{DOMAIN}_refresh"
 
     @property

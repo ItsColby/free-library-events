@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.core import HomeAssistant
@@ -13,9 +13,15 @@ from homeassistant.util import dt as dt_util
 
 from .config import entry_config
 from .const import CONF_BIRTH_DATE, CONF_FILTER_MODE, DOMAIN
-from .digest import BRANCHES, classify_event, include_fit
+from .coordinator import (
+    LibraryDataCoordinator,
+    coverage_warnings,
+    source_keys_for_window,
+    source_label,
+)
+from .digest import BRANCHES, classify_event, include_fit, next_week_start
 from .entity import service_device_info
-from .runtime import LibraryConfigEntry, LibraryRuntime
+from .runtime import LibraryConfigEntry
 
 PARALLEL_UPDATES = 0
 
@@ -38,8 +44,10 @@ class LibraryStatusSensor(CoordinatorEntity, SensorEntity):
     _attr_icon = "mdi:book-check-outline"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
-    def __init__(self, entry: LibraryConfigEntry, runtime: LibraryRuntime) -> None:
-        super().__init__(runtime.coordinator)
+    def __init__(
+        self, entry: LibraryConfigEntry, coordinator: LibraryDataCoordinator
+    ) -> None:
+        super().__init__(coordinator)
         self._entry = entry
         self._attr_unique_id = f"{DOMAIN}_status"
 
@@ -61,8 +69,21 @@ class LibraryStatusSensor(CoordinatorEntity, SensorEntity):
     def native_value(self) -> str:
         if not self.coordinator.last_update_success:
             return "error"
-        if self.coordinator.data and self.coordinator.data.source_errors:
-            return "partial"
+        if self.coordinator.data:
+            today = dt_util.now().date()
+            week_start = next_week_start(today)
+            week_end = week_start + timedelta(days=6)
+            birth_date = date.fromisoformat(self._config[CONF_BIRTH_DATE])
+            relevant_errors = source_keys_for_window(
+                tuple(self.coordinator.data.source_errors),
+                birth_date,
+                week_start,
+                week_end,
+            )
+            if relevant_errors or coverage_warnings(
+                self.coordinator.data, birth_date, week_start, week_end
+            ):
+                return "partial"
         return "ok" if self.coordinator.data else "unknown"
 
     @property
@@ -74,6 +95,12 @@ class LibraryStatusSensor(CoordinatorEntity, SensorEntity):
         birth_date = date.fromisoformat(config[CONF_BIRTH_DATE])
         filter_mode = config[CONF_FILTER_MODE]
         today = dt_util.now().date()
+        week_start = next_week_start(today)
+        week_end = week_start + timedelta(days=6)
+        warnings = coverage_warnings(data, birth_date, week_start, week_end)
+        relevant_error_keys = source_keys_for_window(
+            tuple(data.source_errors), birth_date, week_start, week_end
+        )
         matched = sum(
             1
             for event in data.events
@@ -87,7 +114,7 @@ class LibraryStatusSensor(CoordinatorEntity, SensorEntity):
             "source_counts": {
                 BRANCHES[code].name: count for code, count in data.source_counts.items()
             },
-            "unavailable_branches": [
-                BRANCHES[code].name for code in data.source_errors
-            ],
+            "coverage_complete": not warnings and not relevant_error_keys,
+            "coverage_warnings": warnings,
+            "unavailable_sources": [source_label(key) for key in relevant_error_keys],
         }

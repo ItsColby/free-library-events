@@ -24,7 +24,6 @@ from .api import LibraryClient
 from .config import entry_config, selected_branches
 from .const import (
     ATTR_FORCE_REFRESH,
-    ATTR_REFERENCE_DATE,
     CONF_BIRTH_DATE,
     CONF_CALENDAR_DURATION,
     CONF_CHILD_NAME,
@@ -34,9 +33,14 @@ from .const import (
     NAME,
     SERVICE_RENDER_DIGEST,
 )
-from .coordinator import LibraryDataCoordinator
-from .digest import BRANCHES, build_digest
-from .runtime import LibraryConfigEntry, LibraryRuntime
+from .coordinator import (
+    LibraryDataCoordinator,
+    coverage_warnings,
+    source_keys_for_window,
+    source_label,
+)
+from .digest import BRANCHES, build_digest, next_week_start
+from .runtime import LibraryConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -51,7 +55,6 @@ CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 RENDER_DIGEST_SCHEMA = vol.Schema(
     {
         vol.Optional(ATTR_FORCE_REFRESH, default=True): cv.boolean,
-        vol.Optional(ATTR_REFERENCE_DATE): cv.date,
     }
 )
 
@@ -77,14 +80,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: LibraryConfigEntry) -> b
     if entry.title != NAME:
         hass.config_entries.async_update_entry(entry, title=NAME)
     config = entry_config(entry.data, entry.options)
+    client = LibraryClient(async_get_clientsession(hass))
     coordinator = LibraryDataCoordinator(
         hass,
         entry,
-        LibraryClient(async_get_clientsession(hass)),
+        client,
         selected_branches(config),
+        date.fromisoformat(config[CONF_BIRTH_DATE]),
         timedelta(seconds=config[CONF_SCAN_INTERVAL]),
     )
-    entry.runtime_data = LibraryRuntime(coordinator)
+    entry.runtime_data = coordinator
     await coordinator.async_config_entry_first_refresh()
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
@@ -111,8 +116,7 @@ async def _async_render_digest(call: ServiceCall) -> ServiceResponse:
         )
 
     entry = loaded_entries[0]
-    runtime: LibraryRuntime = entry.runtime_data
-    coordinator = runtime.coordinator
+    coordinator = entry.runtime_data
     if call.data[ATTR_FORCE_REFRESH]:
         await coordinator.async_request_refresh()
         if not coordinator.last_update_success:
@@ -123,19 +127,25 @@ async def _async_render_digest(call: ServiceCall) -> ServiceResponse:
         raise HomeAssistantError("No library event data is available")
 
     config = entry_config(entry.data, entry.options)
-    reference_date: date = call.data.get(
-        ATTR_REFERENCE_DATE,
-        dt_util.now().date(),
-    )
+    reference_date = dt_util.now().date()
     branches = selected_branches(config)
     source_counts = {
         BRANCHES[code].name: count
         for code, count in coordinator.data.source_counts.items()
     }
-    source_errors = [BRANCHES[code].name for code in coordinator.data.source_errors]
-    return build_digest(
+    week_start = next_week_start(reference_date)
+    week_end = week_start + timedelta(days=6)
+    birth_date = date.fromisoformat(config[CONF_BIRTH_DATE])
+    relevant_error_keys = source_keys_for_window(
+        tuple(coordinator.data.source_errors), birth_date, week_start, week_end
+    )
+    source_errors = [source_label(key) for key in relevant_error_keys]
+    source_warnings = coverage_warnings(
+        coordinator.data, birth_date, week_start, week_end
+    )
+    response = build_digest(
         child_name=config[CONF_CHILD_NAME],
-        birth_date=date.fromisoformat(config[CONF_BIRTH_DATE]),
+        birth_date=birth_date,
         filter_mode=config[CONF_FILTER_MODE],
         duration_minutes=config[CONF_CALENDAR_DURATION],
         selected_branches=branches,
@@ -143,4 +153,6 @@ async def _async_render_digest(call: ServiceCall) -> ServiceResponse:
         events=coordinator.data.events,
         source_counts=source_counts,
         source_errors=source_errors,
+        source_warnings=source_warnings,
     )
+    return response

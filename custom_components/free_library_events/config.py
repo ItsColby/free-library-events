@@ -13,12 +13,16 @@ from .const import (
     CONF_CHILD_NAME,
     CONF_FILTER_MODE,
     CONF_INCLUDE_INDEPENDENCE,
+    CONF_INCLUDE_PARKWAY_CENTRAL,
+    CONF_INCLUDE_PCI,
     CONF_INCLUDE_SANTORE,
     CONF_SCAN_INTERVAL,
     DEFAULT_CALENDAR_DURATION,
     DEFAULT_CHILD_NAME,
     DEFAULT_FILTER_MODE,
     DEFAULT_INCLUDE_INDEPENDENCE,
+    DEFAULT_INCLUDE_PARKWAY_CENTRAL,
+    DEFAULT_INCLUDE_PCI,
     DEFAULT_INCLUDE_SANTORE,
     DEFAULT_SCAN_INTERVAL,
     MAX_CALENDAR_DURATION,
@@ -29,6 +33,14 @@ from .const import (
 from .digest import BRANCHES, FILTER_MODES, Branch
 
 
+BRANCH_CONFIG_KEYS = (
+    (CONF_INCLUDE_SANTORE, "SWK"),
+    (CONF_INCLUDE_INDEPENDENCE, "IND"),
+    (CONF_INCLUDE_PARKWAY_CENTRAL, "CEN"),
+    (CONF_INCLUDE_PCI, "PCI"),
+)
+
+
 def default_config() -> dict[str, Any]:
     """Return user-facing defaults."""
 
@@ -36,6 +48,8 @@ def default_config() -> dict[str, Any]:
         CONF_CHILD_NAME: DEFAULT_CHILD_NAME,
         CONF_INCLUDE_SANTORE: DEFAULT_INCLUDE_SANTORE,
         CONF_INCLUDE_INDEPENDENCE: DEFAULT_INCLUDE_INDEPENDENCE,
+        CONF_INCLUDE_PARKWAY_CENTRAL: DEFAULT_INCLUDE_PARKWAY_CENTRAL,
+        CONF_INCLUDE_PCI: DEFAULT_INCLUDE_PCI,
         CONF_FILTER_MODE: DEFAULT_FILTER_MODE,
         CONF_CALENDAR_DURATION: DEFAULT_CALENDAR_DURATION,
         CONF_SCAN_INTERVAL: DEFAULT_SCAN_INTERVAL,
@@ -71,7 +85,7 @@ def normalize_config(values: Mapping[str, Any]) -> dict[str, Any]:
         raise ValueError("child_name_required")
     if birth_date > dt_util.now().date():
         raise ValueError("birth_date_in_future")
-    if not config[CONF_INCLUDE_SANTORE] and not config[CONF_INCLUDE_INDEPENDENCE]:
+    if not any(config[key] for key, _ in BRANCH_CONFIG_KEYS):
         raise ValueError("branch_required")
     if filter_mode not in FILTER_MODES:
         raise ValueError("invalid_filter_mode")
@@ -85,6 +99,8 @@ def normalize_config(values: Mapping[str, Any]) -> dict[str, Any]:
         CONF_BIRTH_DATE: birth_date.isoformat(),
         CONF_INCLUDE_SANTORE: bool(config[CONF_INCLUDE_SANTORE]),
         CONF_INCLUDE_INDEPENDENCE: bool(config[CONF_INCLUDE_INDEPENDENCE]),
+        CONF_INCLUDE_PARKWAY_CENTRAL: bool(config[CONF_INCLUDE_PARKWAY_CENTRAL]),
+        CONF_INCLUDE_PCI: bool(config[CONF_INCLUDE_PCI]),
         CONF_FILTER_MODE: filter_mode,
         CONF_CALENDAR_DURATION: calendar_duration,
         CONF_SCAN_INTERVAL: scan_interval,
@@ -102,9 +118,8 @@ def entry_config(
 def selected_branches(config: Mapping[str, Any]) -> tuple[Branch, ...]:
     """Return configured branches in stable display order."""
 
-    branches: list[Branch] = []
-    if config[CONF_INCLUDE_SANTORE]:
-        branches.append(BRANCHES["SWK"])
-    if config[CONF_INCLUDE_INDEPENDENCE]:
-        branches.append(BRANCHES["IND"])
-    return tuple(branches)
+    return tuple(
+        BRANCHES[branch_code]
+        for config_key, branch_code in BRANCH_CONFIG_KEYS
+        if config[config_key]
+    )

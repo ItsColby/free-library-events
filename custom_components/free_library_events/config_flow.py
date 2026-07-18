@@ -19,14 +19,12 @@ from homeassistant.helpers.selector import (
     TextSelector,
 )
 
-from .config import default_config, entry_config, normalize_config
+from .config import BRANCH_CONFIG_KEYS, default_config, entry_config, normalize_config
 from .const import (
     CONF_BIRTH_DATE,
     CONF_CALENDAR_DURATION,
     CONF_CHILD_NAME,
     CONF_FILTER_MODE,
-    CONF_INCLUDE_INDEPENDENCE,
-    CONF_INCLUDE_SANTORE,
     CONF_SCAN_INTERVAL,
     DOMAIN,
     MAX_CALENDAR_DURATION,
@@ -44,20 +42,17 @@ def _schema(defaults: dict[str, Any]) -> vol.Schema:
         if CONF_BIRTH_DATE in defaults
         else vol.Required(CONF_BIRTH_DATE)
     )
+    branch_fields = {
+        vol.Required(config_key, default=defaults[config_key]): BooleanSelector()
+        for config_key, _ in BRANCH_CONFIG_KEYS
+    }
     return vol.Schema(
         {
             vol.Required(
                 CONF_CHILD_NAME, default=defaults[CONF_CHILD_NAME]
             ): TextSelector(),
             birth_date_key: DateSelector(),
-            vol.Required(
-                CONF_INCLUDE_SANTORE,
-                default=defaults[CONF_INCLUDE_SANTORE],
-            ): BooleanSelector(),
-            vol.Required(
-                CONF_INCLUDE_INDEPENDENCE,
-                default=defaults[CONF_INCLUDE_INDEPENDENCE],
-            ): BooleanSelector(),
+            **branch_fields,
             vol.Required(
                 CONF_FILTER_MODE, default=defaults[CONF_FILTER_MODE]
             ): SelectSelector(SelectSelectorConfig(options=list(FILTER_MODES))),

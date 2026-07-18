@@ -7,16 +7,34 @@ import html
 import re
 import urllib.parse
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timedelta
 from html.parser import HTMLParser
-from typing import Sequence
+from itertools import groupby
+from typing import Literal, Sequence
 
 
 TIMEZONE = "America/New_York"
 FILTER_MODES = ("Strict", "Recommended", "Broad")
 EN_DASH = "\N{EN DASH}"
 MIDDLE_DOT = "\N{MIDDLE DOT}"
+
+# Stable source taxonomy with intentionally overlapping local windows. The
+# library publishes these category names but does not publish numeric bounds.
+# Household age/category choices are derived at refresh time, never stored here.
+AGE_CATEGORY_WINDOWS: tuple[tuple[str, float, float], ...] = (
+    ("Baby", 0, 36),
+    ("Toddler", 9, 48),
+    ("Preschool", 30, 72),
+    ("School Age", 60, 156),
+    ("Young Adult", 144, 228),
+    ("Adult", 216, float("inf")),
+    ("Senior", 720, float("inf")),
+)
+AGE_CATEGORY_ORDER = {
+    category: index
+    for index, (category, _minimum, _maximum) in enumerate(AGE_CATEGORY_WINDOWS)
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,11 +44,17 @@ class Branch:
     code: str
     name: str
     address: str
-    phone: str
 
     @property
     def rss_url(self) -> str:
         return f"https://libwww.freelibrary.org/rss/eventsrss.cfm?location={self.code}"
+
+    def rss_url_for_age(self, age_category: str) -> str:
+        """Return the official custom feed for this branch and age category."""
+
+        if age_category not in AGE_CATEGORY_ORDER:
+            raise ValueError(f"Unsupported official age category: {age_category}")
+        return f"{self.rss_url}&{urllib.parse.urlencode({'age': age_category})}"
 
     @property
     def calendar_url(self) -> str:
@@ -42,13 +66,21 @@ BRANCHES = {
         code="SWK",
         name="Charles Santore Library",
         address="932 South 7th Street, Philadelphia, PA 19147",
-        phone="215-686-1766",
     ),
     "IND": Branch(
         code="IND",
         name="Independence Library",
         address="18 South 7th Street, Philadelphia, PA 19106-2314",
-        phone="215-685-1633",
+    ),
+    "CEN": Branch(
+        code="CEN",
+        name="Parkway Central Library",
+        address="1901 Vine Street, Philadelphia, PA 19103-1189",
+    ),
+    "PCI": Branch(
+        code="PCI",
+        name="Philadelphia City Institute",
+        address="1905 Locust Street, Philadelphia, PA 19103-5730",
     ),
 }
 
@@ -64,19 +96,15 @@ class Event:
     link: str
     image_url: str
     branch: Branch
+    age_categories: tuple[str, ...] = ()
+    end_at: datetime | None = None
 
     @property
     def starts_at(self) -> datetime:
         return datetime.combine(self.event_date, self.start_time)
 
 
-@dataclass(frozen=True, slots=True)
-class Fit:
-    """Deterministic age-fit classification."""
-
-    rank: str
-    label: str
-    reason: str
+type FitRank = Literal["best", "good", "possible", "broad", "exclude"]
 
 
 class _HTMLTextExtractor(HTMLParser):
@@ -134,20 +162,105 @@ def age_in_months(birth_date: date, event_date: date) -> float:
     return years * 12 + months + days / 30.4375
 
 
+def age_categories_for_window(
+    birth_date: date,
+    start_date: date,
+    end_date: date,
+) -> tuple[str, ...]:
+    """Return official age filters that overlap the child's age in a date range."""
+
+    if end_date < start_date:
+        raise ValueError("Age-category window end cannot precede its start")
+    start_months = age_in_months(birth_date, start_date)
+    end_months = age_in_months(birth_date, end_date)
+    return tuple(
+        category
+        for category, minimum, maximum in AGE_CATEGORY_WINDOWS
+        if end_months >= minimum and start_months < maximum
+    )
+
+
 def format_age(birth_date: date, event_date: date) -> str:
-    years, months, days = age_on(birth_date, event_date)
-    parts: list[str] = []
-    if years:
-        parts.append(f"{years} year" + ("s" if years != 1 else ""))
-    if months:
-        parts.append(f"{months} month" + ("s" if months != 1 else ""))
-    if days or not parts:
-        parts.append(f"{days} day" + ("s" if days != 1 else ""))
-    return ", ".join(parts)
+    """Return a conversational age without day-level precision."""
+
+    years, months, _ = age_on(birth_date, event_date)
+    completed_months = years * 12 + months
+    elapsed_days = (event_date - birth_date).days
+    if completed_months < 2:
+        completed_weeks = elapsed_days // 7
+        if completed_weeks == 0:
+            return "under 1 week"
+        return f"{completed_weeks} week" + ("s" if completed_weeks != 1 else "")
+    if completed_months < 24:
+        return f"{completed_months} month" + ("s" if completed_months != 1 else "")
+    if years < 5 and 5 <= months <= 7:
+        return f"{years}½ years"
+    return f"{years} year" + ("s" if years != 1 else "")
 
 
 def format_time(value: time) -> str:
     return value.strftime("%I:%M %p").lstrip("0")
+
+
+def format_event_time(event: Event) -> str:
+    """Return a start time and any confident official end time."""
+
+    if event.end_at:
+        return f"{format_time(event.start_time)} {EN_DASH} {format_time(event.end_at.time())}"
+    return format_time(event.start_time)
+
+
+TIME_RANGE_RE = re.compile(
+    r"\b(?P<start_hour>\d{1,2})(?::(?P<start_minute>\d{2}))?\s*"
+    r"(?P<start_meridiem>a\.?m\.?|p\.?m\.?)?\s*"
+    r"(?:-|\u2013|\u2014|to)\s*"
+    r"(?P<end_hour>\d{1,2})(?::(?P<end_minute>\d{2}))?\s*"
+    r"(?P<end_meridiem>a\.?m\.?|p\.?m\.?)\b",
+    re.IGNORECASE,
+)
+
+
+def _clock_time(hour: str, minute: str | None, meridiem: str) -> time | None:
+    value = int(hour)
+    if not 1 <= value <= 12:
+        return None
+    minute_value = int(minute or 0)
+    if not 0 <= minute_value <= 59:
+        return None
+    normalized_meridiem = meridiem.lower().replace(".", "")
+    if normalized_meridiem == "pm" and value != 12:
+        value += 12
+    elif normalized_meridiem == "am" and value == 12:
+        value = 0
+    return time(value, minute_value)
+
+
+def explicit_end_at(
+    event_date: date,
+    start_time: time,
+    description: str,
+) -> datetime | None:
+    """Return an end time only for an explicit range matching the event start."""
+
+    for match in TIME_RANGE_RE.finditer(description):
+        end_meridiem = match.group("end_meridiem")
+        source_start = _clock_time(
+            match.group("start_hour"),
+            match.group("start_minute"),
+            match.group("start_meridiem") or end_meridiem,
+        )
+        source_end = _clock_time(
+            match.group("end_hour"),
+            match.group("end_minute"),
+            end_meridiem,
+        )
+        if source_start != start_time or source_end is None:
+            continue
+        start_at = datetime.combine(event_date, start_time)
+        end_at = datetime.combine(event_date, source_end)
+        if timedelta(minutes=15) <= end_at - start_at <= timedelta(hours=8):
+            return end_at
+    return None
 
 
 def _repair_bare_numeric_entities(value: str) -> str:
@@ -172,10 +285,15 @@ def clean_title(raw_title: str, branch: Branch) -> str:
     suffix = f" - {branch.name}"
     if value.endswith(suffix):
         value = value[: -len(suffix)]
+    value = re.sub(r"\bBaby\s{2,}Toddler\b", "Baby & Toddler", value)
     return value.replace("Storytime  Playgroup", "Storytime & Playgroup").strip()
 
 
-def parse_feed(xml_content: bytes | str, branch: Branch) -> tuple[list[Event], int]:
+def parse_feed(
+    xml_content: bytes | str,
+    branch: Branch,
+    age_category: str | None = None,
+) -> tuple[list[Event], int]:
     """Parse one official branch RSS feed."""
 
     root = ET.fromstring(xml_content)
@@ -190,22 +308,44 @@ def parse_feed(xml_content: bytes | str, branch: Branch) -> tuple[list[Event], i
         normalized_time = start_time_text.replace(".", "").strip()
         start_time = datetime.strptime(normalized_time, "%I:%M %p").time()
         trailer = f"{start_date_text}, {start_time_text} - {branch.name}"
+        description = clean_description(item.findtext("description") or "", trailer)
         events.append(
             Event(
                 title=clean_title(item.findtext("title") or "Library event", branch),
                 event_date=event_date,
                 start_time=start_time,
-                description=clean_description(
-                    item.findtext("description") or "", trailer
-                ),
+                description=description,
                 link=(item.findtext("link") or item.findtext("guid") or "").strip(),
                 image_url=(item.findtext("eventimage") or "")
                 .strip()
                 .replace("\\", "/"),
                 branch=branch,
+                age_categories=(age_category,) if age_category else (),
+                end_at=explicit_end_at(event_date, start_time, description),
             )
         )
     return events, len(items)
+
+
+def merge_events(events: Sequence[Event]) -> list[Event]:
+    """Deduplicate events while preserving every official age classification."""
+
+    merged: dict[str, Event] = {}
+    for event in events:
+        key = event.link or (
+            f"{event.branch.code}:{event.event_date}:{event.start_time}:{event.title}"
+        )
+        if existing := merged.get(key):
+            age_categories = tuple(
+                sorted(
+                    {*existing.age_categories, *event.age_categories},
+                    key=lambda category: AGE_CATEGORY_ORDER.get(category, 999),
+                )
+            )
+            merged[key] = replace(existing, age_categories=age_categories)
+        else:
+            merged[key] = event
+    return list(merged.values())
 
 
 AGE_RANGE_RE = re.compile(
@@ -229,7 +369,16 @@ def _to_months(value: int, unit: str | None) -> float:
     )
 
 
-def _explicit_age_fit(text: str, child_months: float) -> Fit | None:
+def _is_broad_years_only_upper_limit(
+    value: int, unit: str | None, child_months: float
+) -> bool:
+    """Detect upper limits too broad to establish an early-childhood fit."""
+
+    is_years = unit is None or unit.lower().startswith(("year", "yr"))
+    return child_months < 36 and is_years and value >= 6
+
+
+def _explicit_age_fit(text: str, child_months: float) -> FitRank | None:
     match = AGE_RANGE_RE.search(text)
     if match:
         low = _to_months(int(match.group(1)), match.group(3))
@@ -240,49 +389,37 @@ def _explicit_age_fit(text: str, child_months: float) -> Fit | None:
             else 12
         )
         if low <= child_months < high + margin:
-            return Fit(
-                "best", "Great fit", "The published age range includes the child."
-            )
-        return Fit(
-            "exclude",
-            "Not age matched",
-            "The published age range does not include the child.",
-        )
+            return "best"
+        return "exclude"
 
     match = AGE_AND_UNDER_RE.search(text)
     if match:
-        upper = _to_months(int(match.group(1)), match.group(2))
+        upper_value = int(match.group(1))
+        upper_unit = match.group(2)
+        upper = _to_months(upper_value, upper_unit)
         margin = (
-            1
-            if match.group(2) and match.group(2).lower().startswith(("month", "mo"))
-            else 12
+            1 if upper_unit and upper_unit.lower().startswith(("month", "mo")) else 12
         )
         if child_months < upper + margin:
-            return Fit(
-                "best", "Great fit", "The published maximum age includes the child."
-            )
-        return Fit(
-            "exclude",
-            "Not age matched",
-            "The child is older than the published age range.",
-        )
+            if _is_broad_years_only_upper_limit(upper_value, upper_unit, child_months):
+                return "broad"
+            return "best"
+        return "exclude"
 
     match = UNDER_AGE_RE.search(text)
     if match:
-        upper = _to_months(int(match.group(1)), match.group(2))
+        upper_value = int(match.group(1))
+        upper_unit = match.group(2)
+        upper = _to_months(upper_value, upper_unit)
         if child_months < upper:
-            return Fit(
-                "best", "Great fit", "The published maximum age includes the child."
-            )
-        return Fit(
-            "exclude",
-            "Not age matched",
-            "The child is older than the published age range.",
-        )
+            if _is_broad_years_only_upper_limit(upper_value, upper_unit, child_months):
+                return "broad"
+            return "best"
+        return "exclude"
     return None
 
 
-def classify_event(event: Event, birth_date: date) -> Fit:
+def classify_event(event: Event, birth_date: date) -> FitRank:
     """Classify an event using only deterministic published-text rules."""
 
     text = f"{event.title} {event.description}".lower()
@@ -290,6 +427,12 @@ def classify_event(event: Event, birth_date: date) -> Fit:
     explicit = _explicit_age_fit(text, child_months)
     if explicit is not None:
         return explicit
+
+    if event.age_categories:
+        for category, minimum, maximum in AGE_CATEGORY_WINDOWS:
+            if category in event.age_categories and minimum <= child_months < maximum:
+                return "best"
+        return "exclude"
 
     baby_terms = ("baby", "babies", "infant", "lap sit", "lap-sit")
     toddler_terms = ("toddler", "toddlers", "twos")
@@ -299,37 +442,21 @@ def classify_event(event: Event, birth_date: date) -> Fit:
     adult_terms = ("adult", "adults")
 
     if child_months < 36 and any(term in text for term in baby_terms):
-        return Fit(
-            "best",
-            "Great fit",
-            "This event specifically welcomes babies or very young children.",
-        )
+        return "best"
     if 9 <= child_months < 48 and any(term in text for term in toddler_terms):
-        return Fit(
-            "best",
-            "Great fit",
-            "This event is intended for toddlers and their caregivers.",
-        )
+        return "best"
     if 30 <= child_months < 72 and any(term in text for term in preschool_terms):
-        return Fit(
-            "best", "Great fit", "This event is intended for preschool-age children."
-        )
+        return "best"
     if 60 <= child_months < 156 and any(term in text for term in school_age_terms):
-        return Fit(
-            "best", "Great fit", "This event is intended for school-age children."
-        )
+        return "best"
     if 144 <= child_months < 228 and any(term in text for term in teen_terms):
-        return Fit("best", "Great fit", "This event is intended for teens.")
+        return "best"
 
     if child_months < 36 and any(
         term in text
         for term in ("smallest kiddo", "youngest children", "littlest littles")
     ):
-        return Fit(
-            "good",
-            "Age-friendly",
-            "The description says even the youngest children can participate.",
-        )
+        return "good"
 
     if (
         child_months < 216
@@ -344,14 +471,10 @@ def classify_event(event: Event, birth_date: date) -> Fit:
         )
         and any(term in text for term in ("kid", "child", "family", "littlest"))
     ):
-        return Fit("good", "Age-friendly", "The event welcomes children of all ages.")
+        return "good"
 
     if child_months < 72 and ("range of ages" in text or "playgroup" in text):
-        return Fit(
-            "possible",
-            "Likely a good fit",
-            "The event offers a playgroup or activities for a range of ages.",
-        )
+        return "possible"
 
     category_terms = (
         baby_terms
@@ -362,11 +485,7 @@ def classify_event(event: Event, birth_date: date) -> Fit:
         + adult_terms
     )
     if any(term in text for term in category_terms):
-        return Fit(
-            "exclude",
-            "Not age matched",
-            "The published audience does not match the child's current age.",
-        )
+        return "exclude"
 
     if child_months < 216 and any(
         term in text
@@ -381,26 +500,18 @@ def classify_event(event: Event, birth_date: date) -> Fit:
             "all ages",
         )
     ):
-        return Fit(
-            "broad",
-            "Family option",
-            "The event is published for children, families, or all ages.",
-        )
+        return "broad"
 
-    return Fit(
-        "exclude",
-        "Not age matched",
-        "No matching child age or family audience was published.",
-    )
+    return "exclude"
 
 
-def include_fit(fit: Fit, filter_mode: str) -> bool:
+def include_fit(fit: FitRank, filter_mode: str) -> bool:
     if filter_mode == "Strict":
-        return fit.rank == "best"
+        return fit == "best"
     if filter_mode == "Recommended":
-        return fit.rank in {"best", "good", "possible"}
+        return fit in {"best", "good", "possible"}
     if filter_mode == "Broad":
-        return fit.rank in {"best", "good", "possible", "broad"}
+        return fit in {"best", "good", "possible", "broad"}
     raise ValueError(f"Unsupported filter mode: {filter_mode}")
 
 
@@ -410,7 +521,7 @@ def matching_events(
     filter_mode: str,
     start_date: date,
     end_date: date,
-) -> list[tuple[Event, Fit]]:
+) -> list[Event]:
     """Return deduplicated, sorted, included events in a date range."""
 
     deduplicated: dict[str, Event] = {}
@@ -423,20 +534,23 @@ def matching_events(
         deduplicated[key] = event
 
     rank_order = {"best": 0, "good": 1, "possible": 2, "broad": 3}
-    included: list[tuple[Event, Fit]] = []
+    included: list[tuple[Event, FitRank]] = []
     for event in deduplicated.values():
         fit = classify_event(event, birth_date)
         if include_fit(fit, filter_mode):
             included.append((event, fit))
-    return sorted(
-        included,
-        key=lambda item: (
-            item[0].starts_at,
-            rank_order[item[1].rank],
-            item[0].branch.name,
-            item[0].title,
-        ),
-    )
+    return [
+        event
+        for event, _ in sorted(
+            included,
+            key=lambda item: (
+                item[0].starts_at,
+                rank_order[item[1]],
+                item[0].branch.name,
+                item[0].title,
+            ),
+        )
+    ]
 
 
 def icon_for(event: Event) -> str:
@@ -453,13 +567,13 @@ def icon_for(event: Event) -> str:
 
 
 def google_calendar_url(event: Event, duration_minutes: int) -> str:
-    end = event.starts_at + timedelta(minutes=duration_minutes)
-    details = (
-        f"{event.description}\n\n"
-        f"Official event details: {event.link}\n\n"
-        "The library did not publish an end time. "
-        f"The {duration_minutes}-minute duration is a calendar placeholder."
-    )
+    end = event.end_at or event.starts_at + timedelta(minutes=duration_minutes)
+    details = f"{event.description}\n\nOfficial event details: {event.link}"
+    if event.end_at is None:
+        details += (
+            "\n\nThe library did not publish an end time. "
+            f"The {duration_minutes}-minute duration is a calendar placeholder."
+        )
     return "https://calendar.google.com/calendar/render?" + urllib.parse.urlencode(
         {
             "action": "TEMPLATE",
@@ -475,23 +589,6 @@ def google_calendar_url(event: Event, duration_minutes: int) -> str:
 def directions_url(branch: Branch) -> str:
     return "https://www.google.com/maps/search/?" + urllib.parse.urlencode(
         {"api": "1", "query": f"{branch.name}, {branch.address}"}
-    )
-
-
-def registration_text(description: str) -> str:
-    text = description.lower()
-    if "no registration" in text or "registration is not required" in text:
-        return "No registration required"
-    if "registration required" in text or "register " in text or "register at" in text:
-        return f"Registration may be required {EN_DASH} check the event page"
-    return "No registration information listed"
-
-
-def cost_text(description: str) -> str:
-    return (
-        "Free"
-        if re.search(r"\bfree\b|\bno cost\b", description.lower())
-        else "No cost information listed"
     )
 
 
@@ -518,8 +615,56 @@ def _subject_week_range(start: date, end: date) -> str:
     return f"{start:%b} {start.day}{EN_DASH}{end:%b} {end.day}"
 
 
+def _source_notes(
+    source_errors: Sequence[str],
+    source_warnings: Sequence[str],
+) -> list[tuple[str, bool]]:
+    """Return consistent source-coverage disclosures for both email bodies."""
+
+    notes: list[tuple[str, bool]] = []
+    if source_warnings:
+        notes.append(
+            ("Source coverage is unresolved: " + "; ".join(source_warnings) + ".", True)
+        )
+    if source_errors:
+        notes.append(("We could not load: " + "; ".join(source_errors) + ".", True))
+    return notes
+
+
+def _render_event_card(
+    event: Event,
+    *,
+    duration_minutes: int,
+) -> str:
+    event_url = html.escape(event.link, quote=True)
+    image = ""
+    if event.image_url:
+        image = (
+            '<div style="padding:0;background:#f8fafd;text-align:center">'
+            f'<a href="{event_url}" style="display:block;text-decoration:none">'
+            f'<img src="{html.escape(event.image_url, quote=True)}" '
+            f'alt="{html.escape(event.title, quote=True)}" '
+            'style="display:block;width:auto;max-width:100%;height:auto;max-height:560px;'
+            'margin:0 auto;object-fit:contain"></a></div>'
+        )
+    map_url = html.escape(directions_url(event.branch), quote=True)
+    return f"""
+    <div style="margin:0 0 12px;background:#ffffff;border:1px solid #e3e7ee;border-radius:14px;overflow:hidden">
+      {image}
+      <div style="padding:18px 20px">
+        <h3 style="margin:0 0 6px;color:#202124;font-size:22px;line-height:1.25">{icon_for(event)} <a href="{event_url}" style="color:#174ea6;text-decoration:underline;text-decoration-color:#a8c7fa;text-underline-offset:3px">{html.escape(event.title)}</a></h3>
+        <div style="font-size:16px;font-weight:700;color:#202124">{format_event_time(event)} {MIDDLE_DOT} <a href="{map_url}" style="color:#202124;text-decoration:underline;text-decoration-color:#c4c7c5;text-underline-offset:3px">{html.escape(event.branch.name)}</a></div>
+        <p style="margin:16px 0 12px;color:#3c4043;font-size:15px;line-height:1.65;white-space:pre-line">{html.escape(event.description)}</p>
+        <div style="margin-top:12px">
+          {_button("Add to Google Calendar", google_calendar_url(event, duration_minutes), primary=True)}
+        </div>
+      </div>
+    </div>
+    """
+
+
 def _render_html(
-    events_with_fits: Sequence[tuple[Event, Fit]],
+    events: Sequence[Event],
     *,
     child_name: str,
     birth_date: date,
@@ -527,55 +672,40 @@ def _render_html(
     week_end: date,
     branches: Sequence[Branch],
     duration_minutes: int,
-    scanned_count: int,
-    source_counts: dict[str, int],
     source_errors: Sequence[str],
-    generated_on: date,
+    source_warnings: Sequence[str],
 ) -> str:
-    cards: list[str] = []
-    for event, fit in events_with_fits:
-        image = ""
-        if event.image_url:
-            image = (
-                f'<img src="{html.escape(event.image_url, quote=True)}" '
-                f'alt="{html.escape(event.title, quote=True)}" '
-                'style="display:block;width:100%;height:auto;max-height:320px;object-fit:cover">'
+    day_sections: list[str] = []
+    for event_date, day_items in groupby(events, key=lambda event: event.event_date):
+        day_cards = "".join(
+            _render_event_card(
+                event,
+                duration_minutes=duration_minutes,
             )
-        cards.append(
+            for event in day_items
+        )
+        day_sections.append(
             f"""
-            <div style="margin:0 0 18px;background:#ffffff;border:1px solid #e3e7ee;border-radius:14px;overflow:hidden">
-              {image}
-              <div style="padding:18px 20px">
-                <div style="font-size:13px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:#5f6368">{event.event_date:%A, %B} {event.event_date.day}</div>
-                <div style="margin-top:8px"><span style="display:inline-block;padding:5px 9px;border-radius:999px;background:#e6f4ea;color:#137333;font-size:12px;font-weight:800">{html.escape(fit.label)}</span></div>
-                <h2 style="margin:10px 0 6px;color:#202124;font-size:22px;line-height:1.25">{icon_for(event)} {html.escape(event.title)}</h2>
-                <div style="font-size:16px;font-weight:700;color:#202124">{format_time(event.start_time)} {MIDDLE_DOT} {html.escape(event.branch.name)}</div>
-                <div style="margin-top:5px;color:#5f6368;font-size:14px;line-height:1.5">{html.escape(event.branch.address)}<br>{html.escape(event.branch.phone)}</div>
-                <div style="margin-top:14px;padding:12px 14px;background:#f8fafd;border-radius:10px;color:#3c4043;font-size:14px;line-height:1.5"><strong>Why it fits:</strong> {html.escape(fit.reason)}<br><strong>{html.escape(child_name)} will be:</strong> {html.escape(format_age(birth_date, event.event_date))} old</div>
-                <p style="margin:16px 0 12px;color:#3c4043;font-size:15px;line-height:1.65;white-space:pre-line">{html.escape(event.description)}</p>
-                <table role="presentation" style="width:100%;border-collapse:collapse;color:#3c4043;font-size:14px;line-height:1.5">
-                  <tr><td style="padding:4px 10px 4px 0;font-weight:700;vertical-align:top">Registration</td><td style="padding:4px 0">{html.escape(registration_text(event.description))}</td></tr>
-                  <tr><td style="padding:4px 10px 4px 0;font-weight:700;vertical-align:top">Cost</td><td style="padding:4px 0">{html.escape(cost_text(event.description))}</td></tr>
-                  <tr><td style="padding:4px 10px 4px 0;font-weight:700;vertical-align:top">End time</td><td style="padding:4px 0">Not listed by the library</td></tr>
-                </table>
-                <div style="margin-top:12px">
-                  {_button("Add to Google Calendar", google_calendar_url(event, duration_minutes), primary=True)}
-                  {_button("Event details", event.link)}
-                  {_button("Directions", directions_url(event.branch))}
-                </div>
-              </div>
+            <div style="margin:0 0 24px">
+              <h2 style="margin:0 0 10px;padding:0 4px;color:#174ea6;font-size:20px;font-weight:800;line-height:1.3">{event_date:%A, %B} {event_date.day}</h2>
+              {day_cards}
             </div>
             """
         )
 
-    if cards:
-        body = "".join(cards)
+    if day_sections:
+        body = "".join(day_sections)
+        activity_noun = "activity" if len(events) == 1 else "activities"
+        intro_verb = "is" if len(events) == 1 else "are"
         intro = (
-            f"Here are {len(cards)} activities at your selected libraries that fit "
-            f"{child_name}'s current age."
+            f"Here {intro_verb} {len(events)} {activity_noun} from your libraries for "
+            f"{child_name}, who is {format_age(birth_date, week_start)} old."
         )
     else:
-        intro = f"No clearly age-matched activities were published for {child_name} this week."
+        intro = (
+            f"No clearly age-matched activities were published for {child_name}, "
+            f"who is {format_age(birth_date, week_start)} old, this week."
+        )
         body = (
             '<div style="padding:20px;background:#ffffff;border:1px solid #e3e7ee;'
             'border-radius:14px;color:#3c4043">Nothing suitable was found in the published feeds. '
@@ -586,20 +716,13 @@ def _render_html(
         f'<a href="{html.escape(branch.calendar_url, quote=True)}" style="color:#1967d2">{html.escape(branch.name.replace(" Library", ""))}</a>'
         for branch in branches
     )
-    source_note = ""
-    ten_item_branches = [name for name, count in source_counts.items() if count >= 10]
-    if ten_item_branches:
-        source_note += (
-            '<p style="margin:8px 0 0">The published feed returned 10 items for '
-            + html.escape(" and ".join(ten_item_branches))
-            + ", so use the full-calendar links to double-check for additional events.</p>"
+    source_note_parts: list[str] = []
+    for note, is_error in _source_notes(source_errors, source_warnings):
+        color = ";color:#b3261e" if is_error else ""
+        source_note_parts.append(
+            f'<p style="margin:8px 0 0{color}">{html.escape(note)}</p>'
         )
-    if source_errors:
-        source_note += (
-            '<p style="margin:8px 0 0;color:#b3261e">We could not load: '
-            + html.escape("; ".join(source_errors))
-            + ".</p>"
-        )
+    source_note = "".join(source_note_parts)
 
     return f"""<!doctype html>
 <html lang="en">
@@ -612,14 +735,12 @@ def _render_html(
         <div style="font-size:13px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;opacity:.85">{_format_week_range(week_start, week_end)}</div>
         <h1 style="margin:8px 0 8px;font-size:30px;line-height:1.2">&#128218; Library fun for {html.escape(child_name)}</h1>
         <p style="margin:0;font-size:16px;line-height:1.5">{html.escape(intro)}</p>
-        <p style="margin:10px 0 0;font-size:14px;opacity:.9">{html.escape(child_name)} is {html.escape(format_age(birth_date, week_start))} to {html.escape(format_age(birth_date, week_end))} old this week.</p>
       </td></tr>
       <tr><td style="padding:22px 0">{body}</td></tr>
       <tr><td style="padding:18px 20px;background:#ffffff;border-radius:12px;color:#5f6368;font-size:13px;line-height:1.55">
         <strong style="color:#3c4043">See every published event:</strong> {branch_links}
-        <p style="margin:8px 0 0">Library schedules can change, so check the official event page before leaving. Calendar buttons use a {duration_minutes}-minute placeholder when the library does not publish an end time.</p>
+        <p style="margin:8px 0 0">Library schedules can change, so check the official event page before leaving.</p>
         {source_note}
-        <p style="margin:8px 0 0">Prepared automatically by Home Assistant on {generated_on:%B} {generated_on.day}, {generated_on.year}. {scanned_count} events were checked.</p>
       </td></tr>
     </table>
   </td></tr></table>
@@ -628,7 +749,7 @@ def _render_html(
 
 
 def _render_plain_text(
-    events_with_fits: Sequence[tuple[Event, Fit]],
+    events: Sequence[Event],
     *,
     child_name: str,
     birth_date: date,
@@ -636,38 +757,44 @@ def _render_plain_text(
     week_end: date,
     branches: Sequence[Branch],
     duration_minutes: int,
+    source_errors: Sequence[str],
+    source_warnings: Sequence[str],
 ) -> str:
     lines = [
         f"LIBRARY FUN FOR {child_name.upper()}",
         _format_week_range(week_start, week_end),
         "",
-        f"{child_name} is {format_age(birth_date, week_start)} to {format_age(birth_date, week_end)} old this week.",
+        f"Selected for {child_name}, who is {format_age(birth_date, week_start)} old.",
         "",
     ]
-    if not events_with_fits:
+    if not events:
         lines.extend(["No clearly age-matched events were found.", ""])
-    for event, fit in events_with_fits:
-        lines.extend(
-            [
-                f"{event.event_date:%A, %B} {event.event_date.day} {EN_DASH} {format_time(event.start_time)}",
-                event.title,
-                f"{fit.label}: {fit.reason}",
-                f"{child_name} will be {format_age(birth_date, event.event_date)} old.",
-                f"{event.branch.name} {EN_DASH} {event.branch.address} {EN_DASH} {event.branch.phone}",
-                "",
-                event.description,
-                "",
-                f"Registration: {registration_text(event.description)}",
-                f"Cost: {cost_text(event.description)}",
-                "End time: Not listed by the library",
-                f"Add to Google Calendar: {google_calendar_url(event, duration_minutes)}",
-                f"Event details: {event.link}",
-                f"Directions: {directions_url(event.branch)}",
-                "",
-            ]
-        )
+    for event_date, day_items in groupby(events, key=lambda event: event.event_date):
+        lines.extend([f"{event_date:%A, %B} {event_date.day}".upper(), ""])
+        for event in day_items:
+            lines.extend(
+                [
+                    f"{format_event_time(event)} | {event.title}",
+                    f"{event.branch.name}: {directions_url(event.branch)}",
+                    "",
+                    event.description,
+                    "",
+                ]
+            )
+            lines.extend(
+                [
+                    f"Add to Google Calendar: {google_calendar_url(event, duration_minutes)}",
+                    f"Event details: {event.link}",
+                    "",
+                ]
+            )
     lines.append("Full branch calendars:")
     lines.extend(f"- {branch.name}: {branch.calendar_url}" for branch in branches)
+    plain_source_notes = [
+        note for note, _ in _source_notes(source_errors, source_warnings)
+    ]
+    if plain_source_notes:
+        lines.extend(["", *plain_source_notes])
     lines.extend(
         [
             "",
@@ -688,6 +815,7 @@ def build_digest(
     events: Sequence[Event],
     source_counts: dict[str, int],
     source_errors: Sequence[str] = (),
+    source_warnings: Sequence[str] = (),
 ) -> dict[str, object]:
     """Build the complete JSON-serializable email response."""
 
@@ -732,6 +860,8 @@ def build_digest(
             week_end=week_end,
             branches=selected_branches,
             duration_minutes=duration_minutes,
+            source_errors=source_errors,
+            source_warnings=source_warnings,
         ),
         "html": _render_html(
             included,
@@ -741,10 +871,8 @@ def build_digest(
             week_end=week_end,
             branches=selected_branches,
             duration_minutes=duration_minutes,
-            scanned_count=len(weekly_events),
-            source_counts=source_counts,
             source_errors=source_errors,
-            generated_on=reference_date,
+            source_warnings=source_warnings,
         ),
         "metadata": {
             "week_start": week_start.isoformat(),
@@ -753,10 +881,9 @@ def build_digest(
             "scanned_count": len(weekly_events),
             "included_count": len(included),
             "omitted_count": len(weekly_events) - len(included),
-            "included_event_ids": [
-                event.link.rsplit("/", 1)[-1] for event, _ in included
-            ],
+            "included_event_ids": [event.link.rsplit("/", 1)[-1] for event in included],
             "source_counts": dict(source_counts),
             "source_errors": list(source_errors),
+            "source_warnings": list(source_warnings),
         },
     }

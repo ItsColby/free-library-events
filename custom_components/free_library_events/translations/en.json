@@ -10,6 +10,8 @@
           "birth_date": "Child's birth date",
           "include_charles_santore": "Include Charles Santore Library",
           "include_independence": "Include Independence Library",
+          "include_parkway_central": "Include Parkway Central Library",
+          "include_philadelphia_city_institute": "Include Philadelphia City Institute",
           "filter_mode": "Age-match mode",
           "calendar_duration_minutes": "Calendar placeholder duration (minutes)",
           "scan_interval_seconds": "Refresh interval (seconds)"
@@ -46,6 +48,8 @@
           "birth_date": "Child's birth date",
           "include_charles_santore": "Include Charles Santore Library",
           "include_independence": "Include Independence Library",
+          "include_parkway_central": "Include Parkway Central Library",
+          "include_philadelphia_city_institute": "Include Philadelphia City Institute",
           "filter_mode": "Age-match mode",
           "calendar_duration_minutes": "Calendar placeholder duration (minutes)",
           "scan_interval_seconds": "Refresh interval (seconds)"
