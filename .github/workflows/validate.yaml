@@ -1,0 +1,85 @@
+name: Validate
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: Unit tests and static validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: python -m unittest discover -s tests -p "test_digest.py"
+      - run: python -m unittest discover -s tests -p "test_public_safety.py"
+      - run: python -m compileall -q custom_components/free_library_events tests scripts
+      - run: python scripts/check_public_safety.py
+      - name: Check maintainer-private denylist
+        if: github.event_name != 'pull_request'
+        env:
+          PUBLIC_PRIVACY_DENYLIST_JSON: ${{ secrets.PUBLIC_PRIVACY_DENYLIST_JSON }}
+        run: python scripts/check_public_safety.py --require-private-denylist
+      - name: Validate JSON metadata
+        run: >-
+          python -c "import json, pathlib;
+          [json.loads(pathlib.Path(path).read_text(encoding='utf-8'))
+          for path in
+          ['custom_components/free_library_events/manifest.json',
+          'custom_components/free_library_events/translations/en.json',
+          'hacs.json']]"
+      - name: Check trailing whitespace
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          paths = [
+              path
+              for root in ("custom_components", "tests", ".github", "scripts", "docs")
+              for path in Path(root).rglob("*")
+              if path.is_file()
+              and "__pycache__" not in path.parts
+              and path.suffix in {".json", ".md", ".py", ".txt", ".yaml", ".yml"}
+          ]
+          paths.extend(Path(path) for path in ("AGENTS.md", "LICENSE", "README.md", "hacs.json"))
+          failures = []
+          for path in paths:
+              for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                  if line.endswith((" ", "\t")):
+                      failures.append(f"{path}:{lineno}")
+          if failures:
+              raise SystemExit("Trailing whitespace:\n" + "\n".join(failures))
+          PY
+
+  home-assistant:
+    name: Home Assistant integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: python -m pip install -r requirements-ha-test.txt
+      - run: pytest tests/test_integration_ha.py -q
+
+  hassfest:
+    name: Hassfest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: home-assistant/actions/hassfest@master
+
+  hacs:
+    name: HACS
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hacs/action@main
+        with:
+          category: integration

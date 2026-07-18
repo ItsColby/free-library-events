@@ -1,0 +1,17 @@
+render_digest:
+  name: Render weekly digest
+  description: Refresh the selected library feeds and return a complete age-aware email payload.
+  fields:
+    force_refresh:
+      name: Refresh first
+      description: Load the current official branch feeds before generating the email.
+      required: false
+      default: true
+      selector:
+        boolean:
+    reference_date:
+      name: Reference date
+      description: Optional date used to preview or test a specific upcoming week.
+      required: false
+      selector:
+        date:

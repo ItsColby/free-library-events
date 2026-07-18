@@ -1,0 +1,89 @@
+{
+  "title": "Free Library Events",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up weekly library events",
+        "description": "Choose the child and branches. Home Assistant will keep the calendar and weekly email age appropriate automatically.",
+        "data": {
+          "child_name": "Child's first name",
+          "birth_date": "Child's birth date",
+          "include_charles_santore": "Include Charles Santore Library",
+          "include_independence": "Include Independence Library",
+          "filter_mode": "Age-match mode",
+          "calendar_duration_minutes": "Calendar placeholder duration (minutes)",
+          "scan_interval_seconds": "Refresh interval (seconds)"
+        },
+        "data_description": {
+          "filter_mode": "Recommended balances age fit with family-friendly options. Strict includes only explicit best matches; Broad includes more general children's events.",
+          "calendar_duration_minutes": "Used only when the library does not publish an end time.",
+          "scan_interval_seconds": "Six hours (21600 seconds) is recommended. The email always refreshes again immediately before sending."
+        }
+      }
+    },
+    "error": {
+      "child_name_required": "Enter the child's first name.",
+      "birth_date_required": "Enter the child's birth date.",
+      "invalid_birth_date": "Enter a valid birth date.",
+      "birth_date_in_future": "Birth date cannot be in the future.",
+      "branch_required": "Select at least one library branch.",
+      "invalid_filter_mode": "Select a valid age-match mode.",
+      "invalid_calendar_duration": "Calendar duration must be between 15 and 240 minutes.",
+      "invalid_scan_interval": "Refresh interval must be between 900 and 86400 seconds.",
+      "invalid_config": "Check the settings and try again."
+    },
+    "abort": {
+      "already_configured": "Free Library Events is already configured. Use Configure to change its settings."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Configure weekly library events",
+        "description": "Changes apply automatically after saving.",
+        "data": {
+          "child_name": "Child's first name",
+          "birth_date": "Child's birth date",
+          "include_charles_santore": "Include Charles Santore Library",
+          "include_independence": "Include Independence Library",
+          "filter_mode": "Age-match mode",
+          "calendar_duration_minutes": "Calendar placeholder duration (minutes)",
+          "scan_interval_seconds": "Refresh interval (seconds)"
+        },
+        "data_description": {
+          "filter_mode": "Recommended balances age fit with family-friendly options. Strict includes only explicit best matches; Broad includes more general children's events.",
+          "calendar_duration_minutes": "Used only when the library does not publish an end time.",
+          "scan_interval_seconds": "Six hours (21600 seconds) is recommended. The email always refreshes again immediately before sending."
+        }
+      }
+    },
+    "error": {
+      "child_name_required": "Enter the child's first name.",
+      "birth_date_required": "Enter the child's birth date.",
+      "invalid_birth_date": "Enter a valid birth date.",
+      "birth_date_in_future": "Birth date cannot be in the future.",
+      "branch_required": "Select at least one library branch.",
+      "invalid_filter_mode": "Select a valid age-match mode.",
+      "invalid_calendar_duration": "Calendar duration must be between 15 and 240 minutes.",
+      "invalid_scan_interval": "Refresh interval must be between 900 and 86400 seconds.",
+      "invalid_config": "Check the settings and try again."
+    }
+  },
+  "entity": {
+    "button": {
+      "refresh_events": {
+        "name": "Refresh events"
+      }
+    },
+    "calendar": {
+      "events": {
+        "name": "Calendar"
+      }
+    },
+    "sensor": {
+      "status": {
+        "name": "Status"
+      }
+    }
+  }
+}
