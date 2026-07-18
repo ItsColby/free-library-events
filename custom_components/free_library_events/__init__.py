@@ -36,6 +36,7 @@ from .const import (
 from .coordinator import (
     LibraryDataCoordinator,
     coverage_warnings,
+    discovery_coverage,
     source_keys_for_window,
     source_label,
 )
@@ -143,6 +144,10 @@ async def _async_render_digest(call: ServiceCall) -> ServiceResponse:
     source_warnings = coverage_warnings(
         coordinator.data, birth_date, week_start, week_end
     )
+    discovery_failures, _discovery_limitations = discovery_coverage(
+        coordinator.data, week_end
+    )
+    source_warnings.extend(discovery_failures)
     response = build_digest(
         child_name=config[CONF_CHILD_NAME],
         birth_date=birth_date,

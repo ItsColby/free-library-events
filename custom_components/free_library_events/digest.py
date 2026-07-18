@@ -289,6 +289,16 @@ def clean_title(raw_title: str, branch: Branch) -> str:
     return value.replace("Storytime  Playgroup", "Storytime & Playgroup").strip()
 
 
+def clean_image_url(raw_url: str) -> str:
+    """Suppress structurally empty image filenames published by the feed."""
+
+    value = raw_url.strip().replace("\\", "/")
+    filename = urllib.parse.urlparse(value).path.rsplit("/", 1)[-1]
+    if filename.lower() in {".gif", ".jpeg", ".jpg", ".png", ".webp"}:
+        return ""
+    return value
+
+
 def parse_feed(
     xml_content: bytes | str,
     branch: Branch,
@@ -304,9 +314,12 @@ def parse_feed(
         start_time_text = (item.findtext("starttime") or "").strip()
         if not start_date_text or not start_time_text:
             continue
-        event_date = datetime.strptime(start_date_text, "%m/%d/%y").date()
-        normalized_time = start_time_text.replace(".", "").strip()
-        start_time = datetime.strptime(normalized_time, "%I:%M %p").time()
+        try:
+            event_date = datetime.strptime(start_date_text, "%m/%d/%y").date()
+            normalized_time = start_time_text.replace(".", "").strip()
+            start_time = datetime.strptime(normalized_time, "%I:%M %p").time()
+        except (TypeError, ValueError):
+            continue
         trailer = f"{start_date_text}, {start_time_text} - {branch.name}"
         description = clean_description(item.findtext("description") or "", trailer)
         events.append(
@@ -316,9 +329,7 @@ def parse_feed(
                 start_time=start_time,
                 description=description,
                 link=(item.findtext("link") or item.findtext("guid") or "").strip(),
-                image_url=(item.findtext("eventimage") or "")
-                .strip()
-                .replace("\\", "/"),
+                image_url=clean_image_url(item.findtext("eventimage") or ""),
                 branch=branch,
                 age_categories=(age_category,) if age_category else (),
                 end_at=explicit_end_at(event_date, start_time, description),
@@ -432,7 +443,6 @@ def classify_event(event: Event, birth_date: date) -> FitRank:
         for category, minimum, maximum in AGE_CATEGORY_WINDOWS:
             if category in event.age_categories and minimum <= child_months < maximum:
                 return "best"
-        return "exclude"
 
     baby_terms = ("baby", "babies", "infant", "lap sit", "lap-sit")
     toddler_terms = ("toddler", "toddlers", "twos")
@@ -458,6 +468,17 @@ def classify_event(event: Event, birth_date: date) -> FitRank:
     ):
         return "good"
 
+    if child_months < 216 and any(
+        term in text
+        for term in (
+            "all children can",
+            "all children are welcome",
+            "all kids can",
+            "all kids are welcome",
+        )
+    ):
+        return "good"
+
     if (
         child_months < 216
         and any(
@@ -475,6 +496,12 @@ def classify_event(event: Event, birth_date: date) -> FitRank:
 
     if child_months < 72 and ("range of ages" in text or "playgroup" in text):
         return "possible"
+
+    # A published category remains stronger than generic title inference, but
+    # explicit inclusive language above can correct a category that is too
+    # narrow for the event's own description.
+    if event.age_categories:
+        return "exclude"
 
     category_terms = (
         baby_terms

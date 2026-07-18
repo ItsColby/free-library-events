@@ -22,7 +22,7 @@ class BranchFeed:
     """Normalized result and coverage evidence from one custom feed."""
 
     events: tuple[Event, ...]
-    age_category: str
+    age_category: str | None
     source_count: int
     parsed_count: int
     last_event_date: date | None
@@ -60,15 +60,22 @@ class LibraryClient:
     async def async_fetch_feed(
         self,
         branch: Branch,
-        age_category: str,
+        age_category: str | None,
     ) -> BranchFeed:
-        """Fetch one official branch-plus-age custom RSS feed."""
+        """Fetch one official branch feed, optionally filtered by age."""
+
+        source_name = age_category or "supplemental discovery"
+        url = (
+            branch.rss_url
+            if age_category is None
+            else branch.rss_url_for_age(age_category)
+        )
 
         try:
-            payload = await self._async_get(branch.rss_url_for_age(age_category))
+            payload = await self._async_get(url)
         except (TimeoutError, aiohttp.ClientError) as err:
             raise LibraryApiError(
-                f"Unable to load {branch.name} {age_category} feed"
+                f"Unable to load {branch.name} {source_name} feed"
             ) from err
 
         try:
@@ -80,11 +87,11 @@ class LibraryClient:
             )
         except (ValueError, TypeError) as err:
             raise LibraryApiError(
-                f"Invalid event data from {branch.name} {age_category} feed"
+                f"Invalid event data from {branch.name} {source_name} feed"
             ) from err
         except Exception as err:
             raise LibraryApiError(
-                f"Unable to parse {branch.name} {age_category} feed"
+                f"Unable to parse {branch.name} {source_name} feed"
             ) from err
 
         event_dates = [event.event_date for event in events]

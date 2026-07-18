@@ -15,21 +15,24 @@
 - `config_flow.py` owns the single config entry and reload-on-save options.
 - The config-entry card and service device use the static integration name;
   child identity remains only in private config data and rendered content.
-- `api.py` reads official custom branch-and-age RSS feeds through Home
-  Assistant's shared HTTP session and records the evidence needed to evaluate
-  the ten-item source boundary.
+- `api.py` reads official custom branch RSS feeds through Home Assistant's
+  shared HTTP session and records the evidence needed to evaluate the ten-item
+  source boundary. Invalid individual event rows are skipped while their
+  published-versus-parsed mismatch remains observable.
 - `coordinator.py` derives the relevant official age categories from the local
-  birth date, refreshes each selected branch/category pair concurrently,
-  consolidates duplicate events while retaining their official classifications,
-  and preserves partial source success. It fails the update only when every
-  selected source fails.
+  birth date, adds one supplemental all-event discovery request per selected
+  branch, refreshes the plan concurrently, consolidates duplicate events while
+  retaining their official classifications, and preserves partial source
+  success. It fails the update only when every selected source fails.
 - `digest.py` is a deterministic, side-effect-free parser, age matcher, and
   HTML/plain-text renderer. Explicit numeric ranges take precedence, followed
-  by official age-feed classifications and then text inference. Age
-  classification controls inclusion and ordering; it is not repeated as
-  per-event presentation copy. An end time is accepted only from an explicit RSS
-  description range that matches the published start; the digest and HA calendar
-  both use that same evidence. It does not call an LLM.
+  by matching official age-feed classifications and then explicit inclusive
+  text. Strong published wording can correct an overly narrow feed category;
+  generic family wording cannot. Age classification controls inclusion and
+  ordering; it is not repeated as per-event presentation copy. An end time is
+  accepted only from an explicit RSS description range that matches the
+  published start; the digest and HA calendar both use that same evidence. It
+  does not call an LLM.
 - `calendar.py`, `sensor.py`, and `button.py` expose the native user-facing
   calendar, diagnostic status, and manual refresh surfaces.
 - `__init__.py` registers the response-only `render_digest` action. The caller
@@ -48,11 +51,13 @@ translation changes, deterministic tests, and documentation. All supported
 sources default on and can be disabled individually in the config entry.
 
 For every selected branch, the coordinator requests the official age categories
-that overlap the child's age across its forward source horizon. A feed below the
-ten-item limit is complete. At the limit, its parsed order and last event must
-prove coverage beyond the target digest week; otherwise the diagnostic sensor
-and rendered digest disclose unresolved coverage rather than silently treating
-the result as complete.
+that overlap the child's age across its forward source horizon plus one
+unfiltered discovery feed. A feed below the ten-item limit is complete. At the
+limit, its parsed order and last event must prove coverage beyond the target
+digest week. Relevant age-feed gaps are operationally `partial` and are
+disclosed by the rendered digest. A healthy but capped discovery feed is
+`limited`: this truthfully records that later broadly inclusive events cannot be
+proven without conflating a publisher limitation with a source failure.
 
 ## Release Contract
 

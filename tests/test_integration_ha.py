@@ -49,6 +49,7 @@ from custom_components.free_library_events.const import (  # noqa: E402
 )
 from custom_components.free_library_events.coordinator import (  # noqa: E402
     LibraryDataCoordinator,
+    discovery_coverage,
     source_keys_for_window,
 )
 from custom_components.free_library_events.diagnostics import (  # noqa: E402
@@ -146,7 +147,7 @@ async def test_setup_entities_action_and_redacted_diagnostics(
             link=f"https://example.test/events/{branch.code.lower()}-1001",
             image_url="",
             branch=branch,
-            age_categories=(age_category,),
+            age_categories=(age_category,) if age_category else (),
             end_at=datetime(2026, 7, 22, 12, 0),
         )
         return BranchFeed(
@@ -192,6 +193,21 @@ async def test_setup_entities_action_and_redacted_diagnostics(
         minutes=90
     )
     assert calendar_state.attributes["location"].startswith("Charles Santore Library")
+    status_state = hass.states.get("sensor.free_library_events_status")
+    assert status_state is not None
+    assert status_state.state == "ok"
+    assert status_state.attributes["next_week_events"] == 4
+    assert status_state.attributes["age_feed_coverage_complete"] is True
+    assert status_state.attributes["discovery_coverage_complete"] is True
+    assert status_state.attributes["cached_events_by_branch"] == {
+        "Charles Santore Library": 1,
+        "Independence Library": 1,
+        "Parkway Central Library": 1,
+        "Philadelphia City Institute": 1,
+    }
+    assert "matched_events" not in status_state.attributes
+    assert "source_counts" not in status_state.attributes
+    assert "coverage_complete" not in status_state.attributes
     assert hass.services.has_service(DOMAIN, SERVICE_RENDER_DIGEST)
 
     with patch(
@@ -212,12 +228,16 @@ async def test_setup_entities_action_and_redacted_diagnostics(
     assert "Avery" not in repr(diagnostics)
     assert "2025-01-15" not in repr(diagnostics)
     assert list(diagnostics["sources"]) == [
+        "Charles Santore Library — supplemental discovery",
         "Charles Santore Library — Baby",
         "Charles Santore Library — Toddler",
+        "Independence Library — supplemental discovery",
         "Independence Library — Baby",
         "Independence Library — Toddler",
+        "Parkway Central Library — supplemental discovery",
         "Parkway Central Library — Baby",
         "Parkway Central Library — Toddler",
+        "Philadelphia City Institute — supplemental discovery",
         "Philadelphia City Institute — Baby",
         "Philadelphia City Institute — Toddler",
     ]
@@ -255,7 +275,7 @@ def test_feed_coverage_requires_evidence_past_a_capped_date() -> None:
 
 
 def test_source_plan_is_recomputed_for_the_target_age_window() -> None:
-    keys = ("CEN:Baby", "CEN:Toddler", "CEN:Preschool")
+    keys = ("CEN:all", "CEN:Baby", "CEN:Toddler", "CEN:Preschool")
 
     assert source_keys_for_window(
         keys,
@@ -263,6 +283,42 @@ def test_source_plan_is_recomputed_for_the_target_age_window() -> None:
         date(2026, 7, 20),
         date(2026, 7, 26),
     ) == ["CEN:Baby", "CEN:Toddler"]
+
+
+def test_discovery_coverage_separates_failures_from_official_feed_limits() -> None:
+    limited = BranchFeed(
+        events=(),
+        age_category=None,
+        source_count=10,
+        parsed_count=10,
+        last_event_date=date(2026, 7, 25),
+        ordered=True,
+    )
+    malformed = BranchFeed(
+        events=(),
+        age_category=None,
+        source_count=4,
+        parsed_count=3,
+        last_event_date=date(2026, 7, 27),
+        ordered=True,
+    )
+    data = types.SimpleNamespace(
+        source_statuses={"SWK:all": limited, "CEN:all": malformed},
+        source_errors={"PCI:all": "offline"},
+    )
+
+    failures, limitations = discovery_coverage(data, date(2026, 7, 26))
+
+    assert len(failures) == 2
+    assert any(
+        "Parkway Central Library" in item and "only 3" in item for item in failures
+    )
+    assert any(
+        "Philadelphia City Institute" in item and "offline" in item for item in failures
+    )
+    assert len(limitations) == 1
+    assert "Charles Santore Library" in limitations[0]
+    assert "later broadly inclusive events may be missing" in limitations[0]
 
 
 async def test_coordinator_recomputes_age_feeds_as_time_advances(
@@ -298,7 +354,8 @@ async def test_coordinator_recomputes_age_feeds_as_time_advances(
     ):
         await coordinator._async_update_data()
     assert [call.args[1] for call in client.async_fetch_feed.await_args_list] == [
-        "Baby"
+        None,
+        "Baby",
     ]
 
     client.async_fetch_feed.reset_mock()
@@ -308,9 +365,102 @@ async def test_coordinator_recomputes_age_feeds_as_time_advances(
     ):
         await coordinator._async_update_data()
     assert [call.args[1] for call in client.async_fetch_feed.await_args_list] == [
+        None,
         "Baby",
         "Toddler",
     ]
+
+
+async def test_status_separates_a_healthy_discovery_limit_from_partial_failure(
+    hass: HomeAssistant,
+) -> None:
+    entry = _entry()
+    entry.add_to_hass(hass)
+
+    async def fetch_feed(_branch, age_category):
+        is_discovery = age_category is None
+        return BranchFeed(
+            events=(),
+            age_category=age_category,
+            source_count=10 if is_discovery else 1,
+            parsed_count=10 if is_discovery else 1,
+            last_event_date=date(2026, 7, 25 if is_discovery else 27),
+            ordered=True,
+        )
+
+    with (
+        patch(
+            "custom_components.free_library_events.api.LibraryClient.async_fetch_feed",
+            side_effect=fetch_feed,
+        ),
+        patch(
+            "custom_components.free_library_events.sensor.dt_util.now",
+            return_value=datetime(2026, 7, 18),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    status = hass.states.get("sensor.free_library_events_status")
+    assert status is not None
+    assert status.state == "limited"
+    assert status.attributes["age_feed_coverage_complete"] is True
+    assert status.attributes["discovery_coverage_complete"] is False
+    assert status.attributes["discovery_failures"] == []
+    assert len(status.attributes["discovery_limitations"]) == 4
+
+
+async def test_digest_discloses_an_operational_discovery_failure(
+    hass: HomeAssistant,
+) -> None:
+    entry = _entry()
+    entry.add_to_hass(hass)
+
+    async def fetch_feed(branch, age_category):
+        if branch.code == "SWK" and age_category is None:
+            raise LibraryApiError("offline")
+        event = Event(
+            title="Baby Storytime",
+            event_date=date(2026, 7, 22),
+            start_time=time(10, 30),
+            description="Stories and songs for babies with caregivers.",
+            link=f"https://example.test/events/{branch.code.lower()}-1001",
+            image_url="",
+            branch=branch,
+            age_categories=(age_category,) if age_category else (),
+        )
+        return BranchFeed(
+            events=(event,),
+            age_category=age_category,
+            source_count=1,
+            parsed_count=1,
+            last_event_date=event.event_date,
+            ordered=True,
+        )
+
+    with (
+        patch(
+            "custom_components.free_library_events.api.LibraryClient.async_fetch_feed",
+            side_effect=fetch_feed,
+        ),
+        patch(
+            "custom_components.free_library_events.dt_util.now",
+            return_value=datetime(2026, 7, 17),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_RENDER_DIGEST,
+            {ATTR_FORCE_REFRESH: False},
+            blocking=True,
+            return_response=True,
+        )
+
+    assert "Source coverage is unresolved" in response["message"]
+    assert "Charles Santore Library — supplemental discovery" in response["message"]
+    assert "offline" in response["message"]
 
 
 async def test_coordinator_retains_partial_source_success(
@@ -327,7 +477,11 @@ async def test_coordinator_retains_partial_source_success(
     )
     client = types.SimpleNamespace(
         async_fetch_feed=AsyncMock(
-            side_effect=[success, LibraryApiError("source unavailable")]
+            side_effect=[
+                LibraryApiError("discovery unavailable"),
+                success,
+                LibraryApiError("source unavailable"),
+            ]
         )
     )
     coordinator = LibraryDataCoordinator(
@@ -340,7 +494,10 @@ async def test_coordinator_retains_partial_source_success(
     )
     data = await coordinator._async_update_data()
     assert data.source_counts == {"SWK": 0}
-    assert data.source_errors == {"SWK:Toddler": "source unavailable"}
+    assert data.source_errors == {
+        "SWK:all": "discovery unavailable",
+        "SWK:Toddler": "source unavailable",
+    }
     assert list(data.source_statuses) == ["SWK:Baby"]
 
 

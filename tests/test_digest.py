@@ -27,7 +27,7 @@ def rss(items: list[dict[str, str]]) -> str:
             f"<guid>{item['link']}</guid>"
             f"<startdate>{item['date']}</startdate>"
             f"<starttime>{item['time']}</starttime>"
-            "<eventimage></eventimage>"
+            f"<eventimage>{item.get('image_url', '')}</eventimage>"
             "</item>"
         )
     return "<?xml version='1.0'?><rss><channel>" + "".join(rows) + "</channel></rss>"
@@ -108,6 +108,72 @@ class DigestTests(unittest.TestCase):
             "best",
         )
 
+    def test_explicit_inclusive_text_can_override_a_nonmatching_feed_category(
+        self,
+    ) -> None:
+        cases = (
+            (
+                "Music with Ry",
+                "A music program designed to get even the smallest kiddo clapping.",
+                ("Toddler",),
+                "good",
+            ),
+            (
+                "Crafternoon for Kids",
+                "Kids of all ages are welcome. Even the littlest littles can color.",
+                ("School Age",),
+                "good",
+            ),
+            (
+                "Library Playgroup",
+                "Toys good for a range of ages are available.",
+                ("Toddler", "Preschool", "School Age"),
+                "possible",
+            ),
+            (
+                "Family Storytime with AAC",
+                "An inclusive storytime where all children can communicate and take part.",
+                ("Toddler",),
+                "good",
+            ),
+        )
+
+        for title, description, age_categories, expected in cases:
+            with self.subTest(title=title):
+                event = digest.Event(
+                    title=title,
+                    event_date=date(2026, 7, 24),
+                    start_time=digest.time(10, 0),
+                    description=description,
+                    link=f"https://example.test/{title}",
+                    image_url="",
+                    branch=digest.BRANCHES["SWK"],
+                    age_categories=age_categories,
+                )
+                self.assertEqual(
+                    digest.classify_event(event, date(2025, 11, 7)),
+                    expected,
+                )
+
+    def test_nonmatching_feed_category_still_rejects_generic_family_copy(
+        self,
+    ) -> None:
+        event = digest.Event(
+            title="Family Art Workshop",
+            event_date=date(2026, 7, 24),
+            start_time=digest.time(10, 0),
+            description="Families can make art together.",
+            link="https://example.test/family-art",
+            image_url="",
+            branch=digest.BRANCHES["SWK"],
+            age_categories=("School Age",),
+        )
+
+        self.assertEqual(
+            digest.classify_event(event, date(2025, 11, 7)),
+            "exclude",
+        )
+
     def test_merge_events_preserves_all_official_age_categories(self) -> None:
         base = digest.Event(
             title="Baby & Toddler Storytime!",
@@ -138,6 +204,65 @@ class DigestTests(unittest.TestCase):
             ),
             "Baby & Toddler Storytime!",
         )
+
+    def test_parser_skips_one_malformed_item_without_losing_the_feed(self) -> None:
+        items = [
+            {
+                "title": "Bad date",
+                "description": "This row should be skipped.",
+                "date": "not-a-date",
+                "time": "10:00 A.M.",
+                "branch": "Charles Santore Library",
+                "link": "https://example.test/bad",
+            },
+            {
+                "title": "07/22/26: Baby Music - Charles Santore Library",
+                "description": "A music program for babies and caregivers.",
+                "date": "07/22/26",
+                "time": "10:30 A.M.",
+                "branch": "Charles Santore Library",
+                "link": "https://example.test/good",
+            },
+        ]
+
+        events, source_count = digest.parse_feed(
+            rss(items), digest.BRANCHES["SWK"], "Baby"
+        )
+
+        self.assertEqual(source_count, 2)
+        self.assertEqual(
+            [event.link for event in events], ["https://example.test/good"]
+        )
+        self.assertEqual(events[0].age_categories, ("Baby",))
+
+    def test_parser_suppresses_empty_image_filenames(self) -> None:
+        item = {
+            "title": "07/25/26: Family Storytime - Charles Santore Library",
+            "description": "An inclusive storytime where all children can take part.",
+            "date": "07/25/26",
+            "time": "11:00 A.M.",
+            "branch": "Charles Santore Library",
+            "link": "https://example.test/events/171403",
+            "image_url": (
+                "https://libwww.freelibrary.org/assets/images/calendar/"
+                "events/2026/11/.jpg"
+            ),
+        }
+
+        events, _source_count = digest.parse_feed(
+            rss([item]), digest.BRANCHES["SWK"], "Toddler"
+        )
+
+        self.assertEqual(events[0].image_url, "")
+
+        item["image_url"] = (
+            "https://libwww.freelibrary.org/assets/images/calendar/"
+            "events/2026/11/171403.jpg"
+        )
+        events, _source_count = digest.parse_feed(
+            rss([item]), digest.BRANCHES["SWK"], "Toddler"
+        )
+        self.assertEqual(events[0].image_url, item["image_url"])
 
     def test_age_on_event_date(self) -> None:
         self.assertEqual(digest.age_on(date(2025, 1, 15), date(2026, 7, 24)), (1, 6, 9))

@@ -25,19 +25,21 @@ from .digest import (
 
 _LOGGER = logging.getLogger(__name__)
 SOURCE_AGE_HORIZON = timedelta(days=90)
+DISCOVERY_SOURCE = "all"
 
 
-def source_key(branch: Branch, age_category: str) -> str:
-    """Return a stable key for one branch-plus-age feed."""
+def source_key(branch: Branch, age_category: str | None) -> str:
+    """Return a stable key for one branch feed."""
 
-    return f"{branch.code}:{age_category}"
+    return f"{branch.code}:{age_category or DISCOVERY_SOURCE}"
 
 
 def source_label(key: str) -> str:
     """Return a human-readable label for a source key."""
 
-    branch_code, age_category = key.split(":", 1)
-    return f"{BRANCHES[branch_code].name} — {age_category}"
+    branch_code, source = key.split(":", 1)
+    label = "supplemental discovery" if source == DISCOVERY_SOURCE else source
+    return f"{BRANCHES[branch_code].name} — {label}"
 
 
 def source_keys_for_window(
@@ -50,6 +52,12 @@ def source_keys_for_window(
 
     categories = set(age_categories_for_window(birth_date, start_date, end_date))
     return [key for key in keys if key.split(":", 1)[1] in categories]
+
+
+def discovery_source_keys(keys: Sequence[str]) -> list[str]:
+    """Return supplemental all-event source keys."""
+
+    return [key for key in keys if key.split(":", 1)[1] == DISCOVERY_SOURCE]
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,6 +106,39 @@ def coverage_warnings(
     return warnings
 
 
+def discovery_coverage(
+    data: LibraryData,
+    end_date: date,
+) -> tuple[list[str], list[str]]:
+    """Return discovery failures separately from official cap limitations."""
+
+    failures = [
+        f"{source_label(key)} could not be loaded: {data.source_errors[key]}"
+        for key in discovery_source_keys(tuple(data.source_errors))
+    ]
+    limitations: list[str] = []
+    for key in discovery_source_keys(tuple(data.source_statuses)):
+        feed = data.source_statuses[key]
+        if feed.parsed_count != feed.source_count:
+            failures.append(
+                f"{source_label(key)} published {feed.source_count} items but only "
+                f"{feed.parsed_count} could be parsed"
+            )
+        elif not feed.ordered:
+            failures.append(f"{source_label(key)} was not ordered by event date")
+        elif not feed.covers_through(end_date):
+            boundary = (
+                f"{feed.last_event_date:%B} {feed.last_event_date.day}"
+                if feed.last_event_date
+                else "an unknown date"
+            )
+            limitations.append(
+                f"{source_label(key)} reached its {feed.source_count}-item limit "
+                f"through {boundary}; later broadly inclusive events may be missing"
+            )
+    return failures, limitations
+
+
 class LibraryDataCoordinator(DataUpdateCoordinator[LibraryData]):
     """Coordinate polling across the selected branch feeds."""
 
@@ -134,7 +175,7 @@ class LibraryDataCoordinator(DataUpdateCoordinator[LibraryData]):
         requests = tuple(
             (branch, age_category)
             for branch in self.branches
-            for age_category in age_categories
+            for age_category in (None, *age_categories)
         )
         results = await asyncio.gather(
             *(

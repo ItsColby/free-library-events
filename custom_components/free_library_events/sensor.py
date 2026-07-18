@@ -16,6 +16,7 @@ from .const import CONF_BIRTH_DATE, CONF_FILTER_MODE, DOMAIN
 from .coordinator import (
     LibraryDataCoordinator,
     coverage_warnings,
+    discovery_coverage,
     source_keys_for_window,
     source_label,
 )
@@ -80,10 +81,19 @@ class LibraryStatusSensor(CoordinatorEntity, SensorEntity):
                 week_start,
                 week_end,
             )
-            if relevant_errors or coverage_warnings(
-                self.coordinator.data, birth_date, week_start, week_end
+            discovery_failures, discovery_limitations = discovery_coverage(
+                self.coordinator.data, week_end
+            )
+            if (
+                relevant_errors
+                or coverage_warnings(
+                    self.coordinator.data, birth_date, week_start, week_end
+                )
+                or discovery_failures
             ):
                 return "partial"
+            if discovery_limitations:
+                return "limited"
         return "ok" if self.coordinator.data else "unknown"
 
     @property
@@ -98,23 +108,28 @@ class LibraryStatusSensor(CoordinatorEntity, SensorEntity):
         week_start = next_week_start(today)
         week_end = week_start + timedelta(days=6)
         warnings = coverage_warnings(data, birth_date, week_start, week_end)
+        discovery_failures, discovery_limitations = discovery_coverage(data, week_end)
         relevant_error_keys = source_keys_for_window(
             tuple(data.source_errors), birth_date, week_start, week_end
         )
-        matched = sum(
+        next_week_events = sum(
             1
             for event in data.events
-            if event.event_date >= today
+            if week_start <= event.event_date <= week_end
             and include_fit(classify_event(event, birth_date), filter_mode)
         )
         return {
             "cached_events": len(data.events),
-            "matched_events": matched,
+            "next_week_events": next_week_events,
             "last_refresh": data.fetched_at.isoformat(),
-            "source_counts": {
+            "cached_events_by_branch": {
                 BRANCHES[code].name: count for code, count in data.source_counts.items()
             },
-            "coverage_complete": not warnings and not relevant_error_keys,
+            "age_feed_coverage_complete": not warnings and not relevant_error_keys,
+            "discovery_coverage_complete": not discovery_failures
+            and not discovery_limitations,
             "coverage_warnings": warnings,
+            "discovery_failures": discovery_failures,
+            "discovery_limitations": discovery_limitations,
             "unavailable_sources": [source_label(key) for key in relevant_error_keys],
         }

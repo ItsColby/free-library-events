@@ -22,9 +22,10 @@ service is used at runtime.
 - Configurable child name and birth date
 - Configurable branch selection, refresh interval, and placeholder duration
 - Manual refresh button and diagnostic status sensor
-- Custom official branch-and-age RSS queries with duplicate consolidation
-- Coverage-aware partial operation when a selected source is unavailable or its
-  result boundary cannot prove the full digest week was returned
+- Relevant official branch-and-age RSS queries plus one supplemental all-event
+  discovery feed per branch, with duplicate consolidation
+- Coverage-aware operation that distinguishes source failures from the official
+  ten-item discovery limit
 - Redacted integration diagnostics
 - Response-only `free_library_events.render_digest` action returning:
   - subject
@@ -69,9 +70,10 @@ The setup flow asks for:
 The child name and birth date stay in the Home Assistant config entry and are
 used only for local filtering and rendering. They are redacted from
 downloadable diagnostics. Network requests download official custom RSS feeds
-for each selected branch and relevant published age category. The birth date
-and child name are not included in those requests. All supported branches are
-enabled by default and can be disabled individually.
+for each selected branch, its relevant published age categories, and one
+all-event discovery pass. The birth date and child name are not included in
+those requests. All supported branches are enabled by default and can be
+disabled individually.
 
 ### Match modes
 
@@ -80,8 +82,12 @@ enabled by default and can be disabled individually.
 - **Broad** also includes general child/family events without a specific age.
 
 Published numeric age ranges override the official feed category and general
-wording such as “all ages.” When an event appears in more than one relevant
-official age feed, it is shown once and retains all of those classifications.
+wording such as “all ages.” A matching official age category is a best match;
+when a category is too narrow, explicit inclusive wording such as “smallest
+kiddo,” “littlest littles,” or “range of ages” can still qualify the event.
+Generic family wording alone does not override a nonmatching category. When an
+event appears in more than one feed, it is shown once and retains all published
+age classifications.
 
 ## Calendar
 
@@ -134,27 +140,39 @@ or send mail directly.
 
 The status sensor reports:
 
-- `ok` when every selected source loaded and coverage evidence reaches beyond
-  the upcoming digest week
-- `partial` when at least one source loaded but another failed, parsed
-  incompletely, or reached its item limit before full-week coverage was proven
+- `ok` when every selected source loaded and both age and discovery coverage are
+  proven through the upcoming digest week
+- `limited` when every source is healthy but the official ten-item all-event
+  feed cannot prove that later broadly inclusive events were returned
+- `partial` when a relevant source failed, parsed incompletely, or was unordered
 - `error` after a complete refresh failure
 
 If one selected feed fails, the calendar and digest retain the successful
 branch and disclose the unavailable source. If every selected feed fails,
 `render_digest` raises an error before returning an email payload.
 
-Diagnostics redact the child name and birth date. They include per-branch and
-age-category published/parsed counts, ordering and coverage-boundary evidence,
-source availability, bounded errors, last refresh time, and cached event count.
+Diagnostics redact the child name and birth date. They include per-branch,
+age-category, and discovery published/parsed counts, ordering and
+coverage-boundary evidence, source availability, bounded errors, last refresh
+time, next-week match count, and cached event counts by branch.
 
 ## Source limitations
 
 - The official custom RSS feeds return at most ten items. The integration uses
-  the narrowest relevant branch-and-age feeds, consolidates duplicate events,
-  and treats a capped feed as complete only when its final ordered event is
-  after the digest week. Otherwise the status becomes `partial` and the digest
-  names the unresolved source while retaining full-calendar links.
+  the narrowest relevant branch-and-age feeds plus one all-event discovery feed
+  per branch, then consolidates duplicates. The discovery pass catches clearly
+  inclusive events that were published under a narrower age category without
+  multiplying requests across every category. A healthy capped discovery feed
+  that ends before the digest week is complete produces the honest `limited`
+  status; operational failures remain `partial`. Relevant age-feed coverage
+  problems and operational discovery failures are also disclosed in the
+  rendered digest; the known discovery-cap limitation stays in status and
+  diagnostics so it does not dominate the event-focused email.
+- One malformed RSS item is skipped without discarding the rest of its feed.
+  The published-versus-parsed count remains visible as `partial` source health.
+- Structurally empty image filenames from the official feed are omitted instead
+  of rendering a broken image. Valid event photos retain their full aspect
+  ratio.
 - The feeds provide start times but no structured end times, topic tags,
   registration links, or cost fields. The public event pages are protected by a
   browser challenge and are not a reliable Home Assistant data source. The
