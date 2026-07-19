@@ -36,8 +36,8 @@
   RSS links are preserved, and explicit off-site venues or named/numbered rooms
   refine location without inventing data. An end time is
   accepted only from an explicit RSS description range that matches the
-  published start; the digest and HA calendar both use that same evidence. It
-  does not call an LLM.
+  published start or a conservative whole-event duration statement; the digest
+  and HA calendar both use that same evidence. It does not call an LLM.
 - `calendar.py`, `sensor.py`, and `button.py` expose the native user-facing
   calendar, diagnostic status, and manual refresh surfaces.
 - `__init__.py` registers the response-only `render_digest` action. The caller
@@ -64,7 +64,9 @@ order and last event must prove coverage beyond the target digest week.
 Current-age feed gaps are operationally `partial` and are disclosed by the
 rendered digest. A healthy but capped supplemental age feed is `limited`: this
 truthfully records that later broadly inclusive events cannot be proven without
-conflating a publisher limitation with a source failure.
+conflating a publisher limitation with a source failure. Render-response
+metadata retains both supplemental failures and cap limitations for native HA
+trace/readback without adding diagnostic clutter to the email body.
 
 Protected event HTML and ICS endpoints are deliberately outside the runtime
 source boundary. Home Assistant's asynchronous HTTP clients receive the

@@ -144,7 +144,7 @@ async def _async_render_digest(call: ServiceCall) -> ServiceResponse:
     source_warnings = coverage_warnings(
         coordinator.data, birth_date, week_start, week_end
     )
-    supplemental_failures, _supplemental_limitations = supplemental_coverage(
+    supplemental_failures, supplemental_limitations = supplemental_coverage(
         coordinator.data, birth_date, week_start, week_end
     )
     source_warnings.extend(supplemental_failures)
@@ -159,5 +159,7 @@ async def _async_render_digest(call: ServiceCall) -> ServiceResponse:
         source_counts=source_counts,
         source_errors=source_errors,
         source_warnings=source_warnings,
+        supplemental_age_failures=supplemental_failures,
+        supplemental_age_limitations=supplemental_limitations,
     )
     return response

@@ -290,6 +290,19 @@ TIME_RANGE_RE = re.compile(
     r"(?P<end_meridiem>a\.?m\.?|p\.?m\.?)\b",
     re.IGNORECASE,
 )
+DURATION_RES = (
+    re.compile(
+        r"\b(?:this|the)\s+"
+        r"(?:event|program|class|session|storytime|workshop)\s+"
+        r"(?:lasts?|runs?)\s+(?:for\s+)?(?P<minutes>\d{1,3})\s+minutes?\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?P<minutes>\d{1,3})[- ]minute\s+"
+        r"(?:event|program|class|session|storytime|workshop)\b",
+        re.IGNORECASE,
+    ),
+)
 
 
 def _clock_time(hour: str, minute: str | None, meridiem: str) -> time | None:
@@ -342,6 +355,12 @@ def explicit_end_at(
         end_at = datetime.combine(event_date, source_end)
         if timedelta(minutes=15) <= end_at - start_at <= timedelta(hours=8):
             return end_at
+    start_at = datetime.combine(event_date, start_time)
+    for pattern in DURATION_RES:
+        if match := pattern.search(description):
+            duration = timedelta(minutes=int(match.group("minutes")))
+            if timedelta(minutes=15) <= duration <= timedelta(hours=8):
+                return start_at + duration
     return None
 
 
@@ -1107,6 +1126,8 @@ def build_digest(
     source_counts: dict[str, int],
     source_errors: Sequence[str] = (),
     source_warnings: Sequence[str] = (),
+    supplemental_age_failures: Sequence[str] = (),
+    supplemental_age_limitations: Sequence[str] = (),
 ) -> dict[str, object]:
     """Build the complete JSON-serializable email response."""
 
@@ -1180,5 +1201,7 @@ def build_digest(
             "source_counts": dict(source_counts),
             "source_errors": list(source_errors),
             "source_warnings": list(source_warnings),
+            "supplemental_age_failures": list(supplemental_age_failures),
+            "supplemental_age_limitations": list(supplemental_age_limitations),
         },
     }

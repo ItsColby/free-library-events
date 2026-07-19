@@ -540,7 +540,7 @@ class DigestTests(unittest.TestCase):
             digest.format_age(date(2021, 1, 15), date(2026, 7, 18)), "5 years"
         )
 
-    def test_explicit_description_time_range_must_match_the_event_start(self) -> None:
+    def test_explicit_end_evidence_must_be_confident(self) -> None:
         self.assertEqual(
             digest.explicit_end_at(
                 date(2026, 7, 20),
@@ -563,6 +563,21 @@ class DigestTests(unittest.TestCase):
                 "The program runs from 11:30 to 1:00 p.m.",
             ),
             digest.datetime(2026, 7, 20, 13, 0),
+        )
+        self.assertEqual(
+            digest.explicit_end_at(
+                date(2026, 7, 20),
+                digest.time(10, 30),
+                "Each 90-minute class is free.",
+            ),
+            digest.datetime(2026, 7, 20, 12, 0),
+        )
+        self.assertIsNone(
+            digest.explicit_end_at(
+                date(2026, 7, 20),
+                digest.time(10, 30),
+                "The event includes a 10-minute welcome and open-ended playtime.",
+            )
         )
 
     def test_description_link_replaces_its_published_occurrence(self) -> None:
@@ -804,6 +819,12 @@ class DigestTests(unittest.TestCase):
             source_warnings=[
                 "Philadelphia City Institute — Toddler reached its 10-item limit"
             ],
+            supplemental_age_failures=[
+                "Parkway Central Library — Young Adult could not be loaded"
+            ],
+            supplemental_age_limitations=[
+                "Charles Santore Library — School Age reached its 10-item limit"
+            ],
         )
 
         for body in (payload["message"], payload["html"]):
@@ -812,6 +833,15 @@ class DigestTests(unittest.TestCase):
                 body,
             )
             self.assertIn("could not load: Parkway Central Library", body)
+            self.assertNotIn("Charles Santore Library — School Age", body)
+        self.assertEqual(
+            payload["metadata"]["supplemental_age_failures"],
+            ["Parkway Central Library — Young Adult could not be loaded"],
+        )
+        self.assertEqual(
+            payload["metadata"]["supplemental_age_limitations"],
+            ["Charles Santore Library — School Age reached its 10-item limit"],
+        )
 
     def test_digest_prioritizes_event_and_omits_unknown_facts(self) -> None:
         event = digest.Event(

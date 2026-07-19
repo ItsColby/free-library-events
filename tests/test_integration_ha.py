@@ -418,6 +418,21 @@ async def test_status_separates_a_healthy_supplemental_limit_from_partial_failur
     assert status.attributes["supplemental_age_failures"] == []
     assert len(status.attributes["supplemental_age_limitations"]) == 4
 
+    with patch(
+        "custom_components.free_library_events.dt_util.now",
+        return_value=datetime(2026, 7, 18),
+    ):
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_RENDER_DIGEST,
+            {ATTR_FORCE_REFRESH: False},
+            blocking=True,
+            return_response=True,
+        )
+    assert response["metadata"]["supplemental_age_failures"] == []
+    assert len(response["metadata"]["supplemental_age_limitations"]) == 4
+    assert "later broadly inclusive events may be missing" not in response["message"]
+
 
 async def test_digest_discloses_an_operational_supplemental_failure(
     hass: HomeAssistant,

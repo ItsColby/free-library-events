@@ -27,6 +27,11 @@
   postponed, or rescheduled instead of presenting stale activities.
 - Recognize an explicit end range whose first meridiem is omitted only when the
   event's published start makes that range unambiguous.
+- Recognize a conservative whole-event duration statement such as a “90-minute
+  class” as a confident end time without inferring from unrelated timing text.
+- Return supplemental-age failures and feed-cap limitations in render-response
+  metadata so native Home Assistant traces retain completeness evidence without
+  adding diagnostic clutter to the email.
 
 ## Maintenance
 

@@ -119,10 +119,11 @@ returns a complete email payload. It must be called with `response_variable`.
 The digest states the child's conversational age once: weeks before 2 completed
 months, months through 23 months, half-years near the half-year mark below age
 5, and years thereafter. Each event keeps its description primary without
-repeating the matching rationale. An end time
-appears beside the start time only when the RSS description contains an explicit
-range matching the published start, including ranges whose first meridiem is
-unambiguous from that start; otherwise it is omitted. The location name
+repeating the matching rationale. An end time appears beside the start time only
+when the RSS description contains an explicit range matching the published
+start, including ranges whose first meridiem is unambiguous from that start, or a
+conservative whole-event duration such as a “90-minute class”; otherwise it is
+omitted. The location name
 links to Google Maps, while the title and image link to the official event.
 When the RSS text explicitly names an off-site park, square, playground,
 garden, or museum, that venue replaces the hosting branch as the map and
@@ -185,8 +186,8 @@ and cached event counts by branch.
   ends before the digest week is complete produces the honest `limited` status;
   operational failures remain `partial`. Relevant current-age coverage
   problems and operational supplemental failures are also disclosed in the
-  rendered digest; known cap limitations stay in status and diagnostics so they
-  do not dominate the event-focused email.
+  rendered digest; known cap limitations stay out of the event-focused email but
+  remain available in status, diagnostics, and render-response metadata.
 - One malformed RSS item is skipped without discarding the rest of its feed.
   The published-versus-parsed count remains visible as `partial` source health.
 - Structurally empty image filenames from the official feed are omitted instead
