@@ -16,9 +16,9 @@
 - The config-entry card and service device use the static integration name;
   child identity remains only in private config data and rendered content.
 - `api.py` reads official custom branch RSS feeds through Home Assistant's
-  shared HTTP session and records the evidence needed to evaluate the ten-item
-  source boundary. Because the endpoint ignores `page=2`, it can expand one
-  unresolved feed through the publisher's official event-type filters. Invalid
+  shared HTTP session and records the evidence needed to evaluate the observed
+  ten-item source boundary. Because the endpoint ignores `page=2`, it can expand
+  one unresolved feed through the publisher's official event-type filters. Invalid
   individual event rows are skipped while their published-versus-parsed mismatch
   remains observable. All RSS requests share an eight-request concurrency
   ceiling, each decoded response is stopped at 256 KiB, and any one capped-source
@@ -69,10 +69,11 @@ For every selected branch, the coordinator requests every official age category
 in the configured person's current life-stage group. This preserves publisher
 age provenance, avoids the noise and ambiguity of an unclassified all-events
 feed, and still discovers explicitly inclusive events assigned to a narrower
-category. A feed below the ten-item limit is complete. At the limit, its parsed
-order and last event must prove coverage beyond the target digest week. If they
-do not, the coordinator requests the stable official event-type taxonomy and
-merges the resulting overlapping rows. Expansion proves coverage only when all
+category. A feed below the observed ten-item boundary is complete. At or above
+that boundary, its parsed order and last event must prove coverage beyond the
+target digest week. If they do not, the coordinator requests the stable official
+event-type taxonomy and merges the resulting overlapping rows. Expansion proves
+coverage only when all
 type shards cover the week and collectively recover the capped base prefix;
 otherwise the limitation remains visible. At most twelve capped sources are
 expanded in one refresh, enough for the maximum three overlapping current-age

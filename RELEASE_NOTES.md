@@ -5,9 +5,9 @@
 - Query every official age category in the configured person's current
   life-stage group so explicitly inclusive events remain discoverable and every
   cached event retains publisher age provenance.
-- Expand an unresolved ten-item feed across the publisher's official event-type
-  filters, recovering later events even though the RSS endpoint ignores
-  `page=2`.
+- Expand an unresolved feed at or above the observed ten-item boundary across
+  the publisher's official event-type filters, recovering later events even
+  though the RSS endpoint ignores `page=2`.
 
 ## Changed
 

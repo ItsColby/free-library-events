@@ -136,7 +136,7 @@ def type_expansion_source_keys(
                 key
                 for key, feed in statuses.items()
                 if feed.type_shards_queried == 0
-                and feed.source_count == RSS_ITEM_LIMIT
+                and feed.source_count >= RSS_ITEM_LIMIT
                 and feed.parsed_count == feed.source_count
                 and feed.ordered
                 and not feed.covers_through(coverage_end)

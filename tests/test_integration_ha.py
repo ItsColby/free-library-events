@@ -58,6 +58,7 @@ from custom_components.free_library_events.coordinator import (  # noqa: E402
     source_expansion_details,
     source_keys_for_window,
     supplemental_coverage,
+    type_expansion_source_keys,
 )
 from custom_components.free_library_events.diagnostics import (  # noqa: E402
     async_get_config_entry_diagnostics,
@@ -303,6 +304,24 @@ def test_feed_coverage_requires_evidence_past_a_capped_date() -> None:
     assert complete_short_feed.covers_through(date(2026, 7, 26))
     assert not ambiguous_capped_feed.covers_through(date(2026, 7, 26))
     assert proven_capped_feed.covers_through(date(2026, 7, 26))
+
+
+def test_feed_above_observed_limit_is_still_eligible_for_expansion() -> None:
+    feed = BranchFeed(
+        events=(),
+        age_category="Toddler",
+        source_count=11,
+        parsed_count=11,
+        last_event_date=date(2026, 7, 24),
+        ordered=True,
+    )
+
+    assert type_expansion_source_keys(
+        {"CEN:Toddler": feed},
+        date(2023, 11, 7),
+        date(2026, 7, 18),
+        date(2026, 7, 26),
+    ) == ("CEN:Toddler",)
 
 
 async def test_client_expands_only_an_unresolved_capped_feed() -> None:

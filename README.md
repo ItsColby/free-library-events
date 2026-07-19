@@ -24,9 +24,9 @@ service is used at runtime.
 - Manual refresh button and diagnostic status sensor
 - Official branch-and-age RSS queries for every category in the configured
   person's current life-stage group, with duplicate consolidation
-- Coverage-aware operation that distinguishes source failures from the official
-  ten-item limit and adaptively expands unresolved capped feeds through official
-  event-type filters
+- Coverage-aware operation that distinguishes source failures from the observed
+  ten-item boundary and adaptively expands unresolved feeds at or above that
+  boundary through official event-type filters
 - Redacted integration diagnostics
 - Response-only `free_library_events.render_digest` action returning:
   - subject
