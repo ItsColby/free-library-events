@@ -104,7 +104,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: LibraryConfigEntry) -> 
 
 
 async def _async_render_digest(call: ServiceCall) -> ServiceResponse:
-    """Refresh source data and return a complete email payload."""
+    """Refresh source data and return an email payload with coverage metadata."""
 
     hass = call.hass
     loaded_entries = [
@@ -166,4 +166,5 @@ async def _async_render_digest(call: ServiceCall) -> ServiceResponse:
     response["metadata"]["expanded_capped_sources"] = source_expansion_details(
         coordinator.data
     )
+    response["metadata"]["fetched_at"] = coordinator.data.fetched_at.isoformat()
     return response

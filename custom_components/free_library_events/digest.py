@@ -18,6 +18,13 @@ TIMEZONE = "America/New_York"
 FILTER_MODES = ("Strict", "Recommended", "Broad")
 EN_DASH = "\N{EN DASH}"
 MIDDLE_DOT = "\N{MIDDLE DOT}"
+MAX_CHILD_NAME_LENGTH = 80
+MAX_DESCRIPTION_LINKS = 50
+MAX_EVENT_DESCRIPTION_LENGTH = 50_000
+MAX_EVENT_TITLE_LENGTH = 500
+MAX_PARSED_RSS_ITEMS = 100
+MAX_URL_LENGTH = 2_048
+TRUSTED_IMAGE_HOSTS = frozenset({"libwww.freelibrary.org", "www.freelibrary.org"})
 
 # Stable source taxonomy with intentionally overlapping local windows. The
 # library publishes these category names but does not publish numeric bounds.
@@ -42,7 +49,6 @@ MINOR_SOURCE_CATEGORIES = (
     "School Age",
     "Young Adult",
 )
-ADULT_SOURCE_CATEGORIES = ("Adult", "Senior")
 ADULT_START_MONTHS = 18 * 12
 
 
@@ -137,9 +143,26 @@ type FitRank = Literal["best", "good", "possible", "broad", "exclude"]
 
 
 def _safe_http_url(value: str, base_url: str = "") -> str:
-    url = urllib.parse.urljoin(base_url, value.strip())
-    parsed = urllib.parse.urlparse(url)
-    return url if parsed.scheme in {"http", "https"} and parsed.netloc else ""
+    try:
+        value = value.strip()
+        if len(value) > MAX_URL_LENGTH:
+            return ""
+        url = urllib.parse.urljoin(base_url, value)
+        if len(url) > MAX_URL_LENGTH:
+            return ""
+        parsed = urllib.parse.urlparse(url)
+        hostname = parsed.hostname
+    except ValueError:
+        return ""
+    return (
+        url
+        if parsed.scheme in {"http", "https"}
+        and parsed.netloc
+        and hostname
+        and parsed.username is None
+        and parsed.password is None
+        else ""
+    )
 
 
 class _HTMLTextExtractor(HTMLParser):
@@ -188,6 +211,21 @@ def next_week_start(reference_date: date) -> date:
     """Return the next Monday, treating Monday itself as this week's start."""
 
     return reference_date + timedelta(days=(7 - reference_date.weekday()) % 7)
+
+
+def normalize_child_name(value: object) -> str:
+    """Return a bounded single-line display name safe for email subjects."""
+
+    if not isinstance(value, str):
+        raise ValueError("invalid_child_name")
+    child_name = " ".join(value.split())
+    if not child_name:
+        raise ValueError("child_name_required")
+    if len(child_name) > MAX_CHILD_NAME_LENGTH or any(
+        ord(character) < 32 or ord(character) == 127 for character in child_name
+    ):
+        raise ValueError("invalid_child_name")
+    return child_name
 
 
 def add_months(value: date, months: int) -> date:
@@ -244,10 +282,10 @@ def source_age_categories_for_window(
 
     A minor's source plan includes every official child/teen category so an
     inclusive event remains discoverable even when the publisher assigned it a
-    narrower category. At adulthood the plan uses Adult and Senior plus any
-    official category whose published semantic window still overlaps the
-    person's age, such as Young Adult. A window crossing adulthood uses both
-    groups, so the plan advances without household-specific literals.
+    narrower category. At adulthood the plan follows only official categories
+    whose local semantic windows overlap the person's age. A window crossing
+    adulthood retains both sides automatically, so the plan advances without
+    household-specific literals.
     """
 
     if end_date < start_date:
@@ -255,8 +293,6 @@ def source_age_categories_for_window(
     categories = set(age_categories_for_window(birth_date, start_date, end_date))
     if age_in_months(birth_date, start_date) < ADULT_START_MONTHS:
         categories.update(MINOR_SOURCE_CATEGORIES)
-    if age_in_months(birth_date, end_date) >= ADULT_START_MONTHS:
-        categories.update(ADULT_SOURCE_CATEGORIES)
     return tuple(category for category in AGE_CATEGORY_ORDER if category in categories)
 
 
@@ -375,7 +411,13 @@ def explicit_end_at(
 def _repair_bare_numeric_entities(value: str) -> str:
     def replace(match: re.Match[str]) -> str:
         codepoint = int(match.group(1))
-        return chr(codepoint) if 0 <= codepoint <= 0x10FFFF else match.group(0)
+        is_valid_html_character = (
+            codepoint in {9, 10, 13}
+            or 32 <= codepoint <= 0xD7FF
+            or 0xE000 <= codepoint <= 0xFFFD
+            or 0x10000 <= codepoint <= 0x10FFFF
+        )
+        return chr(codepoint) if is_valid_html_character else match.group(0)
 
     return re.sub(r"(?<!&)#(\d{2,6});", replace, value)
 
@@ -461,10 +503,15 @@ def clean_image_url(raw_url: str, base_url: str = "") -> str:
     """Return a safe image URL, excluding structurally empty feed values."""
 
     value = raw_url.strip().replace("\\", "/")
-    filename = urllib.parse.urlparse(value).path.rsplit("/", 1)[-1]
+    url = _safe_http_url(value, base_url)
+    if not url:
+        return ""
+    parsed = urllib.parse.urlparse(url)
+    filename = parsed.path.rsplit("/", 1)[-1]
     if filename.lower() in {".gif", ".jpeg", ".jpg", ".png", ".webp"}:
         return ""
-    return _safe_http_url(value, base_url)
+    hostname = (parsed.hostname or "").lower()
+    return url if parsed.scheme == "https" and hostname in TRUSTED_IMAGE_HOSTS else ""
 
 
 def parse_feed(
@@ -477,7 +524,7 @@ def parse_feed(
     root = ET.fromstring(xml_content)
     items = root.findall("./channel/item")
     events: list[Event] = []
-    for item in items:
+    for item in items[:MAX_PARSED_RSS_ITEMS]:
         start_date_text = (item.findtext("startdate") or "").strip()
         start_time_text = (item.findtext("starttime") or "").strip()
         if not start_date_text or not start_time_text:
@@ -498,6 +545,12 @@ def parse_feed(
             link or branch.calendar_url,
         )
         title = clean_title(item.findtext("title") or "Library event", branch)
+        if (
+            len(title) > MAX_EVENT_TITLE_LENGTH
+            or len(description) > MAX_EVENT_DESCRIPTION_LENGTH
+            or len(description_links) > MAX_DESCRIPTION_LINKS
+        ):
+            continue
         events.append(
             Event(
                 title=title,
@@ -537,7 +590,10 @@ def merge_events(events: Sequence[Event]) -> list[Event]:
             )
             merged[key] = replace(
                 existing,
-                description=existing.description or event.description,
+                description=max(
+                    (existing.description, event.description),
+                    key=lambda value: len(value),
+                ),
                 image_url=existing.image_url or event.image_url,
                 age_categories=age_categories,
                 end_at=existing.end_at or event.end_at,
@@ -571,7 +627,16 @@ def event_is_active(event: Event) -> bool:
 
 
 AGE_RANGE_RE = re.compile(
-    r"\bages?\s*(\d+)\s*(?:-|\u2013|to)\s*(\d+)\s*(months?|mos?|years?|yrs?)?\b",
+    r"\bages?\s*(?P<low>\d+)\s*"
+    r"(?P<low_unit>months?|mos?|years?|yrs?)?\s*"
+    r"(?:-|\u2013|to|through)\s*(?P<high>\d+)\s*"
+    r"(?P<high_unit>months?|mos?|years?|yrs?)?\b",
+    re.IGNORECASE,
+)
+NEWBORN_RANGE_RE = re.compile(
+    r"\b(?:children\s+from\s+)?(?:newborns?|birth)\s*"
+    r"(?:-|\u2013|to|through)\s*(?:age\s*)?(?P<high>\d+)\s*"
+    r"(?P<high_unit>months?|mos?|years?|yrs?)?\b",
     re.IGNORECASE,
 )
 AGE_AND_UNDER_RE = re.compile(
@@ -601,14 +666,23 @@ def _is_broad_years_only_upper_limit(
 
 
 def _explicit_age_fit(text: str, child_months: float) -> FitRank | None:
+    match = NEWBORN_RANGE_RE.search(text)
+    if match:
+        high_unit = match.group("high_unit")
+        high = _to_months(int(match.group("high")), high_unit)
+        margin = (
+            1 if high_unit and high_unit.lower().startswith(("month", "mo")) else 12
+        )
+        return "best" if child_months < high + margin else "exclude"
+
     match = AGE_RANGE_RE.search(text)
     if match:
-        low = _to_months(int(match.group(1)), match.group(3))
-        high = _to_months(int(match.group(2)), match.group(3))
+        low_unit = match.group("low_unit") or match.group("high_unit")
+        high_unit = match.group("high_unit") or match.group("low_unit")
+        low = _to_months(int(match.group("low")), low_unit)
+        high = _to_months(int(match.group("high")), high_unit)
         margin = (
-            1
-            if match.group(3) and match.group(3).lower().startswith(("month", "mo"))
-            else 12
+            1 if high_unit and high_unit.lower().startswith(("month", "mo")) else 12
         )
         if low <= child_months < high + margin:
             return "best"
@@ -1139,9 +1213,7 @@ def build_digest(
 ) -> dict[str, object]:
     """Build the complete JSON-serializable email response."""
 
-    child_name = child_name.strip()
-    if not child_name:
-        raise ValueError("Child name is required")
+    child_name = normalize_child_name(child_name)
     if not selected_branches:
         raise ValueError("At least one library branch must be enabled")
     if filter_mode not in FILTER_MODES:

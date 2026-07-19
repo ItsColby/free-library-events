@@ -5,6 +5,9 @@ from __future__ import annotations
 from datetime import date
 from typing import Any, Mapping
 
+import voluptuous as vol
+
+from homeassistant.helpers import config_validation as cv
 from homeassistant.util import dt as dt_util
 
 from .const import (
@@ -30,7 +33,7 @@ from .const import (
     MIN_CALENDAR_DURATION,
     MIN_SCAN_INTERVAL,
 )
-from .digest import BRANCHES, FILTER_MODES, Branch
+from .digest import BRANCHES, FILTER_MODES, Branch, normalize_child_name
 
 
 BRANCH_CONFIG_KEYS = (
@@ -62,7 +65,7 @@ def normalize_config(values: Mapping[str, Any]) -> dict[str, Any]:
     config = {**default_config(), **dict(values)}
     if CONF_BIRTH_DATE not in config:
         raise ValueError("birth_date_required")
-    child_name = str(config[CONF_CHILD_NAME]).strip()
+    child_name = normalize_child_name(config[CONF_CHILD_NAME])
     birth_value = config[CONF_BIRTH_DATE]
     try:
         birth_date = (
@@ -81,11 +84,15 @@ def normalize_config(values: Mapping[str, Any]) -> dict[str, Any]:
         scan_interval = int(config[CONF_SCAN_INTERVAL])
     except (TypeError, ValueError) as err:
         raise ValueError("invalid_scan_interval") from err
-    if not child_name:
-        raise ValueError("child_name_required")
+    try:
+        branch_values = {
+            key: cv.boolean(config[key]) for key, _branch_code in BRANCH_CONFIG_KEYS
+        }
+    except (TypeError, ValueError, vol.Invalid) as err:
+        raise ValueError("invalid_config") from err
     if birth_date > dt_util.now().date():
         raise ValueError("birth_date_in_future")
-    if not any(config[key] for key, _ in BRANCH_CONFIG_KEYS):
+    if not any(branch_values.values()):
         raise ValueError("branch_required")
     if filter_mode not in FILTER_MODES:
         raise ValueError("invalid_filter_mode")
@@ -97,10 +104,10 @@ def normalize_config(values: Mapping[str, Any]) -> dict[str, Any]:
     return {
         CONF_CHILD_NAME: child_name,
         CONF_BIRTH_DATE: birth_date.isoformat(),
-        CONF_INCLUDE_SANTORE: bool(config[CONF_INCLUDE_SANTORE]),
-        CONF_INCLUDE_INDEPENDENCE: bool(config[CONF_INCLUDE_INDEPENDENCE]),
-        CONF_INCLUDE_PARKWAY_CENTRAL: bool(config[CONF_INCLUDE_PARKWAY_CENTRAL]),
-        CONF_INCLUDE_PCI: bool(config[CONF_INCLUDE_PCI]),
+        CONF_INCLUDE_SANTORE: branch_values[CONF_INCLUDE_SANTORE],
+        CONF_INCLUDE_INDEPENDENCE: branch_values[CONF_INCLUDE_INDEPENDENCE],
+        CONF_INCLUDE_PARKWAY_CENTRAL: branch_values[CONF_INCLUDE_PARKWAY_CENTRAL],
+        CONF_INCLUDE_PCI: branch_values[CONF_INCLUDE_PCI],
         CONF_FILTER_MODE: filter_mode,
         CONF_CALENDAR_DURATION: calendar_duration,
         CONF_SCAN_INTERVAL: scan_interval,

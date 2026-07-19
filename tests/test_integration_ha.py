@@ -27,7 +27,8 @@ except ModuleNotFoundError as err:  # pragma: no cover - local non-HA test env
     raise unittest.SkipTest(f"Home Assistant test harness unavailable: {err}") from err
 
 from custom_components.free_library_events.api import (  # noqa: E402
-    MAX_TYPE_SHARD_CONCURRENCY,
+    MAX_RSS_RESPONSE_BYTES,
+    MAX_RSS_REQUEST_CONCURRENCY,
     OFFICIAL_EVENT_TYPES,
     BranchFeed,
     LibraryApiError,
@@ -54,6 +55,7 @@ from custom_components.free_library_events.const import (  # noqa: E402
 from custom_components.free_library_events.coordinator import (  # noqa: E402
     MAX_TYPE_EXPANSIONS_PER_REFRESH,
     LibraryDataCoordinator,
+    source_expansion_details,
     source_keys_for_window,
     supplemental_coverage,
 )
@@ -119,6 +121,26 @@ def test_normalize_config_enforces_non_ui_bounds() -> None:
         normalize_config(USER_INPUT | {CONF_CALENDAR_DURATION: 5})
     with pytest.raises(ValueError, match="invalid_scan_interval"):
         normalize_config(USER_INPUT | {CONF_SCAN_INTERVAL: 30})
+
+
+def test_normalize_config_coerces_non_ui_boolean_strings() -> None:
+    disabled = {
+        key: "false"
+        for key in (
+            CONF_INCLUDE_SANTORE,
+            CONF_INCLUDE_INDEPENDENCE,
+            CONF_INCLUDE_PARKWAY_CENTRAL,
+            CONF_INCLUDE_PCI,
+        )
+    }
+
+    with pytest.raises(ValueError, match="branch_required"):
+        normalize_config(USER_INPUT | disabled)
+
+
+def test_normalize_config_rejects_non_string_child_name() -> None:
+    with pytest.raises(ValueError, match="invalid_child_name"):
+        normalize_config(USER_INPUT | {CONF_CHILD_NAME: None})
 
 
 def test_all_sources_default_on_for_legacy_and_new_entries() -> None:
@@ -239,6 +261,7 @@ async def test_setup_entities_action_and_redacted_diagnostics(
         )
     assert response["metadata"]["included_count"] == 4
     assert response["metadata"]["expanded_capped_sources"] == {}
+    assert response["metadata"]["fetched_at"] == status_state.attributes["last_refresh"]
     assert "Avery" in response["subject"]
 
     diagnostics = await async_get_config_entry_diagnostics(hass, entry)
@@ -396,7 +419,28 @@ async def test_client_keeps_recovered_rows_but_discloses_a_shard_failure() -> No
     assert not expanded.covers_through(date(2026, 7, 26))
 
 
-async def test_client_bounds_type_shard_concurrency() -> None:
+def test_state_expansion_details_bound_failure_examples() -> None:
+    failures = tuple(f"Type {index}: offline" for index in range(19))
+    feed = BranchFeed(
+        events=(),
+        age_category="Young Adult",
+        source_count=10,
+        parsed_count=10,
+        last_event_date=date(2026, 7, 24),
+        ordered=True,
+        type_shards_queried=19,
+        type_shard_failures=failures,
+    )
+    data = types.SimpleNamespace(source_statuses={"CEN:Young Adult": feed})
+
+    details = next(iter(source_expansion_details(data).values()))
+
+    assert details["type_feed_failure_count"] == 19
+    assert details["type_feed_failure_examples"] == list(failures[:3])
+    assert "type_feed_failures" not in details
+
+
+async def test_client_bounds_all_rss_request_concurrency() -> None:
     branch = BRANCHES["CEN"]
     base_feed = BranchFeed(
         events=(),
@@ -409,23 +453,16 @@ async def test_client_bounds_type_shard_concurrency() -> None:
     active = 0
     peak = 0
 
-    async def fetch_single(_branch, age_category, _event_type=None):
+    async def fetch_payload(_url):
         nonlocal active, peak
         active += 1
         peak = max(peak, active)
         await asyncio.sleep(0)
         active -= 1
-        return BranchFeed(
-            events=(),
-            age_category=age_category,
-            source_count=0,
-            parsed_count=0,
-            last_event_date=None,
-            ordered=True,
-        )
+        return b"<?xml version='1.0'?><rss><channel></channel></rss>"
 
     client = LibraryClient(None)  # type: ignore[arg-type]
-    client._async_fetch_single = AsyncMock(side_effect=fetch_single)
+    client._async_get = AsyncMock(side_effect=fetch_payload)
 
     await asyncio.gather(
         *(
@@ -436,7 +473,7 @@ async def test_client_bounds_type_shard_concurrency() -> None:
         )
     )
 
-    assert peak == MAX_TYPE_SHARD_CONCURRENCY
+    assert peak == MAX_RSS_REQUEST_CONCURRENCY
     assert active == 0
 
 
@@ -458,7 +495,53 @@ async def test_client_base_fetch_does_not_expand() -> None:
     client._async_fetch_single.assert_awaited_once()
 
 
-async def test_coordinator_bounds_and_prioritizes_type_expansion(
+async def test_client_rejects_an_oversized_rss_response() -> None:
+    response = types.SimpleNamespace(
+        content=types.SimpleNamespace(
+            readexactly=AsyncMock(return_value=b"x" * (MAX_RSS_RESPONSE_BYTES + 1))
+        ),
+        raise_for_status=lambda: None,
+    )
+
+    class ResponseContext:
+        async def __aenter__(self):
+            return response
+
+        async def __aexit__(self, *_args):
+            return None
+
+    session = types.SimpleNamespace(get=lambda *_args, **_kwargs: ResponseContext())
+    client = LibraryClient(session)
+
+    with pytest.raises(LibraryApiError, match="exceeded"):
+        await client._async_get("https://example.test/feed")
+
+
+async def test_client_returns_a_complete_response_below_the_size_limit() -> None:
+    payload = b"<?xml version='1.0'?><rss><channel></channel></rss>"
+
+    async def readexactly(_size):
+        raise asyncio.IncompleteReadError(payload, MAX_RSS_RESPONSE_BYTES + 1)
+
+    response = types.SimpleNamespace(
+        content=types.SimpleNamespace(readexactly=readexactly),
+        raise_for_status=lambda: None,
+    )
+
+    class ResponseContext:
+        async def __aenter__(self):
+            return response
+
+        async def __aexit__(self, *_args):
+            return None
+
+    session = types.SimpleNamespace(get=lambda *_args, **_kwargs: ResponseContext())
+    client = LibraryClient(session)
+
+    assert await client._async_get("https://example.test/feed") == payload
+
+
+async def test_coordinator_expands_every_current_age_source_before_supplemental_sources(
     hass: HomeAssistant,
 ) -> None:
     async def fetch_feed(_branch, age_category):
@@ -477,7 +560,7 @@ async def test_coordinator_bounds_and_prioritizes_type_expansion(
             event_date=date(2026, 7, 25),
             start_time=time(10, 0),
             description="Recovered through official type expansion",
-            link=f"https://example.test/events/{age_category}",
+            link=f"https://example.test/events/{branch.code}/{age_category}",
             image_url="",
             branch=branch,
             age_categories=(age_category,),
@@ -501,8 +584,8 @@ async def test_coordinator_bounds_and_prioritizes_type_expansion(
         hass,
         _entry(),
         client,
-        (BRANCHES["CEN"],),
-        date(2025, 11, 7),
+        tuple(BRANCHES.values()),
+        date(2023, 11, 7),
         timedelta(hours=6),
     )
 
@@ -512,13 +595,50 @@ async def test_coordinator_bounds_and_prioritizes_type_expansion(
     ):
         data = await coordinator._async_update_data()
 
-    expanded_categories = [
-        call.args[1] for call in client.async_expand_feed.await_args_list
+    expanded_sources = [
+        (call.args[0].code, call.args[1])
+        for call in client.async_expand_feed.await_args_list
     ]
-    assert len(expanded_categories) == MAX_TYPE_EXPANSIONS_PER_REFRESH
-    assert expanded_categories[0] == "Baby"
-    assert "Young Adult" not in expanded_categories
+    expected_current_sources = {
+        (branch.code, category)
+        for branch in BRANCHES.values()
+        for category in ("Baby", "Toddler", "Preschool")
+    }
+    assert len(expanded_sources) == MAX_TYPE_EXPANSIONS_PER_REFRESH
+    assert set(expanded_sources) == expected_current_sources
     assert len(data.events) == MAX_TYPE_EXPANSIONS_PER_REFRESH
+
+
+async def test_client_propagates_type_shard_cancellation() -> None:
+    branch = BRANCHES["CEN"]
+    base_feed = BranchFeed(
+        events=(),
+        age_category="Young Adult",
+        source_count=10,
+        parsed_count=10,
+        last_event_date=date(2026, 7, 24),
+        ordered=True,
+    )
+
+    async def fetch_single(_branch, age_category, event_type=None):
+        if event_type == OFFICIAL_EVENT_TYPES[0]:
+            raise asyncio.CancelledError
+        return BranchFeed(
+            events=(),
+            age_category=age_category,
+            source_count=0,
+            parsed_count=0,
+            last_event_date=None,
+            ordered=True,
+        )
+
+    client = LibraryClient(None)  # type: ignore[arg-type]
+    client._async_fetch_single = AsyncMock(side_effect=fetch_single)
+
+    with pytest.raises(asyncio.CancelledError):
+        await client.async_expand_feed(
+            branch, "Young Adult", base_feed, date(2026, 7, 26)
+        )
 
 
 def test_source_plan_is_recomputed_for_the_target_age_window() -> None:
@@ -622,7 +742,6 @@ async def test_coordinator_recomputes_age_feeds_as_time_advances(
     assert [call.args[1] for call in client.async_fetch_feed.await_args_list] == [
         "Young Adult",
         "Adult",
-        "Senior",
     ]
 
 

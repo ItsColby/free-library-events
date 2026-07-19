@@ -1,6 +1,6 @@
 render_digest:
   name: Render weekly digest
-  description: Refresh the selected library feeds and return a complete age-aware email payload.
+  description: Refresh the selected library feeds and return an age-aware email payload with source-coverage metadata.
   fields:
     force_refresh:
       name: Refresh first

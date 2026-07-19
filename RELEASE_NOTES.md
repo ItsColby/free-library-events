@@ -16,9 +16,10 @@
   wording alone.
 - Distinguish the official ten-item supplemental age-feed limit (`limited`) from
   operational source or parsing failures (`partial`).
-- Bound adaptive type expansion to four capped feeds per refresh and prioritize
-  the configured person's current age categories before supplemental discovery;
-  share an eight-request ceiling across all type shards.
+- Bound adaptive type expansion to twelve capped feeds per refresh so even three
+  overlapping current-age categories cover all four branches before the nearest
+  supplemental age windows; share an eight-request ceiling across all RSS
+  traffic.
 - Replace ambiguous status attributes with the next-week event count, cached
   events by branch, and separate current-age and supplemental-age coverage
   indicators.
@@ -39,18 +40,34 @@
   metadata so native Home Assistant traces retain completeness evidence without
   adding diagnostic clutter to the email.
 - Expose each expanded source's discovered-event count, type-feed request count,
-  failures, and proven coverage boundary in the status sensor, diagnostics, and
-  render-response metadata.
+  bounded failure summary, and proven coverage boundary in the status sensor and
+  render-response metadata; retain the complete failure list in on-demand
+  diagnostics.
+- Add the source refresh timestamp to render-response metadata so a native Home
+  Assistant trace proves which coordinator snapshot produced the payload.
 
 ## Maintenance
 
 - Skip malformed individual RSS items instead of discarding their whole feed,
-  while retaining published-versus-parsed evidence in diagnostics.
+  bound remote item and field sizes, and retain published-versus-parsed evidence
+  in diagnostics.
 - Suppress structurally empty image filenames from the official feed instead of
-  rendering a broken image; valid event photos continue to preserve their full
-  aspect ratio.
-- Reject non-HTTP event, image, and contextual URLs while resolving safe
-  relative URLs against the official Free Library source.
+  rendering a broken image; auto-load event photos only from the Free Library's
+  HTTPS hosts, while preserving their full aspect ratio.
+- Reject malformed, credential-bearing, or non-HTTP event and contextual URLs;
+  require publisher-hosted HTTPS images and resolve safe relative URLs against
+  the official Free Library source.
+- Reject RSS responses over 2 MiB, propagate refresh cancellation, coerce
+  non-UI boolean values safely, and keep every RSS request under the same global
+  concurrency ceiling.
+- Normalize the configured display name to one bounded line before it reaches an
+  email subject or HTML body.
+- Recognize mixed-unit and newborn numeric age ranges while keeping the child's
+  configured birth date as the only household input to age calculations.
+- Prefer the more informative official description when duplicate feed copies
+  disagree instead of retaining whichever nonempty description arrived first.
+- Stop polling the Senior source for younger adults; adult source selection now
+  follows only the official age windows that actually overlap.
 - Prevent room extraction from crossing description line boundaries and
   misreading a later schedule date as a room number.
 - Keep protected event-page and ICS scraping out of the runtime after native HA

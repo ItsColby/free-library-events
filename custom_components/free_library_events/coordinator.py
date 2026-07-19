@@ -16,9 +16,12 @@ from homeassistant.util import dt as dt_util
 from .api import OFFICIAL_EVENT_TYPES, RSS_ITEM_LIMIT, BranchFeed, LibraryClient
 from .const import DOMAIN
 from .digest import (
+    AGE_CATEGORY_ORDER,
+    AGE_CATEGORY_WINDOWS,
     BRANCHES,
     Branch,
     Event,
+    age_in_months,
     age_categories_for_window,
     merge_events,
     next_week_start,
@@ -27,7 +30,8 @@ from .digest import (
 
 _LOGGER = logging.getLogger(__name__)
 SOURCE_AGE_HORIZON = timedelta(days=90)
-MAX_TYPE_EXPANSIONS_PER_REFRESH = 4
+MAX_TYPE_EXPANSIONS_PER_REFRESH = 12
+MAX_TYPE_FAILURE_EXAMPLES = 3
 
 
 def source_key(branch: Branch, age_category: str) -> str:
@@ -74,7 +78,10 @@ def source_expansion_details(data: LibraryData) -> dict[str, dict[str, object]]:
         source_label(key): {
             "discovered_event_count": len(feed.events),
             "type_feeds_queried": feed.type_shards_queried,
-            "type_feed_failures": list(feed.type_shard_failures),
+            "type_feed_failure_count": len(feed.type_shard_failures),
+            "type_feed_failure_examples": list(
+                feed.type_shard_failures[:MAX_TYPE_FAILURE_EXAMPLES]
+            ),
             "coverage_through": feed.expanded_through.isoformat()
             if feed.expanded_through
             else None,
@@ -82,6 +89,54 @@ def source_expansion_details(data: LibraryData) -> dict[str, dict[str, object]]:
         for key, feed in data.source_statuses.items()
         if feed.type_shards_queried
     }
+
+
+def type_expansion_source_keys(
+    statuses: dict[str, BranchFeed],
+    birth_date: date,
+    today: date,
+    coverage_end: date,
+) -> tuple[str, ...]:
+    """Select capped sources while covering current ages before nearby windows."""
+
+    current_categories = set(
+        age_categories_for_window(
+            birth_date,
+            next_week_start(today),
+            coverage_end,
+        )
+    )
+    child_months = age_in_months(birth_date, next_week_start(today))
+    age_window_by_category = {
+        category: (minimum, maximum)
+        for category, minimum, maximum in AGE_CATEGORY_WINDOWS
+    }
+
+    def expansion_priority(key: str) -> tuple[bool, float, int, str]:
+        branch_code, category = key.split(":", 1)
+        minimum, maximum = age_window_by_category[category]
+        distance = max(minimum - child_months, child_months - maximum, 0)
+        return (
+            category not in current_categories,
+            distance,
+            AGE_CATEGORY_ORDER[category],
+            branch_code,
+        )
+
+    return tuple(
+        sorted(
+            (
+                key
+                for key, feed in statuses.items()
+                if feed.type_shards_queried == 0
+                and feed.source_count == RSS_ITEM_LIMIT
+                and feed.parsed_count == feed.source_count
+                and feed.ordered
+                and not feed.covers_through(coverage_end)
+            ),
+            key=expansion_priority,
+        )[:MAX_TYPE_EXPANSIONS_PER_REFRESH]
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -242,6 +297,8 @@ class LibraryDataCoordinator(DataUpdateCoordinator[LibraryData]):
         errors: dict[str, str] = {}
         for (branch, age_category), result in zip(requests, results, strict=True):
             key = source_key(branch, age_category)
+            if isinstance(result, asyncio.CancelledError):
+                raise result
             if isinstance(result, BaseException):
                 errors[key] = str(result) or f"Unable to load {source_label(key)}"
                 continue
@@ -256,32 +313,16 @@ class LibraryDataCoordinator(DataUpdateCoordinator[LibraryData]):
                 "; ".join(errors.values()) or "No selected library feed could be loaded"
             )
 
-        current_categories = set(
-            age_categories_for_window(
-                self.birth_date,
-                next_week_start(today),
-                coverage_end,
-            )
-        )
         request_by_key = {
             source_key(branch, age_category): (branch, age_category)
             for branch, age_category in requests
         }
-        expansion_keys = sorted(
-            (
-                key
-                for key, feed in statuses.items()
-                if feed.type_shards_queried == 0
-                and feed.source_count == RSS_ITEM_LIMIT
-                and feed.parsed_count == feed.source_count
-                and feed.ordered
-                and not feed.covers_through(coverage_end)
-            ),
-            key=lambda key: (
-                key.split(":", 1)[1] not in current_categories,
-                key,
-            ),
-        )[:MAX_TYPE_EXPANSIONS_PER_REFRESH]
+        expansion_keys = type_expansion_source_keys(
+            statuses,
+            self.birth_date,
+            today,
+            coverage_end,
+        )
         expanded_results = await asyncio.gather(
             *(
                 self._client.async_expand_feed(
@@ -292,6 +333,8 @@ class LibraryDataCoordinator(DataUpdateCoordinator[LibraryData]):
             return_exceptions=True,
         )
         for key, result in zip(expansion_keys, expanded_results, strict=True):
+            if isinstance(result, asyncio.CancelledError):
+                raise result
             if isinstance(result, BaseException):
                 _LOGGER.warning("Unable to expand %s: %s", source_label(key), result)
                 statuses[key] = replace(

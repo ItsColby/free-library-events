@@ -32,7 +32,7 @@ service is used at runtime.
   - subject
   - plain-text message
   - responsive HTML email
-  - bounded generation metadata
+  - bounded generation and source-coverage metadata
 - Each included event leads with the official description and includes a linked
   location name, linked title and image, and a prefilled Google Calendar link
 - Safe contextual links embedded in official RSS descriptions remain clickable;
@@ -77,10 +77,10 @@ used only for local filtering and rendering. They are redacted from
 downloadable diagnostics. Network requests download official custom RSS feeds
 for each selected branch and every published age category in the configured
 person's current life-stage group. For minors, that means the Baby through
-Young Adult categories. At adulthood it switches to Adult and Senior while
-retaining Young Adult only for as long as that official category still overlaps
-the person's age; a forward source window that crosses adulthood uses both
-groups. This recovers publisher classifications without putting the birth date,
+Young Adult categories. At adulthood it follows only the Adult, Senior, or
+overlapping Young Adult windows that actually apply; a forward source window
+that crosses adulthood uses both sides of the transition. This recovers
+publisher classifications without putting the birth date,
 child name, or calculated age in any request. All supported branches are
 enabled by default and can be disabled individually.
 
@@ -115,7 +115,8 @@ The calendar entity does not send email or create Google Calendar events.
 ## Weekly email action
 
 `free_library_events.render_digest` refreshes the selected feeds by default and
-returns a complete email payload. It must be called with `response_variable`.
+returns an email payload plus explicit source-coverage metadata. It must be
+called with `response_variable`.
 
 The digest states the child's conversational age once: weeks before 2 completed
 months, months through 23 months, half-years near the half-year mark below age
@@ -187,20 +188,23 @@ cached event counts by branch.
   they were assigned to a narrower child category, without mixing in an
   unclassified all-events feed. The RSS endpoint ignores `page=2`, so an
   unresolved capped feed is instead queried through all official event-type
-  filters and deduplicated. Expansion is bounded to four feeds per refresh,
-  shares an eight-request type-shard concurrency ceiling, and prioritizes
-  current-age categories. Coverage is proven only when every type shard covers
-  the digest horizon and recovers the capped base prefix. A healthy
-  supplemental category that remains unresolved produces the honest `limited`
-  status; operational failures remain `partial`. Relevant current-age coverage
-  problems and operational supplemental failures are also disclosed in the
-  rendered digest; known cap limitations stay out of the event-focused email but
-  remain available in status, diagnostics, and render-response metadata.
+  filters and deduplicated. Expansion is bounded to twelve feeds per refresh,
+  enough for all four branches when three official age windows overlap, and
+  prioritizes every current-age source before the nearest supplemental age
+  windows. All RSS traffic shares an eight-request ceiling. Each
+  decoded RSS response is capped at 2 MiB. Coverage is proven only when every
+  type shard covers the digest horizon and recovers the capped base prefix. A
+  healthy supplemental category that remains unresolved produces the honest
+  `limited` status; operational failures remain `partial`. Relevant current-age
+  coverage problems and operational supplemental failures are also disclosed in
+  the rendered digest; known cap limitations stay out of the event-focused email
+  but remain available in status, diagnostics, and render-response metadata.
 - One malformed RSS item is skipped without discarding the rest of its feed.
-  The published-versus-parsed count remains visible as `partial` source health.
+  Remote item counts and field sizes are also bounded. The
+  published-versus-parsed count remains visible as `partial` source health.
 - Structurally empty image filenames from the official feed are omitted instead
-  of rendering a broken image. Valid event photos retain their full aspect
-  ratio.
+  of rendering a broken image. Email clients auto-load images only from the Free
+  Library's HTTPS hosts, and valid event photos retain their full aspect ratio.
 - The feeds provide start times but no structured end times, topic tags,
   registration links, or cost fields. The public event pages are protected by a
   browser challenge: direct tests with Home Assistant's asynchronous HTTP

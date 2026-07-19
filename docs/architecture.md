@@ -20,25 +20,27 @@
   source boundary. Because the endpoint ignores `page=2`, it can expand one
   unresolved feed through the publisher's official event-type filters. Invalid
   individual event rows are skipped while their published-versus-parsed mismatch
-  remains observable.
+  remains observable. All RSS requests share an eight-request concurrency
+  ceiling, and each decoded response is stopped at 2 MiB.
 - `coordinator.py` derives the configured person's current life-stage group from
   the local birth date, requests every official age category in that group for
   each selected branch, refreshes the plan concurrently, consolidates duplicate
   events while retaining their official classifications and richer safe fields,
-  and preserves partial source success. It adaptively expands at most four
-  unresolved capped feeds per refresh, prioritizing current-age categories and
-  sharing an eight-request concurrency ceiling across their type shards. A
-  minor uses Baby through Young Adult; an adult uses Adult and Senior while
-  retaining Young Adult only during its overlapping age window; a forward source
-  window crossing adulthood uses both groups. It fails the update only when
-  every selected source fails.
+  and preserves partial source success. It adaptively expands at most twelve
+  unresolved capped feeds per refresh. Current-age sources come first, followed
+  by the numerically nearest official age windows, with branches distributed
+  deterministically within each category. A minor uses Baby through Young
+  Adult; an adult uses only the Adult, Senior, or overlapping Young Adult windows
+  that apply; a forward source window crossing adulthood retains both sides. It
+  fails the update only when every selected source fails.
 - `digest.py` is a deterministic, side-effect-free parser, age matcher, and
   HTML/plain-text renderer. Explicit numeric ranges take precedence, followed
   by matching official age-feed classifications and then explicit inclusive
   text. Strong published wording can correct an overly narrow feed category;
   generic family wording cannot. Age classification controls inclusion and
   ordering; it is not repeated as per-event presentation copy. Safe contextual
-  RSS links are preserved, and explicit off-site venues or named/numbered rooms
+  RSS links are preserved. Email clients auto-load event images only from the
+  publisher's HTTPS hosts, and explicit off-site venues or named/numbered rooms
   refine location without inventing data. An end time is
   accepted only from an explicit RSS description range that matches the
   published start or a conservative whole-event duration statement; the digest
@@ -50,7 +52,8 @@
   or scheduler exists inside the integration.
 - `diagnostics.py` redacts child name and birth date and exposes only bounded
   per-source counts, type-expansion evidence, ordering, coverage boundaries, and
-  health.
+  health. High-volume shard failures remain available in on-demand diagnostics;
+  entity state and action-response metadata retain a count and three examples.
 
 ## Supported Source Boundary
 
@@ -70,9 +73,13 @@ order and last event must prove coverage beyond the target digest week. If they
 do not, the coordinator requests the stable official event-type taxonomy and
 merges the resulting overlapping rows. Expansion proves coverage only when all
 type shards cover the week and collectively recover the capped base prefix;
-otherwise the limitation remains visible. Current-age feed gaps are
-operationally `partial` and are disclosed by the rendered digest. A healthy but
-still-capped supplemental age feed is `limited`: this truthfully records that
+otherwise the limitation remains visible. At most twelve capped sources are
+expanded in one refresh, enough for the maximum three overlapping current-age
+categories across all four supported branches while the worst case stays
+bounded. Current-age sources are always selected before supplemental discovery.
+Current-age feed gaps are operationally `partial` and are disclosed by the
+rendered digest. A healthy but still-capped supplemental age feed is `limited`:
+this truthfully records that
 later broadly inclusive events cannot be proven without conflating a publisher
 limitation with a source failure. Render-response metadata retains supplemental
 failures, cap limitations, and expansion evidence for native HA trace/readback
@@ -94,10 +101,13 @@ page available outside the integration for schedule changes.
 
 1. Use Python 3.14 and run unit, HA integration, compile, JSON, privacy,
    Hassfest, and HACS validation.
-2. Keep `manifest.json` version, Git tag, and release title aligned.
-3. Publish an immutable `vYYYY.M.D` release from the validated commit.
-4. Install or update only through HACS using an exact release.
-5. Restart Home Assistant after installation or update and verify the config
+2. Compare the official RSS builder's age and event-type options with the local
+   source taxonomy; the runtime builder route is browser-protected, so this is a
+   release-time drift check rather than an unreliable polling dependency.
+3. Keep `manifest.json` version, Git tag, and release title aligned.
+4. Publish an immutable `vYYYY.M.D` release from the validated commit.
+5. Install or update only through HACS using an exact release.
+6. Restart Home Assistant after installation or update and verify the config
    entry, entities, action, diagnostics, logs, Repairs, and update entity.
 
 Maintainer-specific backup, deployment readback, rollback, and household

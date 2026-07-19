@@ -114,7 +114,7 @@ class DigestTests(unittest.TestCase):
                 date(2026, 7, 18),
                 date(2026, 10, 16),
             ),
-            ("Adult", "Senior"),
+            ("Adult",),
         )
         self.assertEqual(
             digest.source_age_categories_for_window(
@@ -122,7 +122,7 @@ class DigestTests(unittest.TestCase):
                 date(2026, 6, 1),
                 date(2026, 9, 1),
             ),
-            tuple(digest.AGE_CATEGORY_ORDER),
+            ("Baby", "Toddler", "Preschool", "School Age", "Young Adult", "Adult"),
         )
 
     def test_official_age_category_precedes_title_only_inference(self) -> None:
@@ -239,7 +239,8 @@ class DigestTests(unittest.TestCase):
         )
         richer = digest.replace(
             base,
-            image_url="https://example.test/event.jpg",
+            description="Stories, songs, rhymes, and movement for babies.",
+            image_url="https://libwww.freelibrary.org/assets/images/event.jpg",
             age_categories=("Toddler",),
             end_at=digest.datetime(2026, 7, 20, 11, 30),
             description_links=(
@@ -251,6 +252,7 @@ class DigestTests(unittest.TestCase):
 
         merged = digest.merge_events((base, richer))[0]
 
+        self.assertEqual(merged.description, richer.description)
         self.assertEqual(merged.image_url, richer.image_url)
         self.assertEqual(merged.end_at, richer.end_at)
         self.assertEqual(merged.description_links, richer.description_links)
@@ -284,6 +286,11 @@ class DigestTests(unittest.TestCase):
             "Baby & Toddler Storytime!",
         )
 
+        self.assertEqual(
+            digest._repair_bare_numeric_entities("We#39;ll keep #0; literal."),
+            "We'll keep #0; literal.",
+        )
+
     def test_parser_skips_one_malformed_item_without_losing_the_feed(self) -> None:
         items = [
             {
@@ -313,6 +320,30 @@ class DigestTests(unittest.TestCase):
             [event.link for event in events], ["https://example.test/good"]
         )
         self.assertEqual(events[0].age_categories, ("Baby",))
+
+    def test_parser_bounds_remote_item_fields_and_item_count(self) -> None:
+        valid = {
+            "title": "07/22/26: Baby Music - Charles Santore Library",
+            "description": "A music program for babies and caregivers.",
+            "date": "07/22/26",
+            "time": "10:30 A.M.",
+            "branch": "Charles Santore Library",
+            "link": "https://example.test/good",
+        }
+        oversized = valid | {
+            "title": "X" * (digest.MAX_EVENT_TITLE_LENGTH + 1),
+            "link": "https://example.test/oversized",
+        }
+        rows = [valid, oversized, *([oversized] * digest.MAX_PARSED_RSS_ITEMS)]
+
+        events, source_count = digest.parse_feed(
+            rss(rows), digest.BRANCHES["SWK"], "Baby"
+        )
+
+        self.assertEqual(source_count, len(rows))
+        self.assertEqual(
+            [event.link for event in events], ["https://example.test/good"]
+        )
 
     def test_parser_suppresses_empty_image_filenames(self) -> None:
         item = {
@@ -369,6 +400,62 @@ class DigestTests(unittest.TestCase):
             payload, digest.BRANCHES["SWK"], "Toddler"
         )
         self.assertEqual(events[0].link, "https://example.test/fallback-event")
+
+    def test_parser_rejects_malformed_or_credentialed_urls_without_losing_item(
+        self,
+    ) -> None:
+        item = {
+            "title": "07/25/26: Family Storytime - Charles Santore Library",
+            "description": (
+                'Read the <a href="https://user:pass@example.test/guide">guide</a>.'
+            ),
+            "date": "07/25/26",
+            "time": "11:00 A.M.",
+            "branch": "Charles Santore Library",
+            "link": "http://[::1",
+            "image_url": "http://[::1",
+        }
+
+        events, source_count = digest.parse_feed(
+            rss([item]), digest.BRANCHES["SWK"], "Toddler"
+        )
+
+        self.assertEqual(source_count, 1)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].link, "")
+        self.assertEqual(events[0].image_url, "")
+        self.assertEqual(events[0].description_links, ())
+
+        item["link"] = "https://example.test/" + ("x" * digest.MAX_URL_LENGTH)
+        events, _source_count = digest.parse_feed(
+            rss([item]), digest.BRANCHES["SWK"], "Toddler"
+        )
+        self.assertEqual(events[0].link, "")
+
+    def test_parser_does_not_auto_load_images_from_untrusted_hosts(self) -> None:
+        item = {
+            "title": "07/25/26: Family Storytime - Charles Santore Library",
+            "description": "An inclusive storytime for children and caregivers.",
+            "date": "07/25/26",
+            "time": "11:00 A.M.",
+            "branch": "Charles Santore Library",
+            "link": "https://libwww.freelibrary.org/calendar/event/171403",
+            "image_url": "https://tracking.example.test/open.gif",
+        }
+
+        events, _source_count = digest.parse_feed(
+            rss([item]), digest.BRANCHES["SWK"], "Toddler"
+        )
+
+        self.assertEqual(events[0].image_url, "")
+
+        item["image_url"] = (
+            "http://libwww.freelibrary.org/assets/images/calendar/events/171403.jpg"
+        )
+        events, _source_count = digest.parse_feed(
+            rss([item]), digest.BRANCHES["SWK"], "Toddler"
+        )
+        self.assertEqual(events[0].image_url, "")
 
     def test_parser_resolves_safe_relative_source_urls(self) -> None:
         item = {
@@ -548,6 +635,15 @@ class DigestTests(unittest.TestCase):
             digest.format_age(date(2021, 1, 15), date(2026, 7, 18)), "5 years"
         )
 
+    def test_child_name_is_single_line_and_bounded_for_email_headers(self) -> None:
+        self.assertEqual(
+            digest.normalize_child_name("  Avery\r\n Quinn  "), "Avery Quinn"
+        )
+        with self.assertRaisesRegex(ValueError, "invalid_child_name"):
+            digest.normalize_child_name(None)
+        with self.assertRaisesRegex(ValueError, "invalid_child_name"):
+            digest.normalize_child_name("A" * (digest.MAX_CHILD_NAME_LENGTH + 1))
+
     def test_explicit_end_evidence_must_be_confident(self) -> None:
         self.assertEqual(
             digest.explicit_end_at(
@@ -621,6 +717,28 @@ class DigestTests(unittest.TestCase):
             branch=digest.BRANCHES["IND"],
         )
         self.assertEqual(digest.classify_event(event, date(2025, 1, 15)), "exclude")
+
+    def test_explicit_age_ranges_support_newborn_and_mixed_units(self) -> None:
+        cases = (
+            ("Children from newborn through age 5 are welcome.", "best"),
+            ("Designed for children ages 6 months to 3 years.", "best"),
+            ("Designed for children ages 2 years to 5 years.", "exclude"),
+        )
+        for description, expected in cases:
+            with self.subTest(description=description):
+                event = digest.Event(
+                    title="Family Program",
+                    event_date=date(2026, 7, 21),
+                    start_time=digest.time(13, 0),
+                    description=description,
+                    link="https://example.test/age-range",
+                    image_url="",
+                    branch=digest.BRANCHES["IND"],
+                    age_categories=("School Age",),
+                )
+                self.assertEqual(
+                    digest.classify_event(event, date(2025, 11, 7)), expected
+                )
 
     def test_broad_upper_age_limit_is_not_a_recommended_toddler_match(self) -> None:
         event = digest.Event(

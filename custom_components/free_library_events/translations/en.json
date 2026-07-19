@@ -25,6 +25,7 @@
     },
     "error": {
       "child_name_required": "Enter the child's first name.",
+      "invalid_child_name": "Enter a first name of 80 characters or fewer.",
       "birth_date_required": "Enter the child's birth date.",
       "invalid_birth_date": "Enter a valid birth date.",
       "birth_date_in_future": "Birth date cannot be in the future.",
@@ -63,6 +64,7 @@
     },
     "error": {
       "child_name_required": "Enter the child's first name.",
+      "invalid_child_name": "Enter a first name of 80 characters or fewer.",
       "birth_date_required": "Enter the child's birth date.",
       "invalid_birth_date": "Enter a valid birth date.",
       "birth_date_in_future": "Birth date cannot be in the future.",

@@ -11,7 +11,8 @@ import aiohttp
 from .digest import Branch, Event, event_identity, merge_events, parse_feed
 
 RSS_ITEM_LIMIT = 10
-MAX_TYPE_SHARD_CONCURRENCY = 8
+MAX_RSS_RESPONSE_BYTES = 2 * 1024 * 1024
+MAX_RSS_REQUEST_CONCURRENCY = 8
 OFFICIAL_EVENT_TYPES = (
     "Arts and Crafts Programs",
     "Author Events",
@@ -74,7 +75,7 @@ class LibraryClient:
 
     def __init__(self, session: aiohttp.ClientSession) -> None:
         self._session = session
-        self._type_shard_semaphore = asyncio.Semaphore(MAX_TYPE_SHARD_CONCURRENCY)
+        self._request_semaphore = asyncio.Semaphore(MAX_RSS_REQUEST_CONCURRENCY)
 
     async def _async_get(self, url: str) -> bytes:
         async with self._session.get(
@@ -83,7 +84,13 @@ class LibraryClient:
             timeout=aiohttp.ClientTimeout(total=20),
         ) as response:
             response.raise_for_status()
-            return await response.read()
+            try:
+                await response.content.readexactly(MAX_RSS_RESPONSE_BYTES + 1)
+            except asyncio.IncompleteReadError as err:
+                return err.partial
+            raise LibraryApiError(
+                f"RSS response exceeded {MAX_RSS_RESPONSE_BYTES} bytes"
+            )
 
     async def async_fetch_feed(
         self,
@@ -114,6 +121,8 @@ class LibraryClient:
         successful_shards: list[BranchFeed] = []
         failures: list[str] = []
         for event_type, result in zip(OFFICIAL_EVENT_TYPES, results, strict=True):
+            if isinstance(result, asyncio.CancelledError):
+                raise result
             if isinstance(result, BaseException):
                 failures.append(f"{event_type}: {result}")
                 continue
@@ -148,10 +157,9 @@ class LibraryClient:
         age_category: str,
         event_type: str,
     ) -> BranchFeed:
-        """Fetch one type shard within the shared expansion concurrency limit."""
+        """Fetch one official publisher event-type shard."""
 
-        async with self._type_shard_semaphore:
-            return await self._async_fetch_single(branch, age_category, event_type)
+        return await self._async_fetch_single(branch, age_category, event_type)
 
     async def _async_fetch_single(
         self,
@@ -171,7 +179,8 @@ class LibraryClient:
             source_name += f" {event_type}"
 
         try:
-            payload = await self._async_get(url)
+            async with self._request_semaphore:
+                payload = await self._async_get(url)
         except (TimeoutError, aiohttp.ClientError) as err:
             raise LibraryApiError(f"Unable to load {source_name} feed") from err
 
