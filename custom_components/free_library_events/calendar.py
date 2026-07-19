@@ -21,10 +21,10 @@ from .const import (
 from .coordinator import LibraryDataCoordinator
 from .digest import (
     TIMEZONE,
-    Event,
     classify_event,
     event_calendar_location,
     event_details_url,
+    event_identity,
     event_is_active,
     include_fit,
     related_link_lines,
@@ -106,17 +106,10 @@ class LibraryCalendar(CoordinatorEntity, CalendarEntity):
                     summary=event.title,
                     description="\n\n".join(description_parts),
                     location=event_calendar_location(event),
-                    uid=event.link or self._event_uid(event),
+                    uid=event_identity(event),
                 )
             )
         return events
-
-    @staticmethod
-    def _event_uid(event: Event) -> str:
-        return (
-            f"{event.branch.code}:{event.event_date.isoformat()}:"
-            f"{event.start_time.isoformat()}:{event.title}"
-        )
 
     @property
     def event(self) -> CalendarEvent | None:

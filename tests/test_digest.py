@@ -463,7 +463,7 @@ class DigestTests(unittest.TestCase):
             'alt="View official event details for Family Storytime with AAC"',
             card,
         )
-        self.assertIn("<strong>Listed for:</strong>", card)
+        self.assertIn("<strong>Library age listing:</strong>", card)
         self.assertNotIn("<strong>Ages:</strong>", card)
         self.assertLess(
             card.index('class="event-audience"'),
@@ -505,7 +505,11 @@ class DigestTests(unittest.TestCase):
 
         card = digest._render_event_card(event, duration_minutes=60)
 
-        self.assertIn("<strong>Listed for:</strong> Baby · Toddler · Preschool", card)
+        self.assertIn('class="event-highlights"', card)
+        self.assertIn(
+            "<strong>Library age listing:</strong> Baby · Toddler · Preschool",
+            card,
+        )
         self.assertNotIn(">Toddler</span>", card)
         self.assertNotIn(">Preschool</span>", card)
         for label in (
@@ -1138,6 +1142,10 @@ class DigestTests(unittest.TestCase):
             source_counts=source_counts,
         )
 
+        self.assertEqual(
+            payload["subject"],
+            "4 library activities for Avery 📚 · Jul 20–26",
+        )
         self.assertEqual(payload["metadata"]["included_count"], 4)
         self.assertEqual(payload["metadata"]["omitted_count"], 1)
         self.assertEqual(
@@ -1147,8 +1155,8 @@ class DigestTests(unittest.TestCase):
         self.assertIn("calendar.google.com/calendar/render", payload["html"])
         self.assertNotIn(">Other calendars</a>", payload["html"])
         self.assertIn('class="email-button"', payload["html"])
-        self.assertIn('<td bgcolor="#1967d2"', payload["html"])
-        self.assertIn("padding:12px 16px", payload["html"])
+        self.assertIn('class="email-button-cell" bgcolor="#1967d2"', payload["html"])
+        self.assertIn("padding:13px 16px", payload["html"])
         self.assertIn("line-height:160%", payload["html"])
         self.assertNotRegex(
             payload["html"],
@@ -1166,12 +1174,17 @@ class DigestTests(unittest.TestCase):
             payload["html"],
         )
         self.assertIn(
-            "See dates, locations, age listings, planning notes, and Google "
-            "Calendar links.",
+            "Wednesday–Friday from 4 libraries, with directions and calendar links.",
             payload["html"],
         )
         self.assertNotIn("4 age-matched library activities for Avery", payload["html"])
-        self.assertIn("Avery, who is 18 months old", payload["html"])
+        self.assertIn(
+            "4 activities selected for Avery’s age across 4 libraries.",
+            payload["html"],
+        )
+        self.assertNotIn("Listed for:", payload["html"])
+        self.assertNotIn("Listed for:", payload["message"])
+        self.assertNotIn("who is 18 months old", payload["html"])
         self.assertNotIn("Avery will be", payload["html"])
         self.assertNotIn("No registration information listed", payload["html"])
         self.assertNotIn("No cost information listed", payload["html"])
@@ -1198,10 +1211,98 @@ class DigestTests(unittest.TestCase):
         self.assertEqual(payload["message"].count("WEDNESDAY, JULY 22"), 1)
         self.assertIn("text-decoration:underline", payload["html"])
         self.assertIn("@media only screen and (max-width:620px)", payload["html"])
+        self.assertEqual(digest.EMAIL_MOBILE_SIDE_IMAGE_WIDTH, 152)
+        self.assertIn(
+            f"width:{digest.EMAIL_MOBILE_SIDE_IMAGE_WIDTH}px!important;"
+            f"max-width:{digest.EMAIL_MOBILE_SIDE_IMAGE_WIDTH}px!important",
+            payload["html"],
+        )
+        self.assertIn("@media only screen and (max-width:390px)", payload["html"])
         self.assertIn(
             "width:100%!important;max-width:100%!important;margin:0!important",
             payload["html"],
         )
+        self.assertIn('class="email-shell"', payload["html"])
+        self.assertIn('class="email-header"', payload["html"])
+        self.assertIn('class="email-title"', payload["html"])
+        self.assertIn('class="email-content"', payload["html"])
+        self.assertIn('class="email-footer"', payload["html"])
+        self.assertIn('class="event-title"', payload["html"])
+        self.assertIn('class="event-meta"', payload["html"])
+        self.assertIn('class="event-time"', payload["html"])
+        self.assertIn('class="event-location"', payload["html"])
+        self.assertIn('class="event-location-link"', payload["html"])
+        self.assertIn('class="branch-calendar-table"', payload["html"])
+        self.assertEqual(payload["html"].count('class="branch-calendar-cell"'), 4)
+        self.assertEqual(payload["html"].count('class="branch-calendar-link"'), 4)
+        self.assertIn(".event-highlights {margin-top:6px!important}", payload["html"])
+        self.assertIn('class="email-button-cell"', payload["html"])
+        self.assertIn('class="email-button-link"', payload["html"])
+        self.assertIn(
+            ".event-description-paragraph,.event-description-list "
+            "{font-size:16px!important;line-height:155%!important}",
+            payload["html"],
+        )
+        self.assertIn(
+            ".email-button-cell {padding:14px 16px!important;"
+            "text-align:center!important}",
+            payload["html"],
+        )
+        self.assertIn(
+            ".event-location-link {display:block!important;padding:13px 0!important}",
+            payload["html"],
+        )
+        self.assertIn(
+            ".branch-calendar-link {padding:13px 10px!important;font-size:15px!important}",
+            payload["html"],
+        )
+        self.assertIn(
+            ".branch-calendar-cell {display:block!important;width:auto!important}",
+            payload["html"],
+        )
+        self.assertIn("html,body {color-scheme:only light}", payload["html"])
+        self.assertNotIn("color-scheme:light only", payload["html"])
+        self.assertIn("Browse full branch calendars:", payload["html"])
+        self.assertNotIn("See every published event:", payload["html"])
+
+    def test_branch_distance_prioritization_never_renders_distance_copy(self) -> None:
+        branch_event = digest.Event(
+            title="Baby Storytime",
+            event_date=date(2026, 7, 22),
+            start_time=digest.time(10, 30),
+            description="Stories for babies.",
+            link="https://example.test/events/branch",
+            image_url="",
+            branch=digest.BRANCHES["SWK"],
+            age_categories=("Baby",),
+        )
+        payload = digest.build_digest(
+            child_name="Avery",
+            birth_date=date(2025, 11, 1),
+            filter_mode="Recommended",
+            duration_minutes=60,
+            selected_branches=(digest.BRANCHES["SWK"],),
+            reference_date=date(2026, 7, 19),
+            events=[branch_event],
+            source_counts={"SWK": 1},
+            distance_by_branch_code={"SWK": 1_609.344},
+        )
+
+        self.assertIn('class="event-time"', payload["html"])
+        self.assertIn('class="event-location"', payload["html"])
+        self.assertIn('class="event-location-link"', payload["html"])
+        self.assertNotRegex(payload["html"], r"(?:~|&lt;)?\d+(?:\.\d+)?\s*mi\b")
+        self.assertNotIn("distance", payload["html"].lower())
+        self.assertNotRegex(payload["message"], r"(?:~|<)?\d+(?:\.\d+)?\s*mi\b")
+        self.assertNotIn("distance", payload["message"].lower())
+        self.assertEqual(payload["html"].count('class="branch-calendar-cell"'), 1)
+        self.assertEqual(payload["html"].count('class="branch-calendar-empty"'), 1)
+
+        offsite_card = digest._render_event_card(
+            digest.replace(branch_event, venue="Sister Cities Park"),
+            duration_minutes=60,
+        )
+        self.assertNotRegex(offsite_card, r"(?:~|&lt;)?\d+(?:\.\d+)?\s*mi\b")
 
     def test_calendar_placeholder_note_distinguishes_all_some_and_none(self) -> None:
         event = digest.Event(
@@ -1267,7 +1368,7 @@ class DigestTests(unittest.TestCase):
             self.assertNotIn("Charles Santore Library — School Age", body)
         self.assertLess(
             payload["html"].index("Some library listings may be missing."),
-            payload["html"].index("See every published event:"),
+            payload["html"].index("Browse full branch calendars:"),
         )
         self.assertLess(
             payload["message"].index("Some library listings may be missing."),
@@ -1312,7 +1413,10 @@ class DigestTests(unittest.TestCase):
         )
 
         card = payload["html"]
-        self.assertIn("Here is 1 activity", card)
+        self.assertIn(
+            "1 activity selected for Avery’s age at 1 library.",
+            card,
+        )
         self.assertNotIn("event was checked", card)
         self.assertEqual(payload["metadata"]["scanned_count"], 1)
         self.assertIn(f"10:30 AM {digest.EN_DASH} 11:30 AM", card)
@@ -1507,6 +1611,30 @@ class DigestTests(unittest.TestCase):
         self.assertIn(("action", "Weather dependent"), chips)
         self.assertIn(("action", "Limited supplies"), chips)
 
+        location_change = digest.replace(
+            event,
+            description=(
+                "Cooler weather? We will meet indoors. Warmer weather? "
+                "We will meet in the park."
+            ),
+        )
+        location_labels = {
+            label for _kind, label in digest._event_chip_specs(location_change)
+        }
+        self.assertIn("Weather affects location", location_labels)
+        self.assertNotIn("Weather dependent", location_labels)
+
+        inclement_location_change = digest.replace(
+            event,
+            description="In inclement weather, the program will move indoors.",
+        )
+        inclement_labels = {
+            label
+            for _kind, label in digest._event_chip_specs(inclement_location_change)
+        }
+        self.assertIn("Weather affects location", inclement_labels)
+        self.assertNotIn("Weather dependent", inclement_labels)
+
         negated = digest.replace(
             event,
             description=(
@@ -1519,6 +1647,7 @@ class DigestTests(unittest.TestCase):
         self.assertNotIn("Registration required", labels)
         self.assertNotIn("AAC board provided", labels)
         self.assertNotIn("Weather dependent", labels)
+        self.assertNotIn("Weather affects location", labels)
         self.assertNotIn("Materials provided", labels)
         self.assertIn("Drop-in", labels)
 
@@ -1558,7 +1687,8 @@ class DigestTests(unittest.TestCase):
         self.assertTrue(digest.event_directions_url(hybrid))
 
         online_card = digest._render_event_card(online, duration_minutes=60)
-        self.assertIn(f"{digest.MIDDLE_DOT} Online</div>", online_card)
+        self.assertIn('class="event-location"', online_card)
+        self.assertIn(" Online</div>", online_card)
         self.assertNotIn(">Online</a>", online_card)
         hybrid_card = digest._render_event_card(hybrid, duration_minutes=60)
         self.assertIn(f"</a> {digest.MIDDLE_DOT} Online option", hybrid_card)
@@ -1575,6 +1705,7 @@ class DigestTests(unittest.TestCase):
             source_errors=(),
             source_warnings=(),
         )
+        self.assertIn("Library age listing: Baby", plain_text)
         self.assertIn("\nOnline\n", plain_text)
         self.assertNotIn("\nOnline: \n", plain_text)
 
@@ -1676,6 +1807,58 @@ class DigestTests(unittest.TestCase):
             len(digest.google_calendar_url(events[0], 60)),
             digest.MAX_CALENDAR_URL_LENGTH,
         )
+
+    def test_mobile_layout_keeps_every_card_rich_when_the_html_budget_allows(
+        self,
+    ) -> None:
+        events = []
+        for index in range(8):
+            branch = digest.BRANCHES["SWK"] if index < 5 else digest.BRANCHES["CEN"]
+            events.append(
+                digest.Event(
+                    title=f"Baby activity {index}",
+                    event_date=date(2026, 7, 20 + index % 7),
+                    start_time=digest.time(9 + index % 8),
+                    description="A useful activity for babies and caregivers.",
+                    link=f"https://example.test/events/{index}",
+                    image_url="https://libwww.freelibrary.org/images/event.png",
+                    branch=branch,
+                    age_categories=("Baby",),
+                )
+            )
+
+        payload = digest.build_digest(
+            child_name="Avery",
+            birth_date=date(2025, 11, 1),
+            filter_mode="Recommended",
+            duration_minutes=60,
+            selected_branches=(digest.BRANCHES["SWK"], digest.BRANCHES["CEN"]),
+            reference_date=date(2026, 7, 19),
+            events=events,
+            source_counts={
+                "SWK": 5,
+                "CEN": 3,
+            },
+            distance_by_branch_code={"SWK": 100.0, "CEN": 10_000.0},
+        )
+
+        metadata = payload["metadata"]
+        self.assertEqual(metadata["included_count"], len(events))
+        self.assertEqual(metadata["email_omitted_count"], 0)
+        self.assertEqual(metadata["full_card_count"], len(events))
+        self.assertEqual(metadata["compact_card_count"], 0)
+        self.assertFalse(metadata["distance_priority_used"])
+        self.assertEqual(payload["html"].count("<img "), len(events))
+        self.assertEqual(
+            payload["html"].count('class="event-description-paragraph"'), len(events)
+        )
+        self.assertNotRegex(payload["html"], r"(?:~|&lt;)?\d+(?:\.\d+)?\s*mi\b")
+        self.assertNotIn("distance", payload["html"].lower())
+        self.assertNotIn(
+            "Nearby activities include more detail; every match stays listed.",
+            payload["html"],
+        )
+        self.assertNotIn('class="compact-calendar-link"', payload["html"])
 
     def test_pathological_event_count_has_an_explicit_bounded_overflow(self) -> None:
         events = [

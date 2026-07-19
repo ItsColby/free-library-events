@@ -45,7 +45,8 @@ service is used at runtime.
   as the map/calendar destination, while a specifically named room refines the
   branch location; an off-site listing still names its hosting branch
 - Event images preserve their published aspect ratio rather than being cropped
-- A muted audience line shows every official age category, while compact
+- A muted `Library age listing:` line shows every official age category, while
+  compact
   highlights show only useful, nonredundant context proved by reliable RSS
   wording: secondary activities, accessibility, participation, take-home
   materials, weather or supply cautions, and registration. At most five are
@@ -138,7 +139,8 @@ multi-paragraph descriptions do not collapse into one dense block. On wider
 screens landscape artwork uses a full-width hero row; square and portrait
 artwork uses the full width of its side column without cropping. The full
 description uses the card width below, and narrow clients stack the image,
-heading, and body. Official age categories appear once in a muted `Listed for:`
+heading, and body. Official age categories appear once in a muted
+`Library age listing:`
 line directly with the title, time, and location. Strongly evidenced secondary
 activities, accessibility, participation, take-home materials, and planning
 details appear there as compact highlights, but a format already obvious in the
@@ -193,8 +195,9 @@ Assistant's configured home coordinates prioritize which branches retain rich
 cards; the digest never stores or returns the home coordinates or calculated
 distances, and it keeps the visible events chronological. Farthest overflow is
 omitted only when compact cards cannot fit, with a visible link to the full
-branch calendars. Recurring events remain distinct by branch, date, and start
-time even when multiple occurrences share one official series URL.
+branch calendars. Recurring events remain distinct in both the digest and the
+native Home Assistant calendar by branch, date, and start time even when
+multiple occurrences share one official series URL.
 
 The caller must pass `digest.images` to an SMTP notify service that supports the
 legacy `data.html` and `data.images` fields in the immediately following action.

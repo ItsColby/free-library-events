@@ -36,6 +36,7 @@ from custom_components.free_library_events.api import (  # noqa: E402
     LibraryApiError,
     LibraryClient,
 )
+from custom_components.free_library_events.calendar import LibraryCalendar  # noqa: E402
 from custom_components.free_library_events.config import (  # noqa: E402
     normalize_config,
     selected_branches,
@@ -70,6 +71,7 @@ from custom_components.free_library_events.digest import (  # noqa: E402
     BRANCHES,
     DescriptionLink,
     Event,
+    event_identity,
 )
 from custom_components.free_library_events.email_images import (  # noqa: E402
     DownloadedImage,
@@ -287,17 +289,25 @@ async def test_setup_entities_action_and_redacted_diagnostics(
             "event-01.png",
         )
     )
+    unused_image_url = "https://libwww.freelibrary.org/images/unused.png"
+    unused_image_path = image_path.with_name("event-02.png")
     download_batch = ImageDownloadBatch(
-        images=(DownloadedImage(image_url, b"image", ".png"),),
-        requested_count=1,
+        images=(
+            DownloadedImage(image_url, b"image", ".png"),
+            DownloadedImage(unused_image_url, b"unused", ".png"),
+        ),
+        requested_count=2,
         failure_count=0,
         failure_examples=(),
     )
     stored_bundle = StoredImageBundle(
-        {image_url: "cid:event-01.png"},
-        (str(image_path),),
+        {
+            image_url: "cid:event-01.png",
+            unused_image_url: "cid:event-02.png",
+        },
+        (str(image_path), str(unused_image_path)),
         image_path.parent,
-        {image_url: "hero"},
+        {image_url: "hero", unused_image_url: "side"},
     )
     with (
         patch(
@@ -325,8 +335,10 @@ async def test_setup_entities_action_and_redacted_diagnostics(
         )
     assert embedded["images"] == [str(image_path)]
     assert embedded["metadata"]["embedded_image_count"] == 1
+    assert embedded["metadata"]["image_download_count"] == 2
     assert embedded["metadata"]["image_download_failure_count"] == 0
     assert 'src="cid:event-01.png"' in embedded["html"]
+    assert "cid:event-02.png" not in embedded["html"]
     assert 'class="event-hero-image-cell"' in embedded["html"]
     schedule.assert_called_once()
 
@@ -354,7 +366,7 @@ async def test_setup_entities_action_and_redacted_diagnostics(
             return_response=True,
         )
     assert remote_fallback["images"] == []
-    assert remote_fallback["metadata"]["image_download_failure_count"] == 1
+    assert remote_fallback["metadata"]["image_download_failure_count"] == 2
     assert f'src="{image_url}"' in remote_fallback["html"]
 
     diagnostics = await async_get_config_entry_diagnostics(hass, entry)
@@ -409,6 +421,46 @@ def test_stored_cid_images_match_home_assistant_smtp_mime_contract(
     finally:
         assert bundle.run_directory is not None
         remove_stored_image_run(bundle.run_directory)
+
+
+def test_calendar_keeps_recurring_series_occurrences_distinct() -> None:
+    first = Event(
+        title="Weekly Storytime",
+        event_date=date(2026, 7, 20),
+        start_time=time(10, 30),
+        description="Stories and songs.",
+        link="https://example.test/events/weekly-series",
+        image_url="",
+        branch=BRANCHES["IND"],
+        age_categories=("Baby",),
+    )
+    second = Event(
+        title=first.title,
+        event_date=date(2026, 7, 27),
+        start_time=first.start_time,
+        description=first.description,
+        link=first.link,
+        image_url="",
+        branch=first.branch,
+        age_categories=first.age_categories,
+    )
+    entry = types.SimpleNamespace(
+        data=USER_INPUT | {CONF_BIRTH_DATE: "2025-11-15"}, options={}
+    )
+    coordinator = types.SimpleNamespace(
+        data=types.SimpleNamespace(events=(first, second))
+    )
+    calendar = LibraryCalendar.__new__(LibraryCalendar)
+    calendar._entry = entry
+    calendar.coordinator = coordinator
+
+    rendered = calendar._calendar_events()
+
+    assert [item.uid for item in rendered] == [
+        event_identity(first),
+        event_identity(second),
+    ]
+    assert rendered[0].uid != rendered[1].uid
 
 
 def test_feed_coverage_requires_evidence_past_a_capped_date() -> None:

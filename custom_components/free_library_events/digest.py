@@ -33,6 +33,7 @@ MAX_EMAIL_EVENTS = 100
 MAX_EVENT_CHIPS = 5
 EMAIL_CONTENT_WIDTH = 680
 EMAIL_SIDE_IMAGE_WIDTH = 220
+EMAIL_MOBILE_SIDE_IMAGE_WIDTH = 152
 TRUSTED_IMAGE_HOSTS = frozenset({"libwww.freelibrary.org", "www.freelibrary.org"})
 
 # Stable source taxonomy with intentionally overlapping local windows. The
@@ -261,7 +262,11 @@ class _HTMLDescriptionSanitizer(HTMLParser):
         '<p class="event-description-paragraph" '
         'style="margin:0 0 12px;color:#3c4043;font-size:15px;line-height:160%">'
     )
-    _LIST = ' style="margin:0 0 12px;padding-left:22px;color:#3c4043;font-size:15px;line-height:160%"'
+    _LIST = (
+        ' class="event-description-list" '
+        'style="margin:0 0 12px;padding-left:22px;color:#3c4043;'
+        'font-size:15px;line-height:160%"'
+    )
     _ITEM = ' style="margin:0 0 5px"'
     _LINK_STYLE = (
         'style="color:#174ea6;text-decoration:underline;'
@@ -1198,8 +1203,10 @@ def _event_location_html(event: Event) -> str:
     directions = event_directions_url(event)
     if directions:
         rendered = (
-            f'<a href="{html.escape(directions, quote=True)}" '
-            'style="color:#202124;text-decoration:underline;'
+            f'<a class="event-location-link" '
+            f'href="{html.escape(directions, quote=True)}" '
+            'style="display:inline-block;padding:5px 0;color:#202124;'
+            "text-decoration:underline;"
             'text-decoration-color:#c4c7c5;text-underline-offset:3px">'
             f"{html.escape(physical_label)}</a>"
         )
@@ -1432,9 +1439,23 @@ def _event_chip_specs(event: Event) -> tuple[tuple[str, str], ...]:
     )
     if aac_board_provided and not aac_board_negated:
         logistics_chips.append(("logistics", "AAC board provided"))
-    weather_warning = re.search(
-        r"\b(?:unfavorable|inclement|cooler|warmer) weather\b|"
-        r"\bweather permitting\b|\bweather[^.]{0,45}\bcancel",
+    weather_location_change = re.search(
+        r"\b(?:cooler|warmer) weather\b|"
+        r"\bweather\b[^.]{0,80}\b(?:indoors?|inside|move|moves|moved|"
+        r"relocat(?:e|es|ed|ion)|alternate location)\b|"
+        r"\b(?:indoors?|inside|move|moves|moved|relocat(?:e|es|ed|ion)|"
+        r"alternate location)\b[^.]{0,80}\bweather\b",
+        searchable,
+        re.IGNORECASE,
+    )
+    weather_risk = re.search(
+        r"\bweather permitting\b|\bweather\b[^.]{0,60}\b(?:cancel|postpone|"
+        r"reschedul)",
+        searchable,
+        re.IGNORECASE,
+    )
+    weather_conditions = re.search(
+        r"\b(?:unfavorable|inclement) weather\b",
         searchable,
         re.IGNORECASE,
     )
@@ -1446,8 +1467,13 @@ def _event_chip_specs(event: Event) -> tuple[tuple[str, str], ...]:
         searchable,
         re.IGNORECASE,
     )
-    if weather_warning and not weather_negated:
-        action_chips.append(("action", "Weather dependent"))
+    if not weather_negated:
+        if weather_risk:
+            action_chips.append(("action", "Weather dependent"))
+        elif weather_location_change:
+            action_chips.append(("action", "Weather affects location"))
+        elif weather_conditions:
+            action_chips.append(("action", "Weather dependent"))
     if re.search(r"\bwhile supplies last\b", searchable, re.IGNORECASE):
         action_chips.append(("action", "Limited supplies"))
     registration_required = re.search(
@@ -1508,7 +1534,8 @@ def _event_chip_specs(event: Event) -> tuple[tuple[str, str], ...]:
     action_priority = {
         "Registration required": 0,
         "Weather dependent": 1,
-        "Limited supplies": 2,
+        "Weather affects location": 2,
+        "Limited supplies": 3,
     }
     action_chips.sort(key=lambda chip: action_priority.get(chip[1], 99))
     ordered = action_chips + logistics_chips + topic_chips
@@ -1528,7 +1555,11 @@ def _event_chips_html(event: Event) -> str:
         f"{html.escape(label)}</span>"
         for kind, label in _event_chip_specs(event)
     )
-    return f'<div style="margin:8px 0 0">{chips}</div>' if chips else ""
+    return (
+        f'<div class="event-highlights" style="margin:8px 0 0">{chips}</div>'
+        if chips
+        else ""
+    )
 
 
 def _event_age_categories(event: Event) -> tuple[str, ...]:
@@ -1551,7 +1582,7 @@ def _event_audience_html(event: Event) -> str:
     audience = f" {MIDDLE_DOT} ".join(html.escape(category) for category in categories)
     return (
         '<div class="event-audience" style="margin:10px 0 0;color:#5f6368;'
-        'font-size:14px;line-height:145%"><strong>Listed for:</strong> '
+        'font-size:14px;line-height:145%"><strong>Library age listing:</strong> '
         f"{audience}</div>"
     )
 
@@ -1563,11 +1594,45 @@ def _button(label: str, url: str, primary: bool = False) -> str:
         '<table class="email-button" role="presentation" border="0" '
         'cellpadding="0" cellspacing="0" '
         'style="border-collapse:separate;margin:12px 0 0">'
-        f'<tr><td bgcolor="{background}" style="padding:12px 16px;'
+        f'<tr><td class="email-button-cell" bgcolor="{background}" '
+        'style="padding:13px 16px;'
         f'border:1px solid #1967d2;border-radius:8px;background:{background}">'
-        f'<a href="{html.escape(url, quote=True)}" style="display:block;'
-        f"color:{color};font-weight:700;text-decoration:none;font-size:14px;"
+        f'<a class="email-button-link" href="{html.escape(url, quote=True)}" '
+        'style="display:block;'
+        f"color:{color};font-weight:700;text-decoration:none;font-size:15px;"
         f'line-height:140%">{html.escape(label)}</a></td></tr></table>'
+    )
+
+
+def _branch_calendar_links_html(branches: Sequence[Branch]) -> str:
+    """Render branch calendars as an email-safe two-column link grid."""
+
+    rows: list[str] = []
+    for index in range(0, len(branches), 2):
+        cells: list[str] = []
+        for branch in branches[index : index + 2]:
+            label = branch.name.replace(" Library", "")
+            cells.append(
+                '<td class="branch-calendar-cell" width="50%" valign="top" '
+                'style="width:50%;padding:4px">'
+                f'<a class="branch-calendar-link" '
+                f'href="{html.escape(branch.calendar_url, quote=True)}" '
+                'style="display:block;padding:10px;border:1px solid #c4c7c5;'
+                "border-radius:8px;color:#174ea6;font-size:14px;font-weight:700;"
+                'line-height:145%;text-align:center;text-decoration:none">'
+                f"{html.escape(label)}</a></td>"
+            )
+        if len(cells) == 1:
+            cells.append(
+                '<td class="branch-calendar-empty" width="50%" '
+                'style="width:50%;padding:4px">&nbsp;</td>'
+            )
+        rows.append(f"<tr>{''.join(cells)}</tr>")
+    return (
+        '<table class="branch-calendar-table" role="presentation" width="100%" '
+        'border="0" cellpadding="0" cellspacing="0" '
+        'style="width:100%;margin:8px 0 0;border-collapse:collapse">'
+        f"{''.join(rows)}</table>"
     )
 
 
@@ -1632,11 +1697,14 @@ def _render_event_card(
         return f"""
     <table class="event-card-shell compact-event-card" role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse">
     <tr><td bgcolor="#ffffff" style="padding:14px 18px 15px;background:#ffffff;border:1px solid #e3e7ee;border-radius:12px;overflow-wrap:anywhere;word-break:break-word">
-      <h3 style="margin:0 0 5px;color:#202124;font-size:19px;line-height:130%"><span aria-hidden="true">{icon_for(event)}</span> <a href="{event_url}" style="color:#174ea6;text-decoration:underline">{html.escape(display_title)}</a></h3>
-      <div style="font-size:14px;font-weight:700;color:#202124;line-height:145%">{format_event_time(event)} {MIDDLE_DOT} {location_html}</div>
+      <h3 class="event-title" style="margin:0 0 5px;color:#202124;font-size:19px;line-height:130%"><span aria-hidden="true">{icon_for(event)}</span> <a href="{event_url}" style="color:#174ea6;text-decoration:underline">{html.escape(display_title)}</a></h3>
+      <div class="event-meta" style="font-size:14px;font-weight:700;color:#202124;line-height:145%">
+        <div class="event-time">{format_event_time(event)}</div>
+        <div class="event-location" style="margin:2px 0 0"><span aria-hidden="true">&#128205;</span> {location_html}</div>
+      </div>
       {_event_audience_html(event)}
       {_event_chips_html(event)}
-      <div style="margin:10px 0 0;font-size:13px;font-weight:700"><a href="{calendar_url}" style="color:#1967d2;text-decoration:underline">Add to Google Calendar</a></div>
+      <div class="compact-calendar-link" style="margin:8px 0 0;font-size:14px;font-weight:700;line-height:145%"><a href="{calendar_url}" style="display:inline-block;padding:5px 0;color:#1967d2;text-decoration:underline">Add to Google Calendar</a></div>
     </td></tr><tr><td height="10" style="height:10px;font-size:1px;line-height:10px">&nbsp;</td></tr>
     </table>
     """
@@ -1694,8 +1762,11 @@ def _render_event_card(
       <tr>
       {image_cell}
       <td class="event-heading-cell"{heading_colspan} valign="top" style="padding:16px 20px 14px;overflow-wrap:anywhere;word-break:break-word">
-        <h3 style="margin:0 0 6px;color:#202124;font-size:22px;line-height:125%"><span aria-hidden="true">{icon_for(event)}</span> <a href="{event_url}" style="color:#174ea6;text-decoration:underline;text-decoration-color:#a8c7fa;text-underline-offset:3px">{html.escape(display_title)}</a></h3>
-        <div style="font-size:16px;font-weight:700;color:#202124;line-height:145%">{format_event_time(event)} {MIDDLE_DOT} {location_html}</div>
+        <h3 class="event-title" style="margin:0 0 6px;color:#202124;font-size:22px;line-height:125%"><span aria-hidden="true">{icon_for(event)}</span> <a href="{event_url}" style="color:#174ea6;text-decoration:underline;text-decoration-color:#a8c7fa;text-underline-offset:3px">{html.escape(display_title)}</a></h3>
+        <div class="event-meta" style="font-size:16px;font-weight:700;color:#202124;line-height:145%">
+          <div class="event-time">{format_event_time(event)}</div>
+          <div class="event-location" style="margin:2px 0 0"><span aria-hidden="true">&#128205;</span> {location_html}</div>
+        </div>
         {_event_audience_html(event)}
         {_event_chips_html(event)}
       </td>
@@ -1736,7 +1807,7 @@ def _render_html(
         day_sections.append(
             f"""
             <table class="event-day-heading" role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse">
-              <tr><td style="padding:0 4px 10px"><h2 style="margin:0;color:#174ea6;font-size:20px;font-weight:800;line-height:130%">{event_date:%A, %B} {event_date.day}</h2></td></tr>
+              <tr><td style="padding:0 4px 10px"><h2 class="event-day-title" style="margin:0;color:#174ea6;font-size:20px;font-weight:800;line-height:130%">{event_date:%A, %B} {event_date.day}</h2></td></tr>
             </table>
             {day_cards}
             <table class="event-day-spacer" role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse">
@@ -1748,11 +1819,15 @@ def _render_html(
     if day_sections:
         body = "".join(day_sections)
         activity_noun = "activity" if len(events) == 1 else "activities"
-        intro_verb = "is" if len(events) == 1 else "are"
+        event_branch_count = len({event.branch.code for event in events})
+        library_noun = "library" if event_branch_count == 1 else "libraries"
+        branch_preposition = "at" if event_branch_count == 1 else "across"
         intro = (
-            f"Here {intro_verb} {len(events)} {activity_noun} from your libraries for "
-            f"{child_name}, who is {format_age(birth_date, week_start)} old."
+            f"{len(events)} {activity_noun} selected for {child_name}’s age "
+            f"{branch_preposition} {event_branch_count} {library_noun}."
         )
+        if len(full_event_ids) < len(events):
+            intro += " Nearby activities include more detail; every match stays listed."
     else:
         intro = (
             f"No clearly age-matched activities were published for {child_name}, "
@@ -1764,10 +1839,7 @@ def _render_html(
             "The full branch calendars are linked below.</div>"
         )
 
-    branch_links = f" {MIDDLE_DOT} ".join(
-        f'<a href="{html.escape(branch.calendar_url, quote=True)}" style="color:#1967d2">{html.escape(branch.name.replace(" Library", ""))}</a>'
-        for branch in branches
-    )
+    branch_links = _branch_calendar_links_html(branches)
     source_note_parts: list[str] = []
     for note, is_error in _source_notes(source_errors, source_warnings):
         color = ";color:#b3261e" if is_error else ""
@@ -1789,42 +1861,92 @@ def _render_html(
             '<p style="margin:8px 0 0;color:#5f6368">'
             f"{html.escape(calendar_note_text)}</p>"
         )
-    preheader = (
-        "See dates, locations, age listings, planning notes, and Google Calendar links."
-        if events
-        else (
+    if events:
+        first_event_date = events[0].event_date
+        last_event_date = events[-1].event_date
+        event_day_range = f"{first_event_date:%A}"
+        if first_event_date != last_event_date:
+            event_day_range += f"{EN_DASH}{last_event_date:%A}"
+        event_branch_count = len({event.branch.code for event in events})
+        library_noun = "library" if event_branch_count == 1 else "libraries"
+        preheader_features = []
+        if any(event.image_url for event in events):
+            preheader_features.append("photos")
+        if any(event.age_categories for event in events):
+            preheader_features.append("age notes")
+        if any(event_directions_url(event) for event in events):
+            preheader_features.append("directions")
+        preheader_features.append("calendar links")
+        if len(preheader_features) == 1:
+            feature_summary = preheader_features[0]
+        elif len(preheader_features) == 2:
+            feature_summary = " and ".join(preheader_features)
+        else:
+            feature_summary = (
+                ", ".join(preheader_features[:-1]) + f", and {preheader_features[-1]}"
+            )
+        preheader = (
+            f"{event_day_range} from {event_branch_count} {library_noun}, "
+            f"with {feature_summary}."
+        )
+    else:
+        preheader = (
             "No clearly age-matched activities were published; "
             "check the full branch calendars."
         )
-    )
 
     return f"""<!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><meta name="supported-color-schemes" content="light"><title>Library fun for {html.escape(child_name)}</title>
 <style>
-html,body {{color-scheme:light only}}
+html,body {{color-scheme:only light}}
 @media only screen and (max-width:620px) {{
-  .event-image-cell,.event-heading-cell,.event-body-cell {{display:block!important;width:auto!important;max-width:100%!important}}
-  .event-image-cell {{padding:0!important;text-align:center!important}}
-  .event-image-cell img {{width:100%!important;max-width:100%!important;margin:0!important;border-radius:13px 13px 0 0!important}}
+  .email-shell {{padding:12px 8px!important}}
+  .email-header {{padding:20px 18px 18px!important}}
+  .email-title {{font-size:27px!important;line-height:120%!important}}
+  .email-content {{padding:18px 0!important}}
+  .email-footer {{padding:16px!important;font-size:14px!important}}
+  .event-day-title {{font-size:19px!important}}
+  .event-card-table {{table-layout:fixed!important}}
+  .event-image-cell {{width:{EMAIL_MOBILE_SIDE_IMAGE_WIDTH}px!important;max-width:{EMAIL_MOBILE_SIDE_IMAGE_WIDTH}px!important;padding:0!important;text-align:center!important}}
+  .event-image-cell a,.event-image-cell img {{width:{EMAIL_MOBILE_SIDE_IMAGE_WIDTH}px!important;max-width:{EMAIL_MOBILE_SIDE_IMAGE_WIDTH}px!important;height:auto!important;margin:0!important}}
   .event-hero-image-cell img {{width:100%!important;max-width:100%!important;height:auto!important}}
-  .event-heading-cell {{padding:16px 18px 14px!important}}
-  .event-body-cell {{padding:16px 18px 18px!important}}
+  .event-heading-cell {{width:auto!important;max-width:none!important;padding:14px 14px 12px!important}}
+  .event-title {{font-size:20px!important;line-height:125%!important}}
+  .event-meta {{font-size:15px!important;line-height:145%!important}}
+  .event-location-link {{display:block!important;padding:13px 0!important}}
+  .event-audience {{margin-top:8px!important;font-size:14px!important}}
+  .event-highlights {{margin-top:6px!important}}
+  .event-highlights span {{padding:5px 7px!important;font-size:13px!important}}
+  .event-body-cell {{padding:15px 16px 17px!important}}
+  .event-description-paragraph,.event-description-list {{font-size:16px!important;line-height:155%!important}}
+  .email-button {{width:100%!important}}
+  .email-button-cell {{padding:14px 16px!important;text-align:center!important}}
+  .email-button-link {{font-size:16px!important;line-height:125%!important}}
+  .compact-calendar-link a {{display:block!important;padding:13px 0!important;font-size:16px!important;line-height:135%!important}}
+  .branch-calendar-link {{padding:13px 10px!important;font-size:15px!important}}
+}}
+@media only screen and (max-width:390px) {{
+  .event-image-cell,.event-heading-cell {{display:block!important;width:auto!important;max-width:100%!important}}
+  .event-image-cell a,.event-image-cell img {{width:100%!important;max-width:100%!important;margin:0!important;border-radius:13px 13px 0 0!important}}
+  .event-heading-cell {{padding:15px 16px 13px!important}}
+  .branch-calendar-cell {{display:block!important;width:auto!important}}
+  .branch-calendar-empty {{display:none!important}}
 }}
 </style></head>
 <body style="margin:0;padding:0;background:#f3f6fb;font-family:Arial,Helvetica,sans-serif;color:#202124">
   <div style="display:none!important;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all">{html.escape(preheader)}&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;</div>
-  <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" bgcolor="#f3f6fb" style="width:100%;border-collapse:collapse;background:#f3f6fb"><tr><td align="center" style="padding:20px 10px">
-    <table role="presentation" width="{EMAIL_CONTENT_WIDTH}" border="0" cellpadding="0" cellspacing="0" style="width:100%;max-width:{EMAIL_CONTENT_WIDTH}px;border-collapse:collapse">
-      <tr><td style="padding:24px 24px 20px;background:#174ea6;border-radius:16px 16px 0 0;color:#ffffff">
+  <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" bgcolor="#f3f6fb" style="width:100%;border-collapse:collapse;background:#f3f6fb"><tr><td class="email-shell" align="center" style="padding:20px 10px">
+    <table class="email-container" role="presentation" width="{EMAIL_CONTENT_WIDTH}" border="0" cellpadding="0" cellspacing="0" style="width:100%;max-width:{EMAIL_CONTENT_WIDTH}px;border-collapse:collapse">
+      <tr><td class="email-header" style="padding:24px 24px 20px;background:#174ea6;border-radius:16px 16px 0 0;color:#ffffff">
         <div style="font-size:13px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;opacity:.85">{_format_week_range(week_start, week_end)}</div>
-        <h1 style="margin:8px 0 8px;font-size:30px;line-height:120%"><span aria-hidden="true">&#128218;</span> Library fun for {html.escape(child_name)}</h1>
+        <h1 class="email-title" style="margin:8px 0 8px;font-size:30px;line-height:120%"><span aria-hidden="true">&#128218;</span> Library fun for {html.escape(child_name)}</h1>
         <p style="margin:0;font-size:16px;line-height:150%">{html.escape(intro)}</p>
       </td></tr>
-      <tr><td style="padding:22px 0">{body}</td></tr>
-      <tr><td style="padding:18px 20px;background:#ffffff;border-radius:12px;color:#5f6368;font-size:13px;line-height:155%">
+      <tr><td class="email-content" style="padding:22px 0">{body}</td></tr>
+      <tr><td class="email-footer" style="padding:18px 20px;background:#ffffff;border-radius:12px;color:#5f6368;font-size:13px;line-height:155%">
         {source_note}
-        <strong style="color:#3c4043">See every published event:</strong> {branch_links}
+        <strong style="color:#3c4043">Browse full branch calendars:</strong> {branch_links}
         <p style="margin:8px 0 0">Library schedules can change, so check the official event page before leaving.</p>
         {calendar_note}
       </td></tr>
@@ -1869,7 +1991,10 @@ def _render_plain_text(
                     f"{format_event_time(event)} | {event.title}",
                     location_line,
                     *(
-                        [f"Listed for: {f' {MIDDLE_DOT} '.join(age_categories)}"]
+                        [
+                            f"Library age listing: "
+                            f"{f' {MIDDLE_DOT} '.join(age_categories)}"
+                        ]
                         if age_categories
                         else []
                     ),
@@ -2007,11 +2132,15 @@ def _render_budgeted_html(
         nearest = priority[0]
         nearest_delta = len(
             _render_event_card(
-                nearest, duration_minutes=duration_minutes, compact=False
+                nearest,
+                duration_minutes=duration_minutes,
+                compact=False,
             ).encode("utf-8")
         ) - len(
             _render_event_card(
-                nearest, duration_minutes=duration_minutes, compact=True
+                nearest,
+                duration_minutes=duration_minutes,
+                compact=True,
             ).encode("utf-8")
         )
         while len(priority) > 1 and html_bytes + nearest_delta > MAX_DIGEST_HTML_BYTES:
@@ -2025,10 +2154,14 @@ def _render_budgeted_html(
     for event in priority:
         identity = event_identity(event)
         compact_card = _render_event_card(
-            event, duration_minutes=duration_minutes, compact=True
+            event,
+            duration_minutes=duration_minutes,
+            compact=True,
         )
         full_card = _render_event_card(
-            event, duration_minutes=duration_minutes, compact=False
+            event,
+            duration_minutes=duration_minutes,
+            compact=False,
         )
         delta = len(full_card.encode("utf-8")) - len(compact_card.encode("utf-8"))
         if html_bytes + delta <= MAX_DIGEST_HTML_BYTES:
@@ -2127,7 +2260,8 @@ def build_digest(
     subject = (
         f"{len(source_included)} library "
         f"activit{'y' if len(source_included) == 1 else 'ies'} "
-        f"for {child_name} this week \U0001f4da | {_subject_week_range(week_start, week_end)}"
+        f"for {child_name} \U0001f4da {MIDDLE_DOT} "
+        f"{_subject_week_range(week_start, week_end)}"
     )
     return {
         "subject": subject,

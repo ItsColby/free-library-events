@@ -1,3 +1,18 @@
+# Free Library Events v2026.7.24
+
+## Changed
+
+- Refine the weekly email for phone-first reading with a concise subject and
+  header, separate time and location lines, larger touch targets and body copy,
+  edge-to-edge event artwork, useful source-backed highlights, the clearer
+  `Library age listing:` label, responsive branch-calendar links, and no visible
+  home-relative distance.
+- Return only CID image paths still referenced by the final budgeted HTML, so
+  compacted or omitted cards do not create unused SMTP attachments.
+- Use exact occurrence identities as native Home Assistant calendar UIDs so a
+  recurring series that shares one publisher URL cannot collapse separate
+  dates in calendar consumers.
+
 # Free Library Events v2026.7.23
 
 ## Changed

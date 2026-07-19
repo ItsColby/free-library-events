@@ -39,8 +39,10 @@
   by matching official age-feed classifications and then explicit inclusive
   text. Strong published wording can correct an overly narrow feed category;
   generic family wording cannot. Age classification controls inclusion and
-  ordering. Publisher age categories render in one muted `Listed for:` audience
-  line with the title, time, and location. Presentation highlights render in
+  ordering. Publisher age categories render in one muted `Library age listing:`
+  line with the title, time, and location so publisher provenance remains clear.
+  Time and map-linked location use separate mobile-friendly lines without
+  exposing home-relative distance. Presentation highlights render in
   that same scan-first metadata area and are derived deterministically from the
   RSS title, description, or explicit venue; title-redundant activity labels,
   broader equivalents of specific take-home details, audience-redundant breadth
@@ -48,8 +50,11 @@
   actionable cautions ahead of logistics and secondary topics; negated and
   audience-qualified claims are excluded. Safe contextual RSS links, paragraph
   boundaries, emphasis, and list structure are preserved through an allow-list
-  sanitizer. Presentation tables, percentage line heights, a complementary
-  hidden preheader, and table-cell spacing for day, card, and button layout
+  sanitizer. The concise subject avoids duplicating the date range, while the
+  header summarizes age matching and participating-library count. Presentation
+  tables, percentage line heights, a dynamic complementary hidden preheader,
+  a two-column touch-friendly branch-calendar fallback that stacks below 390
+  CSS pixels, and table-cell spacing for day, card, and button layout
   improve compatibility across email rendering engines. Linked event images use
   functional alternative text that identifies their official details page. By
   default, email clients load event
@@ -61,19 +66,22 @@
   remain on trusted publisher hosts,
   validates signatures and dimensions, and writes them to a random
   integration-owned run under the default-allowed `www` root, substitutes
-  basename-matched `cid:` sources, and returns the local paths for the caller's
-  legacy HTML/images-capable SMTP
-  notify action. The newer plain-text SMTP notify entity is outside this CID
+  basename-matched `cid:` sources, and returns only paths whose CIDs remain
+  referenced by the final budgeted HTML to the caller's legacy
+  HTML/images-capable SMTP notify action. The newer plain-text SMTP notify entity
+  is outside this CID
   contract. It never calls an LLM. Each run expires after one hour. Scheduled,
   pre-render stale, and startup cleanup remove owned run directories while
   marker and name checks preserve all other files. Transient transport/server
   failures, storage failures, and digest-level count/total-size limits may
   retain the already trusted publisher URL as a remote fallback; unsafe
   redirects, unsupported content, permanent HTTP failures, and individually
-  oversized files are omitted. Landscape images
-  use a full-width hero row; square and portrait images use the full width of an
-  unpadded side column, with a full-width body below. Image, heading, and body
-  stack in narrow clients. Explicit online events omit map links; hybrid events
+  oversized files are omitted. Landscape images use a full-width hero row;
+  square and portrait images use the full width of an unpadded side column,
+  including a compact thumbnail beside the scan-first metadata at common phone
+  widths. The mobile side-image column is 152 CSS pixels for poster legibility.
+  That side image and its heading stack at 390 CSS pixels or below; the body
+  remains full width below. Explicit online events omit map links; hybrid events
   retain their physical destination and name the online option. Explicit
   off-site venues or named/numbered rooms and floor locations refine the
   map/calendar destination without inventing data, while an off-site summary
@@ -81,9 +89,10 @@
   explicit RSS description range that matches the published start or a
   conservative whole-event duration statement; the digest and HA calendar both
   use that same evidence. Recurring rows use an occurrence identity containing
-  source URL/title, branch, date, and start time so a shared
-  series URL cannot collapse distinct dates. Response metadata retains both
-  simple publisher event IDs and exact occurrence IDs. Display titles,
+  source URL/title, branch, date, and start time across the digest and native HA
+  calendar so a shared series URL cannot collapse distinct dates. Response
+  metadata retains both simple publisher event IDs and exact occurrence IDs.
+  Display titles,
   descriptions, calendar details/URLs, event count, and the final HTML byte size
   have separate bounds. The renderer keeps chronological presentation, reserves
   rich cards for nearest branches when a large result requires compaction, and
@@ -100,8 +109,9 @@
 - `__init__.py` also calculates ephemeral branch distances from Home Assistant's
   native configured latitude/longitude and the integration's public branch
   coordinates. Distance only selects which occurrences retain rich cards when
-  the HTML budget is constrained. Coordinates and calculated distances are not
-  stored, logged, returned, or used to reorder the chronological email.
+  the HTML budget is constrained; it never renders in the email. Home
+  coordinates and calculated distances are not stored, logged, included in
+  response metadata, or used to reorder the chronological email.
 - `email_images.py` owns the deterministic publisher-image download limits,
   trusted redirect policy, dimension/orientation classification, CID filenames,
   integration-owned temporary storage, and guarded cleanup. Remote-image

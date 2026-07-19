@@ -81,6 +81,16 @@ RENDER_DIGEST_SCHEMA = vol.Schema(
 )
 
 
+def _referenced_embedded_image_paths(
+    rendered_html: str, image_paths: tuple[str, ...]
+) -> tuple[str, ...]:
+    """Return only stored CID images referenced by the final email HTML."""
+
+    return tuple(
+        path for path in image_paths if f'src="cid:{Path(path).name}"' in rendered_html
+    )
+
+
 async def async_setup(hass: HomeAssistant, config: dict[str, object]) -> bool:
     """Register the native response-returning digest action."""
 
@@ -291,6 +301,9 @@ async def _async_render_digest(call: ServiceCall) -> ServiceResponse:
     )
     response["metadata"]["fetched_at"] = coordinator.data.fetched_at.isoformat()
     if call.data[ATTR_EMBED_IMAGES]:
+        embedded_image_paths = _referenced_embedded_image_paths(
+            str(response["html"]), embedded_image_paths
+        )
         response["images"] = list(embedded_image_paths)
         response["metadata"]["embedded_image_count"] = len(embedded_image_paths)
         response["metadata"]["image_download_count"] = image_download_count
