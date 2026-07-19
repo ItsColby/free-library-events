@@ -26,7 +26,8 @@
   each selected branch, refreshes the plan concurrently, consolidates duplicate
   events while retaining their official classifications and richer safe fields,
   and preserves partial source success. It adaptively expands at most four
-  unresolved capped feeds per refresh, prioritizing current-age categories. A
+  unresolved capped feeds per refresh, prioritizing current-age categories and
+  sharing an eight-request concurrency ceiling across their type shards. A
   minor uses Baby through Young Adult; an adult uses Adult and Senior while
   retaining Young Adult only during its overlapping age window; a forward source
   window crossing adulthood uses both groups. It fails the update only when

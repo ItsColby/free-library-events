@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 import sys
@@ -26,6 +27,7 @@ except ModuleNotFoundError as err:  # pragma: no cover - local non-HA test env
     raise unittest.SkipTest(f"Home Assistant test harness unavailable: {err}") from err
 
 from custom_components.free_library_events.api import (  # noqa: E402
+    MAX_TYPE_SHARD_CONCURRENCY,
     OFFICIAL_EVENT_TYPES,
     BranchFeed,
     LibraryApiError,
@@ -392,6 +394,50 @@ async def test_client_keeps_recovered_rows_but_discloses_a_shard_failure() -> No
     assert len(expanded.type_shard_failures) == 1
     assert expanded.expanded_through is None
     assert not expanded.covers_through(date(2026, 7, 26))
+
+
+async def test_client_bounds_type_shard_concurrency() -> None:
+    branch = BRANCHES["CEN"]
+    base_feed = BranchFeed(
+        events=(),
+        age_category="Young Adult",
+        source_count=10,
+        parsed_count=10,
+        last_event_date=date(2026, 7, 24),
+        ordered=True,
+    )
+    active = 0
+    peak = 0
+
+    async def fetch_single(_branch, age_category, _event_type=None):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        await asyncio.sleep(0)
+        active -= 1
+        return BranchFeed(
+            events=(),
+            age_category=age_category,
+            source_count=0,
+            parsed_count=0,
+            last_event_date=None,
+            ordered=True,
+        )
+
+    client = LibraryClient(None)  # type: ignore[arg-type]
+    client._async_fetch_single = AsyncMock(side_effect=fetch_single)
+
+    await asyncio.gather(
+        *(
+            client.async_expand_feed(
+                branch, "Young Adult", base_feed, date(2026, 7, 26)
+            )
+            for _ in range(3)
+        )
+    )
+
+    assert peak == MAX_TYPE_SHARD_CONCURRENCY
+    assert active == 0
 
 
 async def test_client_base_fetch_does_not_expand() -> None:

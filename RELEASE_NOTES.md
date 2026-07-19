@@ -17,7 +17,8 @@
 - Distinguish the official ten-item supplemental age-feed limit (`limited`) from
   operational source or parsing failures (`partial`).
 - Bound adaptive type expansion to four capped feeds per refresh and prioritize
-  the configured person's current age categories before supplemental discovery.
+  the configured person's current age categories before supplemental discovery;
+  share an eight-request ceiling across all type shards.
 - Replace ambiguous status attributes with the next-week event count, cached
   events by branch, and separate current-age and supplemental-age coverage
   indicators.

@@ -11,6 +11,7 @@ import aiohttp
 from .digest import Branch, Event, event_identity, merge_events, parse_feed
 
 RSS_ITEM_LIMIT = 10
+MAX_TYPE_SHARD_CONCURRENCY = 8
 OFFICIAL_EVENT_TYPES = (
     "Arts and Crafts Programs",
     "Author Events",
@@ -73,6 +74,7 @@ class LibraryClient:
 
     def __init__(self, session: aiohttp.ClientSession) -> None:
         self._session = session
+        self._type_shard_semaphore = asyncio.Semaphore(MAX_TYPE_SHARD_CONCURRENCY)
 
     async def _async_get(self, url: str) -> bytes:
         async with self._session.get(
@@ -103,7 +105,7 @@ class LibraryClient:
 
         results = await asyncio.gather(
             *(
-                self._async_fetch_single(branch, age_category, event_type)
+                self._async_fetch_type_shard(branch, age_category, event_type)
                 for event_type in OFFICIAL_EVENT_TYPES
             ),
             return_exceptions=True,
@@ -139,6 +141,17 @@ class LibraryClient:
             type_shard_failures=tuple(failures),
             expanded_through=coverage_end if expansion_proves_coverage else None,
         )
+
+    async def _async_fetch_type_shard(
+        self,
+        branch: Branch,
+        age_category: str,
+        event_type: str,
+    ) -> BranchFeed:
+        """Fetch one type shard within the shared expansion concurrency limit."""
+
+        async with self._type_shard_semaphore:
+            return await self._async_fetch_single(branch, age_category, event_type)
 
     async def _async_fetch_single(
         self,

@@ -187,9 +187,10 @@ cached event counts by branch.
   they were assigned to a narrower child category, without mixing in an
   unclassified all-events feed. The RSS endpoint ignores `page=2`, so an
   unresolved capped feed is instead queried through all official event-type
-  filters and deduplicated. Expansion is bounded to four feeds per refresh and
-  prioritizes current-age categories. Coverage is proven only when every type
-  shard covers the digest horizon and recovers the capped base prefix. A healthy
+  filters and deduplicated. Expansion is bounded to four feeds per refresh,
+  shares an eight-request type-shard concurrency ceiling, and prioritizes
+  current-age categories. Coverage is proven only when every type shard covers
+  the digest horizon and recovers the capped base prefix. A healthy
   supplemental category that remains unresolved produces the honest `limited`
   status; operational failures remain `partial`. Relevant current-age coverage
   problems and operational supplemental failures are also disclosed in the
