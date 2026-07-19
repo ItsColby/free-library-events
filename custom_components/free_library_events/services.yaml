@@ -9,3 +9,10 @@ render_digest:
       default: true
       selector:
         boolean:
+    embed_images:
+      name: Embed event images
+      description: Download selected event images for inline SMTP display and return their temporary local paths. Files are deleted automatically after one hour.
+      required: false
+      default: false
+      selector:
+        boolean:

@@ -39,18 +39,72 @@
   by matching official age-feed classifications and then explicit inclusive
   text. Strong published wording can correct an overly narrow feed category;
   generic family wording cannot. Age classification controls inclusion and
-  ordering; it is not repeated as per-event presentation copy. Safe contextual
-  RSS links are preserved. Email clients auto-load event images only from the
-  publisher's HTTPS hosts, and explicit off-site venues or named/numbered rooms
-  refine location without inventing data. An end time is
-  accepted only from an explicit RSS description range that matches the
+  ordering. Publisher age categories render in one muted `Listed for:` audience
+  line with the title, time, and location. Presentation highlights render in
+  that same scan-first metadata area and are derived deterministically from the
+  RSS title, description, or explicit venue; title-redundant activity labels,
+  broader
+  equivalents of specific take-home details, audience-redundant breadth labels,
+  and generic taxonomy are omitted. At most five highlights render, with
+  actionable cautions ahead of logistics and secondary topics; negated and
+  audience-qualified claims are excluded. Safe contextual RSS links, paragraph
+  boundaries, emphasis, and list structure are preserved through an allow-list
+  sanitizer. Presentation tables,
+  percentage line heights, a complementary hidden preheader, and table-cell
+  spacing for day, card, and button layout improve compatibility across email
+  rendering engines. Linked event images use functional alternative text that
+  identifies their official-details
+  destination. By default, email clients load event images only from the
+  publisher's HTTPS hosts; the renderer keeps the publisher's working
+  dot-prefixed image paths and does not resolve a blank image field to the feed
+  URL. An explicit SMTP embedding option deterministically downloads only the
+  selected events' unique images through Home Assistant's shared HTTP session,
+  follows at most two HTTPS redirects that remain on trusted publisher hosts,
+  validates signatures and dimensions, and writes them to a random
+  integration-owned run under
+  the default-allowed `www` root, substitutes basename-matched `cid:` sources,
+  and returns the local paths for the caller's legacy HTML/images-capable SMTP
+  notify action. The newer plain-text SMTP notify entity is outside this CID
+  contract. It never calls an LLM. Each run expires after one hour; scheduled, pre-render stale, and startup
+  cleanup remove owned run directories while marker and name checks preserve all
+  other files. Transient transport/server failures, storage failures, and
+  digest-level count/total-size limits may retain the already trusted publisher
+  URL as a remote fallback; unsafe redirects, unsupported content, permanent
+  HTTP failures, and individually oversized files are omitted. Landscape images
+  use a full-width hero row; square and portrait images use the full width of an
+  unpadded side column, with a full-width body below. Image, heading, and body
+  stack in narrow clients. Explicit online events omit map links; hybrid events
+  retain their physical destination and name the online option. Explicit
+  off-site venues or named/numbered rooms and floor locations refine the
+  map/calendar destination without inventing data, while an off-site summary retains unlinked
+  hosting-branch context. An end time is accepted only from an explicit RSS
+  description range that matches the
   published start or a conservative whole-event duration statement; the digest
-  and HA calendar both use that same evidence. It does not call an LLM.
+  and HA calendar both use that same evidence. Recurring rows use an occurrence
+  identity containing source URL/title, branch, date, and start time so a shared
+  series URL cannot collapse distinct dates. Display titles, descriptions,
+  calendar details/URLs, event count, and the final HTML byte size have separate
+  bounds. The renderer keeps chronological presentation, reserves rich cards
+  for nearest branches when a large result requires compaction, and removes
+  farthest compact overflow only when necessary to remain within 80,000 UTF-8
+  bytes. It visibly discloses any email-only omission. It does not call an LLM.
 - `calendar.py`, `sensor.py`, and `button.py` expose the native user-facing
   calendar, diagnostic status, and manual refresh surfaces.
 - `__init__.py` registers the response-only `render_digest` action. The caller
   owns scheduling, recipient selection, and email delivery; no parallel sender
-  or scheduler exists inside the integration.
+  or scheduler exists inside the integration. Opt-in SMTP embedding adds
+  `images` plus bounded download and expiry metadata to the response, but the
+  immediately following caller-owned notify action remains the delivery owner.
+- `__init__.py` also calculates ephemeral branch distances from Home Assistant's
+  native configured latitude/longitude and the integration's public branch
+  coordinates. Distance only selects which occurrences retain rich cards when
+  the HTML budget is constrained. Coordinates and calculated distances are not
+  stored, logged, returned, or used to reorder the chronological email.
+- `email_images.py` owns the deterministic publisher-image download limits,
+  trusted redirect policy, dimension/orientation classification, CID filenames,
+  integration-owned temporary storage, and guarded cleanup. Remote-image
+  rendering remains the no-storage default so
+  generic response consumers do not receive unusable CID references.
 - `diagnostics.py` redacts child name and birth date and exposes only bounded
   per-source counts, type-expansion evidence, ordering, coverage boundaries, and
   health. High-volume shard failures remain available in on-demand diagnostics;
@@ -91,8 +145,12 @@ Protected event HTML and ICS endpoints are deliberately outside the runtime
 source boundary. Home Assistant's asynchronous HTTP clients receive the
 publisher's browser challenge on those routes, so page scraping would make
 refresh health dependent on an unsupported access path. The integration
-retains safe embedded RSS links and explicit venue/room wording but does not
-infer unavailable topic, registration, cost, or end-time fields.
+retains safe embedded RSS links and explicit venue/room wording. It does not
+fetch official structured event-page taxonomy, registration, cost, or end-time
+fields. It may derive narrow presentation highlights such as a secondary
+activity, accessibility format, outdoor setting, participation note, or
+published planning caution from reliable RSS wording; these labels do not change
+inclusion or source provenance.
 
 The actionable calendar and digest omit items whose published title marks the
 occurrence cancelled, canceled, postponed, or rescheduled. This avoids

@@ -1,3 +1,69 @@
+# Unreleased
+
+## Changed
+
+- Add opt-in, LLM-free SMTP image embedding to `render_digest`: bounded
+  publisher downloads are validated, stored under an integration-owned random
+  Home Assistant `www` run, rewritten to matching CID references, and returned
+  as notifier-ready local paths. Individual image failures omit only the image
+  and remain visible in bounded response metadata.
+- Rework each digest card into a larger full-column image beside scan-first
+  title, time, location, audience, and highlights, followed by a divided
+  full-width description and action row. Landscape artwork becomes a full-width
+  hero while square/portrait artwork uses the side column; both preserve the
+  publisher's aspect ratio without the prior mobile height cap.
+- Preserve safe publisher paragraphs, links, bold/emphasis, and list structure
+  while stripping scripts, styles, event handlers, and unsafe URLs.
+- Show all official age categories in one muted `Listed for:` audience line and
+  derive only useful, nonredundant highlights from reliable RSS wording. More
+  specific take-home details suppress broader activity labels, generic breadth
+  labels are omitted when the published audience already conveys them, and
+  source-backed provided materials remain visible. Activity labels already
+  obvious in the title and generic event-page taxonomy are omitted. Cap each
+  card at five highlights, prioritizing required actions, logistics, then
+  secondary topics, and reject negated or audience-qualified claims.
+- Bound display titles, descriptions, Google Calendar details/URLs, event count,
+  and final HTML at 80,000 UTF-8 bytes. When compaction is required, use
+  ephemeral distance from Home Assistant's configured location to public branch
+  coordinates to preserve rich cards for nearby branches without returning or
+  storing coordinates/distances; keep visible order chronological and disclose
+  any farthest overflow omission.
+- Preserve distinct recurring occurrences when a series reuses one event URL by
+  including branch, date, and start time in its identity.
+- Recognize explicit online and hybrid events, broader confidently named venue
+  types, rooms, and floors; omit misleading map links for online-only events and
+  retain the physical destination plus online context for hybrid events.
+- Restore a generic title after whitespace cleanup and match dynamic event icons
+  on whole words so titles such as `Community Party` and `Bread Making` do not
+  receive unrelated art/book icons.
+- Keep Google Calendar as the single direct calendar action and put one precise
+  placeholder-duration disclosure in the footer when any included event lacks
+  a published end time.
+- Keep an explicit off-site venue as the Maps/calendar destination while visibly
+  identifying the hosting branch outside the Maps link.
+- Replace technical source-health detail in the recipient body with one concise
+  completeness warning; retain errors, warnings, and supplemental evidence in
+  response metadata and diagnostics.
+- Add a complementary schedule-and-action preheader; improve highlight
+  size/contrast, harden preheader hiding, card/day spacing, and the calendar
+  button across email clients, use compatible percentage line heights, give
+  linked images functional alternative text, and hide decorative event emoji
+  from assistive technology.
+
+## Maintenance
+
+- Delete embedded-image runs one hour after rendering, purge expired runs before
+  later renders, and clear abandoned prior-process runs during setup. Strict run
+  names and ownership markers keep cleanup confined to integration-owned files.
+- Omit truly blank image fields instead of resolving them to the RSS endpoint,
+  while retaining the publisher's working dot-prefixed image paths; auto-load
+  event photos only from the Free Library's HTTPS hosts.
+- Follow at most two trusted publisher HTTPS image redirects, classify validated
+  image dimensions for layout, and use the original trusted remote URL only for
+  transient transport/server, storage, and digest-level count/total-size
+  failures. Unsafe redirects, unsupported content, permanent HTTP failures, and
+  individually oversized images remain omitted.
+
 # Free Library Events v2026.7.22
 
 ## Added

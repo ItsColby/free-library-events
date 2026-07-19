@@ -33,13 +33,25 @@ service is used at runtime.
   - plain-text message
   - responsive HTML email
   - bounded generation and source-coverage metadata
-- Each included event leads with the official description and includes a linked
-  location name, linked title and image, and a prefilled Google Calendar link
+- Optional LLM-free SMTP image embedding with bounded publisher downloads,
+  notifier-ready CID attachments, and automatic temporary-file cleanup
+- Each included event uses an orientation-aware responsive card: landscape
+  artwork spans the card, while square/portrait artwork sits beside the title,
+  time, location, audience, and planning highlights; the description and
+  prefilled Google Calendar link use the full width below
 - Safe contextual links embedded in official RSS descriptions remain clickable;
   non-HTTP links are discarded
-- Explicitly named off-site venues and rooms in published RSS text replace the
-  less-specific branch location when the wording is unambiguous
+- An explicitly named off-site venue in published RSS text replaces the branch
+  as the map/calendar destination, while a specifically named room refines the
+  branch location; an off-site listing still names its hosting branch
 - Event images preserve their published aspect ratio rather than being cropped
+- A muted audience line shows every official age category, while compact
+  highlights show only useful, nonredundant context proved by reliable RSS
+  wording: secondary activities, accessibility, participation, take-home
+  materials, weather or supply cautions, and registration. At most five are
+  shown, ordered as action needed, logistics, then secondary topics
+- Explicit online and hybrid wording changes location treatment without
+  turning incidental phrases such as “online play” into a virtual event
 
 ## Installation through HACS
 
@@ -121,18 +133,75 @@ called with `response_variable`.
 The digest states the child's conversational age once: weeks before 2 completed
 months, months through 23 months, half-years near the half-year mark below age
 5, and years thereafter. Each event keeps its description primary without
-repeating the matching rationale. An end time appears beside the start time only
-when the RSS description contains an explicit range matching the published
-start, including ranges whose first meridiem is unambiguous from that start, or a
-conservative whole-event duration such as a “90-minute class”; otherwise it is
-omitted. The location name
-links to Google Maps, while the title and image link to the official event.
+repeating the matching rationale. Source paragraph boundaries are preserved so
+multi-paragraph descriptions do not collapse into one dense block. On wider
+screens landscape artwork uses a full-width hero row; square and portrait
+artwork uses the full width of its side column without cropping. The full
+description uses the card width below, and narrow clients stack the image,
+heading, and body. Official age
+categories appear once in a muted `Listed for:` line directly with the title,
+time, and location. Strongly evidenced secondary activities, accessibility,
+participation, take-home materials, and planning details appear there as compact
+highlights, but a format already obvious in the title is not repeated. Action
+items are shown first, followed by logistics and then secondary topics, with a
+five-highlight cap. Negated or audience-qualified claims are not promoted. A
+more specific highlight suppresses its broader equivalent, and a generic breadth
+label is omitted when the published audience already conveys it. Generic
+event-page labels such as Family Programs, Storytimes, Children, and Family are
+also omitted. An end time appears beside the start time only when the RSS
+description contains an explicit range matching the published start, including
+ranges whose first meridiem is unambiguous from that start, or a conservative
+whole-event duration such as a “90-minute class”; otherwise it is omitted. The
+location name links to Google Maps, while the title and image link to the
+official event. An explicitly online event uses `Online` with no misleading map
+link. A hybrid event retains the physical destination and visibly names its
+online option.
 When the RSS text explicitly names an off-site park, square, playground,
-garden, or museum, that venue replaces the hosting branch as the map and
-calendar destination. Specifically named or numbered rooms are shown with their
-branch.
+garden, museum, community/recreation center, school, theater, studio, gallery,
+plaza, courtyard, field, pool, market, pavilion, campus, or center, that venue
+replaces the hosting branch as the map and calendar destination. Specifically
+named/numbered rooms and floor locations are shown with their
+branch. An off-site location line also identifies the hosting branch without
+making that context part of the Maps link.
 Contextual links embedded by the library remain linked in HTML and are listed
-after the description in plain text.
+after the description in plain text. The email-client-safe calendar button opens
+a prefilled Google Calendar event. The linked event title and image remain the
+route to the official details page, with functional image alternative text that
+names that destination. When the feed has no end time, both email bodies visibly
+disclose the configured placeholder used by the calendar link.
+
+For SMTP, set `embed_images: true` to make image display independent of the
+recipient's remote-image setting. This deterministic mode downloads only the
+unique publisher images used by the selected events, follows at most two
+publisher-hosted HTTPS redirects, validates signatures and dimensions, stores
+them in an integration-owned random run directory under
+Home Assistant's `www` directory, rewrites the matching HTML sources to SMTP
+`cid:` references, and returns the local paths as `digest.images`. It does not
+use an LLM. Downloads are limited to 12 images, 3 MiB per image, 15 MiB in
+total, four concurrent requests, and 15 seconds per request. A trusted original
+URL remains available as a remote-image fallback for transient transport/server,
+storage, and digest count/total-size limits. Unsupported content, untrusted or
+excessive redirects, oversized individual files, and permanent HTTP errors are
+omitted rather than relaxed. Image failure never suppresses its event; bounded
+failure details remain in response metadata.
+
+The HTML body is capped at 80,000 UTF-8 bytes. Long descriptions and calendar
+details are independently bounded. If a large week needs compact cards, Home
+Assistant's configured home coordinates prioritize which branches retain rich
+cards; the digest never stores or returns the home coordinates or calculated
+distances, and it keeps the visible events chronological. Farthest overflow is
+omitted only when compact cards cannot fit, with a visible link to the full
+branch calendars. Recurring events remain distinct by branch, date, and start
+time even when multiple occurrences share one official series URL.
+
+The caller must pass `digest.images` to an SMTP notify service that supports the
+legacy `data.html` and `data.images` fields in the immediately following action.
+The newer SMTP notify entity currently sends plain text and is not compatible
+with this HTML/CID flow. Every run is scheduled for deletion after one hour,
+expired runs are purged before later renders, and abandoned runs from a prior
+Home Assistant process are removed during integration setup. The dedicated
+directory and ownership marker prevent cleanup from deleting other `www`
+content.
 
 Example automation fragment:
 
@@ -141,20 +210,24 @@ actions:
   - action: free_library_events.render_digest
     data:
       force_refresh: true
+      embed_images: true
     response_variable: digest
 
-  # Replace notify.email with your configured email notifier.
+  # Replace notify.email with your HTML/images-capable SMTP notify service.
   - action: notify.email
     data:
       title: "{{ digest.subject }}"
       message: "{{ digest.message }}"
       data:
         html: "{{ digest.html }}"
+        images: "{{ digest.images }}"
 ```
 
 The automation or script calling the action owns its schedule, recipient, and
 email notifier. This integration deliberately does not store email addresses
-or send mail directly.
+or send mail directly. Leave `embed_images` false for non-SMTP notifiers or any
+caller that does not pass the returned `images` list; the default HTML continues
+to use the publisher's HTTPS image URLs and creates no local files.
 
 ## Diagnostics and failures
 
@@ -204,17 +277,23 @@ cached event counts by branch.
 - One malformed RSS item is skipped without discarding the rest of its feed.
   Remote item counts and field sizes are also bounded. The
   published-versus-parsed count remains visible as `partial` source health.
-- Structurally empty image filenames from the official feed are omitted instead
-  of rendering a broken image. Email clients auto-load images only from the Free
+- Blank image fields are omitted instead of resolving to the feed URL. The
+  publisher's unusual but working dot-prefixed image paths (for example,
+  `.../.jpg`) are retained. Email clients auto-load images only from the Free
   Library's HTTPS hosts, and valid event photos retain their full aspect ratio.
-- The feeds provide start times but no structured end times, topic tags,
+- The feeds provide start times but no structured end times, event-type/series
+  tags,
   registration links, or cost fields. The public event pages are protected by a
   browser challenge: direct tests with Home Assistant's asynchronous HTTP
   clients returned challenge responses even when browser and command-line
   clients could load the same URL. They are therefore not a reliable portable
   Home Assistant data source. The
   digest therefore uses an explicit time range from the RSS description when
-  available, omits unavailable fields, and keeps the official event link. Google
+  available, omits unavailable fields, and keeps the official event link.
+  Official structured event-page taxonomy is not fetched at runtime. Official
+  age categories come from the feeds, and deterministic presentation highlights
+  are derived only from reliable RSS title, description, and explicit-venue
+  wording. Highlights are suppressed when they merely repeat the title. Google
   Calendar links disclose any configured placeholder duration they use.
 - RSS description hyperlinks, explicit off-site venue names, and specifically
   named rooms are retained because they arrive through the same reliable feed;
@@ -240,11 +319,12 @@ Python 3.14 is required for the Home Assistant 2026.7 test boundary.
 
 ```powershell
 python -m unittest discover -s tests -p "test_digest.py"
+python -m unittest discover -s tests -p "test_email_images.py"
 python -m unittest discover -s tests -p "test_public_safety.py"
 python -m compileall -q custom_components\free_library_events tests scripts
 python scripts\check_public_safety.py
 python -m pip install -r requirements-ha-test.txt
-python -m pytest tests\test_integration_ha.py -q
+python -m pytest tests\test_integration_ha.py tests\test_email_images.py -q
 ```
 
 GitHub validation also runs Hassfest and the HACS Action. See

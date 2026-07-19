@@ -31,6 +31,7 @@ Use Python 3.14 and run:
 
 ```powershell
 python -m unittest discover -s tests -p "test_digest.py"
+python -m unittest discover -s tests -p "test_email_images.py"
 python -m unittest discover -s tests -p "test_public_safety.py"
 python -m compileall -q custom_components\free_library_events tests scripts
 python scripts\check_public_safety.py

@@ -11,7 +11,7 @@ from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timedelta
 from html.parser import HTMLParser
 from itertools import groupby
-from typing import Literal, Sequence
+from typing import Literal, Mapping, Sequence
 
 
 TIMEZONE = "America/New_York"
@@ -24,6 +24,13 @@ MAX_EVENT_DESCRIPTION_LENGTH = 50_000
 MAX_EVENT_TITLE_LENGTH = 500
 MAX_PARSED_RSS_ITEMS = 100
 MAX_URL_LENGTH = 2_048
+MAX_DISPLAY_TITLE_LENGTH = 180
+MAX_CARD_DESCRIPTION_CHARS = 1_800
+MAX_CALENDAR_DETAILS_CHARS = 1_200
+MAX_CALENDAR_URL_LENGTH = 4_096
+MAX_DIGEST_HTML_BYTES = 80_000
+MAX_EMAIL_EVENTS = 100
+MAX_EVENT_CHIPS = 5
 TRUSTED_IMAGE_HOSTS = frozenset({"libwww.freelibrary.org", "www.freelibrary.org"})
 
 # Stable source taxonomy with intentionally overlapping local windows. The
@@ -59,6 +66,8 @@ class Branch:
     code: str
     name: str
     address: str
+    latitude: float
+    longitude: float
 
     @property
     def rss_url(self) -> str:
@@ -89,21 +98,29 @@ BRANCHES = {
         code="SWK",
         name="Charles Santore Library",
         address="932 South 7th Street, Philadelphia, PA 19147",
+        latitude=39.937044,
+        longitude=-75.155274,
     ),
     "IND": Branch(
         code="IND",
         name="Independence Library",
         address="18 South 7th Street, Philadelphia, PA 19106-2314",
+        latitude=39.9504517,
+        longitude=-75.1524099,
     ),
     "CEN": Branch(
         code="CEN",
         name="Parkway Central Library",
         address="1901 Vine Street, Philadelphia, PA 19103-1189",
+        latitude=39.959302,
+        longitude=-75.171102,
     ),
     "PCI": Branch(
         code="PCI",
         name="Philadelphia City Institute",
         address="1905 Locust Street, Philadelphia, PA 19103-5730",
+        latitude=39.949453,
+        longitude=-75.173354,
     ),
 }
 
@@ -131,8 +148,12 @@ class Event:
     age_categories: tuple[str, ...] = ()
     end_at: datetime | None = None
     description_links: tuple[DescriptionLink, ...] = ()
+    description_html: str = ""
     venue: str = ""
     room: str = ""
+    modality: Literal["in_person", "online", "hybrid"] = "in_person"
+    image_layout: Literal["side", "hero"] = "side"
+    description_truncated: bool = False
 
     @property
     def starts_at(self) -> datetime:
@@ -173,11 +194,20 @@ class _HTMLTextExtractor(HTMLParser):
         self.links: list[DescriptionLink] = []
         self._link_url = ""
         self._link_parts: list[str] | None = None
+        self._suppressed_depth = 0
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         tag = tag.lower()
-        if tag in {"br", "p", "li", "div"}:
+        if self._suppressed_depth:
+            self._suppressed_depth += 1
+            return
+        if tag in {"script", "style"}:
+            self._suppressed_depth = 1
+            return
+        if tag == "br":
             self.parts.append("\n")
+        elif tag in {"p", "li", "div"}:
+            self.parts.append("\n\n")
         if tag == "a":
             values = {key.lower(): value or "" for key, value in attrs}
             self._link_url = _safe_http_url(values.get("href", ""), self.base_url)
@@ -185,8 +215,11 @@ class _HTMLTextExtractor(HTMLParser):
 
     def handle_endtag(self, tag: str) -> None:
         tag = tag.lower()
+        if self._suppressed_depth:
+            self._suppressed_depth -= 1
+            return
         if tag in {"p", "li", "div"}:
-            self.parts.append("\n")
+            self.parts.append("\n\n")
         if tag == "a" and self._link_parts is not None:
             label = " ".join(" ".join(self._link_parts).split())
             if self._link_url and label:
@@ -198,13 +231,171 @@ class _HTMLTextExtractor(HTMLParser):
             self._link_parts = None
 
     def handle_data(self, data: str) -> None:
+        if self._suppressed_depth:
+            return
         self.parts.append(data)
         if self._link_parts is not None:
             self._link_parts.append(data)
 
     def text(self) -> str:
         lines = [" ".join(line.split()) for line in "".join(self.parts).splitlines()]
-        return "\n".join(line for line in lines if line)
+        normalized: list[str] = []
+        pending_paragraph = False
+        for line in lines:
+            if line:
+                if pending_paragraph and normalized:
+                    normalized.append("")
+                normalized.append(line)
+                pending_paragraph = False
+            elif normalized:
+                pending_paragraph = True
+        return "\n".join(normalized)
+
+
+class _HTMLDescriptionSanitizer(HTMLParser):
+    """Preserve safe publisher emphasis and structure for email rendering."""
+
+    _PARAGRAPH = (
+        '<p class="event-description-paragraph" '
+        'style="margin:0 0 12px;color:#3c4043;font-size:15px;line-height:160%">'
+    )
+    _LIST = ' style="margin:0 0 12px;padding-left:22px;color:#3c4043;font-size:15px;line-height:160%"'
+    _ITEM = ' style="margin:0 0 5px"'
+    _LINK_STYLE = (
+        'style="color:#174ea6;text-decoration:underline;'
+        'text-decoration-color:#a8c7fa;text-underline-offset:3px"'
+    )
+
+    def __init__(self, base_url: str = "") -> None:
+        super().__init__(convert_charrefs=True)
+        self.base_url = base_url
+        self.parts: list[str] = []
+        self._stack: list[tuple[str, str]] = []
+        self._suppressed_depth = 0
+
+    def _close_from(self, index: int) -> None:
+        for _source_tag, output_tag in reversed(self._stack[index:]):
+            self.parts.append(f"</{output_tag}>")
+        del self._stack[index:]
+
+    def _close_open_paragraph(self) -> None:
+        matching_index = next(
+            (
+                index
+                for index in range(len(self._stack) - 1, -1, -1)
+                if self._stack[index][1] == "p"
+            ),
+            -1,
+        )
+        if matching_index >= 0:
+            self._close_from(matching_index)
+
+    def _ensure_text_container(self) -> None:
+        if any(output_tag in {"p", "li"} for _source, output_tag in self._stack):
+            return
+        if any(output_tag in {"ul", "ol"} for _source, output_tag in self._stack):
+            self.parts.append(f"<li{self._ITEM}>")
+            self._stack.append(("__implicit_list_item__", "li"))
+            return
+        self.parts.append(self._PARAGRAPH)
+        self._stack.append(("__implicit_paragraph__", "p"))
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        tag = tag.lower()
+        if self._suppressed_depth:
+            self._suppressed_depth += 1
+            return
+        if tag in {"script", "style"}:
+            self._suppressed_depth = 1
+            return
+        if tag == "br":
+            self._ensure_text_container()
+            self.parts.append("<br>")
+            return
+
+        output_tag = ""
+        if tag in {"p", "div"}:
+            self._close_open_paragraph()
+            output_tag = "p"
+            self.parts.append(self._PARAGRAPH)
+        elif tag in {"strong", "b"}:
+            self._ensure_text_container()
+            output_tag = "strong"
+            self.parts.append("<strong>")
+        elif tag in {"em", "i"}:
+            self._ensure_text_container()
+            output_tag = "em"
+            self.parts.append("<em>")
+        elif tag in {"ul", "ol"}:
+            self._close_open_paragraph()
+            output_tag = tag
+            self.parts.append(f"<{tag}{self._LIST}>")
+        elif tag == "li":
+            self._close_open_paragraph()
+            open_item_index = next(
+                (
+                    index
+                    for index in range(len(self._stack) - 1, -1, -1)
+                    if self._stack[index][1] == "li"
+                ),
+                -1,
+            )
+            if open_item_index >= 0:
+                self._close_from(open_item_index)
+            if not any(output in {"ul", "ol"} for _source, output in self._stack):
+                self.parts.append(f"<ul{self._LIST}>")
+                self._stack.append(("__implicit_list__", "ul"))
+            output_tag = "li"
+            self.parts.append(f"<li{self._ITEM}>")
+        elif tag == "a":
+            values = {key.lower(): value or "" for key, value in attrs}
+            href = _safe_http_url(values.get("href", ""), self.base_url)
+            if href:
+                self._ensure_text_container()
+                output_tag = "a"
+                self.parts.append(
+                    f'<a href="{html.escape(href, quote=True)}" {self._LINK_STYLE}>'
+                )
+        if output_tag:
+            self._stack.append((tag, output_tag))
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.handle_starttag(tag, attrs)
+        if tag.lower() != "br":
+            self.handle_endtag(tag)
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        if self._suppressed_depth:
+            self._suppressed_depth -= 1
+            return
+        if tag in {"p", "div"}:
+            self._close_open_paragraph()
+            return
+        matching_index = next(
+            (
+                index
+                for index in range(len(self._stack) - 1, -1, -1)
+                if self._stack[index][0] == tag
+            ),
+            -1,
+        )
+        if matching_index < 0:
+            return
+        self._close_from(matching_index)
+
+    def handle_data(self, data: str) -> None:
+        if self._suppressed_depth:
+            return
+        if not data.strip() and not self._stack:
+            return
+        self._ensure_text_container()
+        self.parts.append(html.escape(data))
+
+    def rendered_html(self) -> str:
+        if self._stack:
+            self._close_from(0)
+        return "".join(self.parts).strip()
 
 
 def next_week_start(reference_date: date) -> date:
@@ -429,13 +620,50 @@ def _description_data(
 ) -> tuple[str, tuple[DescriptionLink, ...]]:
     extractor = _HTMLTextExtractor(base_url)
     extractor.feed(_repair_bare_numeric_entities(raw_html))
+    extractor.close()
     value = html.unescape(extractor.text()).strip()
     if trailer and value.endswith(trailer):
         value = value[: -len(trailer)].rstrip()
     return value, tuple(extractor.links)
 
 
-_VENUE_NAME = r"[A-Z][A-Za-z0-9&' .-]{1,70}?(?:Park|Square|Playground|Garden|Museum)"
+def _description_render_html(
+    raw_html: str,
+    trailer: str,
+    base_url: str = "",
+) -> str:
+    """Return a small, email-safe subset of the publisher's description HTML."""
+
+    sanitizer = _HTMLDescriptionSanitizer(base_url)
+    sanitizer.feed(_repair_bare_numeric_entities(raw_html))
+    sanitizer.close()
+    value = sanitizer.rendered_html()
+    if trailer:
+        escaped_trailer = html.escape(trailer)
+        trailer_index = value.rfind(escaped_trailer)
+        if trailer_index >= 0 and re.fullmatch(
+            r"(?:\s|</?(?:p|strong|em|ul|ol|li|a)(?:\s[^>]*)?>|<br>)*",
+            value[trailer_index + len(escaped_trailer) :],
+        ):
+            value = (
+                value[:trailer_index] + value[trailer_index + len(escaped_trailer) :]
+            )
+    value = re.sub(
+        r'<p class="event-description-paragraph"[^>]*>\s*</p>',
+        "",
+        value,
+    ).strip()
+    if value and not re.search(r"<(?:p|ul|ol)\b", value):
+        value = f"{_HTMLDescriptionSanitizer._PARAGRAPH}{value}</p>"
+    return value
+
+
+_VENUE_SUFFIX = (
+    r"Park|Square|Playground|Garden|Museum|Community Center|Recreation Center|"
+    r"Rec Center|School|Theater|Theatre|Studio|Gallery|Plaza|Courtyard|Field|"
+    r"Pool|Market|Pavilion|Campus|Center"
+)
+_VENUE_NAME = rf"[A-Z][A-Za-z0-9&' .-]{{1,70}}?(?:{_VENUE_SUFFIX})"
 _TITLE_VENUE_RE = re.compile(
     rf"\bat\s+(?P<venue>{_VENUE_NAME})\s*[!?.]*$",
     re.IGNORECASE,
@@ -446,13 +674,21 @@ _DESCRIPTION_VENUE_RES = (
         re.IGNORECASE,
     ),
     re.compile(rf"\bjoin us in\s+(?P<venue>{_VENUE_NAME})\b", re.IGNORECASE),
+    re.compile(rf"\bmeet us at\s+(?P<venue>{_VENUE_NAME})\b", re.IGNORECASE),
+    re.compile(rf"\blocated at\s+(?P<venue>{_VENUE_NAME})\b", re.IGNORECASE),
 )
 _ROOM_RES = (
     re.compile(
         r"\b(?:[Tt]he|[Oo]ur)[ \t]+"
-        r"(?P<room>[A-Z][A-Za-z0-9&' -]{1,60}[ \t]+Room)\b"
+        r"(?P<room>[A-Z][A-Za-z0-9&' -]{1,60}[ \t]+"
+        r"(?:Room|Auditorium|Department|Center|Studio|Gallery|Courtyard|Pavilion))\b"
     ),
     re.compile(r"\b(?P<room>Room[ \t]+(?:[A-Z]|\d{1,4}[A-Za-z]?))\b"),
+    re.compile(
+        r"\b(?P<room>(?:first|second|third|fourth|fifth|lower|ground)[ -]floor"
+        r"(?:[ A-Za-z0-9&'-]{0,40})?)\b",
+        re.IGNORECASE,
+    ),
 )
 
 
@@ -496,20 +732,46 @@ def clean_title(raw_title: str, branch: Branch) -> str:
     if value.endswith(suffix):
         value = value[: -len(suffix)]
     value = re.sub(r"\bBaby\s{2,}Toddler\b", "Baby & Toddler", value)
-    return value.replace("Storytime  Playgroup", "Storytime & Playgroup").strip()
+    value = value.replace("Storytime  Playgroup", "Storytime & Playgroup").strip()
+    return value or "Library event"
+
+
+_ONLINE_EVENT_RE = re.compile(
+    r"\b(?:virtual|online)\s+(?:event|program|class|session|workshop|storytime)\b|"
+    r"\b(?:via|on)\s+Zoom\b|\bjoin us online\b",
+    re.IGNORECASE,
+)
+_IN_PERSON_EVENT_RE = re.compile(
+    r"\bin[ -]person\b|\b(?:at|inside)\s+the\s+library\b",
+    re.IGNORECASE,
+)
+
+
+def event_modality(
+    title: str, description: str
+) -> Literal["in_person", "online", "hybrid"]:
+    """Return modality only when the publisher uses explicit event wording."""
+
+    searchable = f"{title}\n{description}"
+    if re.search(r"\bhybrid\b", searchable, re.IGNORECASE) or (
+        _ONLINE_EVENT_RE.search(searchable) and _IN_PERSON_EVENT_RE.search(searchable)
+    ):
+        return "hybrid"
+    if _ONLINE_EVENT_RE.search(searchable):
+        return "online"
+    return "in_person"
 
 
 def clean_image_url(raw_url: str, base_url: str = "") -> str:
-    """Return a safe image URL, excluding structurally empty feed values."""
+    """Return a publisher-hosted HTTPS image URL."""
 
     value = raw_url.strip().replace("\\", "/")
+    if not value:
+        return ""
     url = _safe_http_url(value, base_url)
     if not url:
         return ""
     parsed = urllib.parse.urlparse(url)
-    filename = parsed.path.rsplit("/", 1)[-1]
-    if filename.lower() in {".gif", ".jpeg", ".jpg", ".png", ".webp"}:
-        return ""
     hostname = (parsed.hostname or "").lower()
     return url if parsed.scheme == "https" and hostname in TRUSTED_IMAGE_HOSTS else ""
 
@@ -539,8 +801,14 @@ def parse_feed(
             item.findtext("guid") or ""
         )
         trailer = f"{start_date_text}, {start_time_text} - {branch.name}"
+        raw_description = item.findtext("description") or ""
         description, description_links = _description_data(
-            item.findtext("description") or "",
+            raw_description,
+            trailer,
+            link or branch.calendar_url,
+        )
+        description_html = _description_render_html(
+            raw_description,
             trailer,
             link or branch.calendar_url,
         )
@@ -565,8 +833,10 @@ def parse_feed(
                 age_categories=(age_category,) if age_category else (),
                 end_at=explicit_end_at(event_date, start_time, description),
                 description_links=description_links,
+                description_html=description_html,
                 venue=explicit_venue(title, description),
                 room=explicit_room(description),
+                modality=event_modality(title, description),
             )
         )
     return events, len(items)
@@ -588,16 +858,22 @@ def merge_events(events: Sequence[Event]) -> list[Event]:
             description_links = tuple(
                 dict.fromkeys((*existing.description_links, *event.description_links))
             )
+            richer_description_event = max(
+                (existing, event),
+                key=lambda candidate: (
+                    len(candidate.description),
+                    bool(candidate.description_html),
+                    len(candidate.description_html),
+                ),
+            )
             merged[key] = replace(
                 existing,
-                description=max(
-                    (existing.description, event.description),
-                    key=lambda value: len(value),
-                ),
+                description=richer_description_event.description,
                 image_url=existing.image_url or event.image_url,
                 age_categories=age_categories,
                 end_at=existing.end_at or event.end_at,
                 description_links=description_links,
+                description_html=richer_description_event.description_html,
                 venue=existing.venue or event.venue,
                 room=existing.room or event.room,
             )
@@ -607,10 +883,12 @@ def merge_events(events: Sequence[Event]) -> list[Event]:
 
 
 def event_identity(event: Event) -> str:
-    """Return a stable identity even when an item omits its details URL."""
+    """Return a stable occurrence identity, including for recurring series URLs."""
 
-    return event.link or (
-        f"{event.branch.code}:{event.event_date}:{event.start_time}:{event.title}"
+    source = event.link or event.title
+    return (
+        f"{source}:{event.branch.code}:{event.event_date.isoformat()}:"
+        f"{event.start_time.isoformat()}"
     )
 
 
@@ -866,13 +1144,13 @@ def matching_events(
 
 def icon_for(event: Event) -> str:
     text = event.title.lower()
-    if any(term in text for term in ("read", "story", "book")):
+    if re.search(r"\b(?:read(?:ing)?|story(?:time)?|books?)\b", text):
         return "\U0001f4da"
-    if any(term in text for term in ("music", "sing", "karaoke")):
+    if re.search(r"\b(?:music|sing(?:ing)?|karaoke)\b", text):
         return "\U0001f3b5"
-    if any(term in text for term in ("craft", "origami", "art")):
+    if re.search(r"\b(?:crafts?|origami|art)\b", text):
         return "\U0001f3a8"
-    if any(term in text for term in ("playgroup", "play group", "playtime")):
+    if re.search(r"\b(?:playgroup|play group|playtime)\b", text):
         return "\U0001f9f8"
     return "\N{SPARKLES}"
 
@@ -880,23 +1158,43 @@ def icon_for(event: Event) -> str:
 def event_location_name(event: Event) -> str:
     """Return the most specific confidently published location name."""
 
+    if event.modality == "online":
+        return "Online"
     return event.venue or event.branch.name
 
 
-def event_location_summary(event: Event) -> str:
-    """Return the visible venue plus useful within-building room detail."""
+def event_location_label(event: Event) -> str:
+    """Return only the place and room represented by the map destination."""
 
     location = event_location_name(event)
-    return f"{location} {MIDDLE_DOT} {event.room}" if event.room else location
+    if event.modality == "online":
+        return location
+    location = f"{location} {MIDDLE_DOT} {event.room}" if event.room else location
+    if event.modality == "hybrid":
+        location += f" {MIDDLE_DOT} Online option"
+    return location
+
+
+def event_location_summary(event: Event) -> str:
+    """Return the visible venue, room, and off-site hosting context."""
+
+    summary = event_location_label(event)
+    if event.venue and event.modality != "online":
+        summary += f" {MIDDLE_DOT} Hosted by {event.branch.name}"
+    return summary
 
 
 def event_calendar_location(event: Event) -> str:
     """Return a geocodable calendar location without a redundant email address."""
 
+    if event.modality == "online":
+        return "Online"
     if event.venue:
-        return f"{event.venue}, Philadelphia, PA"
+        location = f"{event.venue}, Philadelphia, PA"
+        return f"{location} (hybrid)" if event.modality == "hybrid" else location
     room = f", {event.room}" if event.room else ""
-    return f"{event.branch.name}{room}, {event.branch.address}"
+    location = f"{event.branch.name}{room}, {event.branch.address}"
+    return f"{location} (hybrid)" if event.modality == "hybrid" else location
 
 
 def related_link_lines(event: Event) -> list[str]:
@@ -914,26 +1212,44 @@ def event_details_url(event: Event) -> str:
     return event.link or event.branch.calendar_url
 
 
-def google_calendar_url(event: Event, duration_minutes: int) -> str:
+def google_calendar_url(
+    event: Event,
+    duration_minutes: int,
+    *,
+    compact: bool = False,
+) -> str:
     end = event.end_at or event.starts_at + timedelta(minutes=duration_minutes)
-    detail_parts = [event.description, *related_link_lines(event)]
-    details = "\n\n".join(detail_parts)
+    detail_parts = (
+        []
+        if compact
+        else [
+            _bounded_text(event.description, MAX_CALENDAR_DETAILS_CHARS),
+            *related_link_lines(event),
+        ]
+    )
+    details = "\n\n".join(part for part in detail_parts if part)
     details += f"\n\nOfficial event details: {event_details_url(event)}"
     if event.end_at is None:
         details += (
             "\n\nThe library did not publish an end time. "
             f"The {duration_minutes}-minute duration is a calendar placeholder."
         )
-    return "https://calendar.google.com/calendar/render?" + urllib.parse.urlencode(
-        {
-            "action": "TEMPLATE",
-            "text": event.title,
-            "dates": f"{event.starts_at:%Y%m%dT%H%M%S}/{end:%Y%m%dT%H%M%S}",
-            "ctz": TIMEZONE,
-            "location": event_calendar_location(event),
-            "details": details,
-        }
-    )
+    parameters = {
+        "action": "TEMPLATE",
+        "text": _bounded_text(event.title, MAX_DISPLAY_TITLE_LENGTH),
+        "dates": f"{event.starts_at:%Y%m%dT%H%M%S}/{end:%Y%m%dT%H%M%S}",
+        "ctz": TIMEZONE,
+        "location": event_calendar_location(event),
+        "details": details,
+    }
+    base = "https://calendar.google.com/calendar/render?"
+    url = base + urllib.parse.urlencode(parameters)
+    while len(url) > MAX_CALENDAR_URL_LENGTH and parameters["details"]:
+        overflow = len(url) - MAX_CALENDAR_URL_LENGTH
+        target = max(0, len(parameters["details"]) - overflow - 32)
+        parameters["details"] = _bounded_text(parameters["details"], target)
+        url = base + urllib.parse.urlencode(parameters)
+    return url
 
 
 def directions_url(branch: Branch) -> str:
@@ -945,11 +1261,25 @@ def directions_url(branch: Branch) -> str:
 def event_directions_url(event: Event) -> str:
     """Return a map link for an explicit venue or the hosting branch."""
 
+    if event.modality == "online":
+        return ""
     if not event.venue:
         return directions_url(event.branch)
     return "https://www.google.com/maps/search/?" + urllib.parse.urlencode(
         {"api": "1", "query": f"{event.venue}, Philadelphia, PA"}
     )
+
+
+def _bounded_text(value: str, maximum: int) -> str:
+    """Shorten display text at a word boundary and mark the omission."""
+
+    normalized = " ".join(value.split())
+    if len(normalized) <= maximum:
+        return normalized
+    if maximum <= 1:
+        return "" if maximum == 0 else "\N{HORIZONTAL ELLIPSIS}"
+    clipped = normalized[: maximum - 1].rsplit(" ", 1)[0].rstrip(" ,;:")
+    return (clipped or normalized[: maximum - 1]).rstrip() + "\N{HORIZONTAL ELLIPSIS}"
 
 
 def _description_html(event: Event) -> str:
@@ -981,14 +1311,231 @@ def _description_html(event: Event) -> str:
     return "".join(parts)
 
 
+def _description_paragraphs_html(event: Event) -> str:
+    """Render sanitized rich HTML, with a plain-text fallback for older events."""
+
+    if event.description_html:
+        return event.description_html
+
+    paragraphs = re.split(r"\n{2,}", _description_html(event).strip())
+    rendered: list[str] = []
+    for index, paragraph in enumerate(paragraphs):
+        if not paragraph:
+            continue
+        margin = "0" if index == len(paragraphs) - 1 else "0 0 12px"
+        rendered.append(
+            '<p class="event-description-paragraph" '
+            f'style="margin:{margin};color:#3c4043;font-size:15px;line-height:160%">'
+            f"{paragraph.replace(chr(10), '<br>')}</p>"
+        )
+    return "".join(rendered)
+
+
+def _event_chip_specs(event: Event) -> tuple[tuple[str, str], ...]:
+    """Return bounded, prioritized highlights provable from publisher wording."""
+
+    topic_chips: list[tuple[str, str]] = []
+    logistics_chips: list[tuple[str, str]] = []
+    action_chips: list[tuple[str, str]] = []
+    searchable = f"{event.title}\n{event.description}"
+    activity_rules = (
+        (r"\bstorytimes?\b", r"\bstorytimes?\b", "Storytime"),
+        (
+            r"\bmusic program\b|\blive music\b|\bsing[ -]?along\b",
+            r"\bmusic\b|\bsing[ -]?along\b",
+            "Music",
+        ),
+        (r"\bplaygroups?\b", r"\bplaygroups?\b", "Playgroup"),
+        (r"\bplaytimes?\b", r"\bplaytimes?\b", "Playtime"),
+        (
+            r"\b(?:crafts?|crafting|crafternoon)\b",
+            r"\b(?:crafts?|crafting|crafternoon)\b",
+            "Crafts",
+        ),
+        (r"\bAAC\b", r"\bAAC\b", "AAC"),
+    )
+    for source_pattern, title_pattern, label in activity_rules:
+        if re.search(source_pattern, searchable, re.IGNORECASE) and not re.search(
+            title_pattern, event.title, re.IGNORECASE
+        ):
+            topic_chips.append(("topic", label))
+    if re.search(r"\b(?:outdoor|outdoors|outside)\b", searchable, re.IGNORECASE) or (
+        event.venue
+        and re.search(
+            r"\b(?:park|square|playground|garden)\b",
+            event.venue,
+            re.IGNORECASE,
+        )
+    ):
+        logistics_chips.append(("logistics", "Outdoors"))
+    take_home_craft = re.search(
+        r"\b(?:to-go|take[ -]home)\s+(?:a\s+)?craft\b",
+        searchable,
+        re.IGNORECASE,
+    )
+    if take_home_craft:
+        topic_chips = [chip for chip in topic_chips if chip != ("topic", "Crafts")]
+        logistics_chips.append(("logistics", "Take-home craft"))
+    if re.search(r"\bsiblings? (?:are )?welcome\b", searchable, re.IGNORECASE):
+        logistics_chips.append(("logistics", "Siblings welcome"))
+    if re.search(
+        r"\b(?:kids|children) of all ages\b|\beven the littlest\b",
+        searchable,
+        re.IGNORECASE,
+    ):
+        logistics_chips.append(("logistics", "All ages welcome"))
+    elif (
+        re.search(r"\brange of ages\b", searchable, re.IGNORECASE)
+        and len(set(event.age_categories)) <= 1
+    ):
+        logistics_chips.append(("logistics", "Broad ages"))
+    aac_board_provided = re.search(
+        r"\b(?:receive|provided|given)[^.]{0,50}\bAAC boards?\b|"
+        r"\bAAC boards?\b[^.]{0,50}\b(?:take home|provided)\b",
+        searchable,
+        re.IGNORECASE,
+    )
+    aac_board_negated = re.search(
+        r"\bAAC boards?\b[^.]{0,35}\b(?:not|aren't|are not)\s+provided\b|"
+        r"\b(?:no|without)\s+AAC boards?\b",
+        searchable,
+        re.IGNORECASE,
+    )
+    if aac_board_provided and not aac_board_negated:
+        logistics_chips.append(("logistics", "AAC board provided"))
+    weather_warning = re.search(
+        r"\b(?:unfavorable|inclement|cooler|warmer) weather\b|"
+        r"\bweather permitting\b|\bweather[^.]{0,45}\bcancel",
+        searchable,
+        re.IGNORECASE,
+    )
+    weather_negated = re.search(
+        r"\b(?:will|does|do) not be cancelled for weather\b|"
+        r"\bregardless of (?:the )?weather\b",
+        searchable,
+        re.IGNORECASE,
+    )
+    if weather_warning and not weather_negated:
+        action_chips.append(("action", "Weather dependent"))
+    if re.search(r"\bwhile supplies last\b", searchable, re.IGNORECASE):
+        action_chips.append(("action", "Limited supplies"))
+    registration_required = re.search(
+        r"\b(?:advance\s+)?registration\s+(?:is\s+)?required\b",
+        searchable,
+        re.IGNORECASE,
+    )
+    registration_not_required = re.search(
+        r"\b(?:no registration|registration (?:is )?not required)\b",
+        searchable,
+        re.IGNORECASE,
+    )
+    registration_qualified = re.search(
+        r"\bregistration\s+(?:is\s+)?required\s+for\s+(?:adults?|caregivers?)\s+only\b",
+        searchable,
+        re.IGNORECASE,
+    )
+    if (
+        registration_required
+        and not registration_not_required
+        and not registration_qualified
+    ):
+        action_chips.append(("action", "Registration required"))
+
+    if re.search(r"\b(?:drop[ -]?in|walk[ -]?ins? welcome)\b", searchable, re.I):
+        logistics_chips.append(("logistics", "Drop-in"))
+    if re.search(
+        r"\b(?:materials?|supplies) (?:are |will be )?provided\b",
+        searchable,
+        re.I,
+    ) and not re.search(
+        r"\b(?:materials?|supplies) (?:are |will be )?not provided\b",
+        searchable,
+        re.I,
+    ):
+        logistics_chips.append(("logistics", "Materials provided"))
+    if re.search(
+        r"\b(?:caregiver|parent|adult) (?:participation|participates?|joins?)\b|"
+        r"\bwith (?:a |their )?(?:caregiver|parent|adult)\b",
+        searchable,
+        re.I,
+    ):
+        logistics_chips.append(("logistics", "Caregiver participation"))
+    if re.search(r"\bsensory[ -]friendly\b", searchable, re.I):
+        logistics_chips.append(("logistics", "Sensory-friendly"))
+    if re.search(
+        r"\bASL (?:interpretation|interpreter|interpreted)\b", searchable, re.I
+    ):
+        logistics_chips.append(("logistics", "ASL interpreted"))
+    if re.search(
+        r"\bbilingual\b|\b(?:English|Spanish)\s*(?:and|/)\s*(?:English|Spanish)\b",
+        searchable,
+        re.I,
+    ):
+        logistics_chips.append(("logistics", "Bilingual"))
+
+    action_priority = {
+        "Registration required": 0,
+        "Weather dependent": 1,
+        "Limited supplies": 2,
+    }
+    action_chips.sort(key=lambda chip: action_priority.get(chip[1], 99))
+    ordered = action_chips + logistics_chips + topic_chips
+    return tuple(dict.fromkeys(ordered))[:MAX_EVENT_CHIPS]
+
+
+def _event_chips_html(event: Event) -> str:
+    colors = {
+        "topic": "#1c6984",
+        "logistics": "#477a00",
+        "action": "#cf102d",
+    }
+    chips = "".join(
+        '<span style="display:inline-block;margin:4px 5px 0 0;padding:4px 7px;'
+        f"border-radius:5px;background:{colors[kind]};color:#ffffff;"
+        'font-size:12px;font-weight:800">'
+        f"{html.escape(label)}</span>"
+        for kind, label in _event_chip_specs(event)
+    )
+    return f'<div style="margin:8px 0 0">{chips}</div>' if chips else ""
+
+
+def _event_age_categories(event: Event) -> tuple[str, ...]:
+    """Return every published age category in stable display order."""
+
+    return tuple(
+        sorted(
+            dict.fromkeys(event.age_categories),
+            key=lambda category: AGE_CATEGORY_ORDER.get(
+                category, len(AGE_CATEGORY_ORDER)
+            ),
+        )
+    )
+
+
+def _event_audience_html(event: Event) -> str:
+    categories = _event_age_categories(event)
+    if not categories:
+        return ""
+    audience = f" {MIDDLE_DOT} ".join(html.escape(category) for category in categories)
+    return (
+        '<div class="event-audience" style="margin:10px 0 0;color:#5f6368;'
+        'font-size:14px;line-height:145%"><strong>Listed for:</strong> '
+        f"{audience}</div>"
+    )
+
+
 def _button(label: str, url: str, primary: bool = False) -> str:
     background = "#1967d2" if primary else "#ffffff"
     color = "#ffffff" if primary else "#1967d2"
     return (
-        f'<a href="{html.escape(url, quote=True)}" style="display:inline-block;'
-        f"margin:6px 8px 0 0;padding:11px 15px;border:1px solid #1967d2;"
-        f"border-radius:8px;background:{background};color:{color};font-weight:700;"
-        f'text-decoration:none;font-size:14px">{html.escape(label)}</a>'
+        '<table class="email-button" role="presentation" border="0" '
+        'cellpadding="0" cellspacing="0" '
+        'style="border-collapse:separate;margin:12px 0 0">'
+        f'<tr><td bgcolor="{background}" style="padding:11px 15px;'
+        f'border:1px solid #1967d2;border-radius:8px;background:{background}">'
+        f'<a href="{html.escape(url, quote=True)}" style="display:block;'
+        f"color:{color};font-weight:700;text-decoration:none;font-size:14px;"
+        f'line-height:140%">{html.escape(label)}</a></td></tr></table>'
     )
 
 
@@ -1010,45 +1557,139 @@ def _source_notes(
 ) -> list[tuple[str, bool]]:
     """Return consistent source-coverage disclosures for both email bodies."""
 
-    notes: list[tuple[str, bool]] = []
-    if source_warnings:
-        notes.append(
-            ("Source coverage is unresolved: " + "; ".join(source_warnings) + ".", True)
-        )
-    if source_errors:
-        notes.append(("We could not load: " + "; ".join(source_errors) + ".", True))
-    return notes
+    if source_warnings or source_errors:
+        return [
+            (
+                "Some library listings may be missing. "
+                "Check the full branch calendars below.",
+                True,
+            )
+        ]
+    return []
+
+
+def _calendar_placeholder_note(events: Sequence[Event], duration_minutes: int) -> str:
+    """Return one precise note for Google links that need placeholder end times."""
+
+    missing_count = sum(event.end_at is None for event in events)
+    if not missing_count:
+        return ""
+    if missing_count == len(events):
+        opening = "The library did not publish end times for these activities"
+    else:
+        opening = "Some end times are not published"
+    return (
+        f"{opening}; Google Calendar uses a {duration_minutes}-minute "
+        "placeholder for those activities."
+    )
 
 
 def _render_event_card(
     event: Event,
     *,
     duration_minutes: int,
+    compact: bool = False,
 ) -> str:
     event_url = html.escape(event_details_url(event), quote=True)
-    image = ""
-    if event.image_url:
-        image = (
-            '<div style="padding:0;background:#f8fafd;text-align:center">'
-            f'<a href="{event_url}" style="display:block;text-decoration:none">'
-            f'<img src="{html.escape(event.image_url, quote=True)}" '
-            f'alt="{html.escape(event.title, quote=True)}" '
-            'style="display:block;width:auto;max-width:100%;height:auto;max-height:560px;'
-            'margin:0 auto;object-fit:contain"></a></div>'
+    display_title = _bounded_text(event.title, MAX_DISPLAY_TITLE_LENGTH)
+    if compact:
+        location_label = html.escape(event_location_label(event))
+        directions = event_directions_url(event)
+        location_html = (
+            f'<a href="{html.escape(directions, quote=True)}" '
+            'style="color:#202124;text-decoration:underline">'
+            f"{location_label}</a>"
+            if directions
+            else location_label
         )
-    map_url = html.escape(event_directions_url(event), quote=True)
+        calendar_url = html.escape(
+            google_calendar_url(event, duration_minutes, compact=True), quote=True
+        )
+        return f"""
+    <table class="event-card-shell compact-event-card" role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse">
+    <tr><td bgcolor="#ffffff" style="padding:14px 18px 15px;background:#ffffff;border:1px solid #e3e7ee;border-radius:12px;overflow-wrap:anywhere;word-break:break-word">
+      <h3 style="margin:0 0 5px;color:#202124;font-size:19px;line-height:130%"><span aria-hidden="true">{icon_for(event)}</span> <a href="{event_url}" style="color:#174ea6;text-decoration:underline">{html.escape(display_title)}</a></h3>
+      <div style="font-size:14px;font-weight:700;color:#202124;line-height:145%">{format_event_time(event)} {MIDDLE_DOT} {location_html}</div>
+      {_event_audience_html(event)}
+      {_event_chips_html(event)}
+      <div style="margin:10px 0 0;font-size:13px;font-weight:700"><a href="{calendar_url}" style="color:#1967d2;text-decoration:underline">Add to Google Calendar</a></div>
+    </td></tr><tr><td height="10" style="height:10px;font-size:1px;line-height:10px">&nbsp;</td></tr>
+    </table>
+    """
+    image_cell = ""
+    hero_image = ""
+    if event.image_url and not compact and event.image_layout == "hero":
+        hero_image = (
+            '<tr><td class="event-hero-image-cell" colspan="2" style="padding:0;'
+            'background:#ffffff;text-align:center">'
+            f'<a href="{event_url}" style="display:block;width:100%;text-decoration:none">'
+            f'<img width="638" src="{html.escape(event.image_url, quote=True)}" '
+            f'alt="View official event details for {html.escape(display_title, quote=True)}" '
+            'style="display:block;width:100%;max-width:638px;height:auto;margin:0 auto;'
+            'border:0"></a></td></tr>'
+        )
+    elif event.image_url and not compact:
+        image_cell = (
+            '<td class="event-image-cell" width="190" valign="top" '
+            'style="width:190px;padding:0;background:#ffffff;text-align:center">'
+            f'<a href="{event_url}" style="display:block;width:100%;'
+            'text-decoration:none">'
+            f'<img width="190" src="{html.escape(event.image_url, quote=True)}" '
+            f'alt="View official event details for '
+            f'{html.escape(display_title, quote=True)}" '
+            'style="display:block;width:100%;max-width:190px;height:auto;'
+            'margin:0 auto;border:0;object-fit:contain"></a></td>'
+        )
+    heading_colspan = "" if image_cell else ' colspan="2"'
+    location_label = html.escape(event_location_label(event))
+    host_context = (
+        f" {MIDDLE_DOT} Hosted by {html.escape(event.branch.name)}"
+        if event.venue and event.modality != "online"
+        else ""
+    )
+    directions = event_directions_url(event)
+    if directions:
+        location_html = (
+            f'<a href="{html.escape(directions, quote=True)}" '
+            'style="color:#202124;text-decoration:underline;'
+            'text-decoration-color:#c4c7c5;text-underline-offset:3px">'
+            f"{location_label}</a>"
+        )
+    else:
+        location_html = location_label
+    shortened_note = ""
+    if event.description_truncated:
+        shortened_note = (
+            '<p style="margin:8px 0 0;color:#5f6368;font-size:13px;line-height:150%">'
+            f'Description shortened for email. <a href="{event_url}" '
+            'style="color:#174ea6">View the complete official listing</a>.</p>'
+        )
+    body = f"""
+      <tr>
+      <td class="event-body-cell" colspan="2" style="padding:16px 20px 18px;border-top:1px solid #eef1f5;overflow-wrap:anywhere;word-break:break-word">
+        <div>{_description_paragraphs_html(event)}</div>
+        {shortened_note}
+        {_button("Add to Google Calendar", google_calendar_url(event, duration_minutes), primary=True)}
+      </td>
+      </tr>"""
     return f"""
-    <div style="margin:0 0 12px;background:#ffffff;border:1px solid #e3e7ee;border-radius:14px;overflow:hidden">
-      {image}
-      <div style="padding:18px 20px">
-        <h3 style="margin:0 0 6px;color:#202124;font-size:22px;line-height:1.25">{icon_for(event)} <a href="{event_url}" style="color:#174ea6;text-decoration:underline;text-decoration-color:#a8c7fa;text-underline-offset:3px">{html.escape(event.title)}</a></h3>
-        <div style="font-size:16px;font-weight:700;color:#202124">{format_event_time(event)} {MIDDLE_DOT} <a href="{map_url}" style="color:#202124;text-decoration:underline;text-decoration-color:#c4c7c5;text-underline-offset:3px">{html.escape(event_location_summary(event))}</a></div>
-        <p style="margin:16px 0 12px;color:#3c4043;font-size:15px;line-height:1.65;white-space:pre-line">{_description_html(event)}</p>
-        <div style="margin-top:12px">
-          {_button("Add to Google Calendar", google_calendar_url(event, duration_minutes), primary=True)}
-        </div>
-      </div>
-    </div>
+    <table class="event-card-shell" role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse">
+    <tr><td style="padding:0 0 12px">
+      <table class="event-card-table" role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" bgcolor="#ffffff" style="width:100%;border-collapse:separate;border-spacing:0;background:#ffffff;border:1px solid #e3e7ee;border-radius:14px;overflow:hidden">
+      {hero_image}
+      <tr>
+      {image_cell}
+      <td class="event-heading-cell"{heading_colspan} valign="top" style="padding:16px 20px 14px;overflow-wrap:anywhere;word-break:break-word">
+        <h3 style="margin:0 0 6px;color:#202124;font-size:22px;line-height:125%"><span aria-hidden="true">{icon_for(event)}</span> <a href="{event_url}" style="color:#174ea6;text-decoration:underline;text-decoration-color:#a8c7fa;text-underline-offset:3px">{html.escape(display_title)}</a></h3>
+        <div style="font-size:16px;font-weight:700;color:#202124;line-height:145%">{format_event_time(event)} {MIDDLE_DOT} {location_html}{host_context}</div>
+        {_event_audience_html(event)}
+        {_event_chips_html(event)}
+      </td>
+      </tr>
+      {body}
+      </table>
+    </td></tr>
+    </table>
     """
 
 
@@ -1063,22 +1704,30 @@ def _render_html(
     duration_minutes: int,
     source_errors: Sequence[str],
     source_warnings: Sequence[str],
+    full_event_ids: frozenset[str] | None = None,
+    email_omitted_count: int = 0,
 ) -> str:
+    if full_event_ids is None:
+        full_event_ids = frozenset(event_identity(event) for event in events)
     day_sections: list[str] = []
     for event_date, day_items in groupby(events, key=lambda event: event.event_date):
         day_cards = "".join(
             _render_event_card(
                 event,
                 duration_minutes=duration_minutes,
+                compact=event_identity(event) not in full_event_ids,
             )
             for event in day_items
         )
         day_sections.append(
             f"""
-            <div style="margin:0 0 24px">
-              <h2 style="margin:0 0 10px;padding:0 4px;color:#174ea6;font-size:20px;font-weight:800;line-height:1.3">{event_date:%A, %B} {event_date.day}</h2>
-              {day_cards}
-            </div>
+            <table class="event-day-heading" role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse">
+              <tr><td style="padding:0 4px 10px"><h2 style="margin:0;color:#174ea6;font-size:20px;font-weight:800;line-height:130%">{event_date:%A, %B} {event_date.day}</h2></td></tr>
+            </table>
+            {day_cards}
+            <table class="event-day-spacer" role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse">
+              <tr><td height="12" style="height:12px;font-size:1px;line-height:12px">&nbsp;</td></tr>
+            </table>
             """
         )
 
@@ -1111,25 +1760,59 @@ def _render_html(
         source_note_parts.append(
             f'<p style="margin:8px 0 0{color}">{html.escape(note)}</p>'
         )
+    if email_omitted_count:
+        source_note_parts.append(
+            '<p style="margin:8px 0 0;color:#5f6368">'
+            f"{email_omitted_count} additional matched "
+            f"activit{'y was' if email_omitted_count == 1 else 'ies were'} omitted "
+            "to keep this email reliable. See the full calendars below.</p>"
+        )
     source_note = "".join(source_note_parts)
+    calendar_note_text = _calendar_placeholder_note(events, duration_minutes)
+    calendar_note = ""
+    if calendar_note_text:
+        calendar_note = (
+            '<p style="margin:8px 0 0;color:#5f6368">'
+            f"{html.escape(calendar_note_text)}</p>"
+        )
+    preheader = (
+        "See dates, locations, age listings, planning notes, and Google Calendar links."
+        if events
+        else (
+            "No clearly age-matched activities were published; "
+            "check the full branch calendars."
+        )
+    )
 
     return f"""<!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Library fun for {html.escape(child_name)}</title></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><meta name="supported-color-schemes" content="light"><title>Library fun for {html.escape(child_name)}</title>
+<style>
+html,body {{color-scheme:light only}}
+@media only screen and (max-width:620px) {{
+  .event-image-cell,.event-heading-cell,.event-body-cell {{display:block!important;width:auto!important;max-width:100%!important}}
+  .event-image-cell {{padding:0!important;text-align:center!important}}
+  .event-image-cell img {{width:100%!important;max-width:360px!important;margin:0 auto!important}}
+  .event-hero-image-cell img {{width:100%!important;max-width:100%!important;height:auto!important}}
+  .event-heading-cell {{padding:16px 18px 14px!important}}
+  .event-body-cell {{padding:16px 18px 18px!important}}
+}}
+</style></head>
 <body style="margin:0;padding:0;background:#f3f6fb;font-family:Arial,Helvetica,sans-serif;color:#202124">
-  <div style="display:none;max-height:0;overflow:hidden">Age-matched library activities for {_format_week_range(week_start, week_end)}.</div>
-  <table role="presentation" style="width:100%;border-collapse:collapse;background:#f3f6fb"><tr><td align="center" style="padding:20px 10px">
-    <table role="presentation" style="width:100%;max-width:680px;border-collapse:collapse">
+  <div style="display:none!important;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all">{html.escape(preheader)}&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;</div>
+  <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" bgcolor="#f3f6fb" style="width:100%;border-collapse:collapse;background:#f3f6fb"><tr><td align="center" style="padding:20px 10px">
+    <table role="presentation" width="680" border="0" cellpadding="0" cellspacing="0" style="width:100%;max-width:680px;border-collapse:collapse">
       <tr><td style="padding:24px 24px 20px;background:#174ea6;border-radius:16px 16px 0 0;color:#ffffff">
         <div style="font-size:13px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;opacity:.85">{_format_week_range(week_start, week_end)}</div>
-        <h1 style="margin:8px 0 8px;font-size:30px;line-height:1.2">&#128218; Library fun for {html.escape(child_name)}</h1>
-        <p style="margin:0;font-size:16px;line-height:1.5">{html.escape(intro)}</p>
+        <h1 style="margin:8px 0 8px;font-size:30px;line-height:120%"><span aria-hidden="true">&#128218;</span> Library fun for {html.escape(child_name)}</h1>
+        <p style="margin:0;font-size:16px;line-height:150%">{html.escape(intro)}</p>
       </td></tr>
       <tr><td style="padding:22px 0">{body}</td></tr>
-      <tr><td style="padding:18px 20px;background:#ffffff;border-radius:12px;color:#5f6368;font-size:13px;line-height:1.55">
+      <tr><td style="padding:18px 20px;background:#ffffff;border-radius:12px;color:#5f6368;font-size:13px;line-height:155%">
+        {source_note}
         <strong style="color:#3c4043">See every published event:</strong> {branch_links}
         <p style="margin:8px 0 0">Library schedules can change, so check the official event page before leaving.</p>
-        {source_note}
+        {calendar_note}
       </td></tr>
     </table>
   </td></tr></table>
@@ -1161,10 +1844,18 @@ def _render_plain_text(
     for event_date, day_items in groupby(events, key=lambda event: event.event_date):
         lines.extend([f"{event_date:%A, %B} {event_date.day}".upper(), ""])
         for event in day_items:
+            chip_labels = [label for _kind, label in _event_chip_specs(event)]
+            age_categories = _event_age_categories(event)
             lines.extend(
                 [
                     f"{format_event_time(event)} | {event.title}",
                     f"{event_location_summary(event)}: {event_directions_url(event)}",
+                    *(
+                        [f"Listed for: {f' {MIDDLE_DOT} '.join(age_categories)}"]
+                        if age_categories
+                        else []
+                    ),
+                    *([f"Highlights: {', '.join(chip_labels)}"] if chip_labels else []),
                     "",
                     event.description,
                     "",
@@ -1180,13 +1871,16 @@ def _render_plain_text(
                     "",
                 ]
             )
-    lines.append("Full branch calendars:")
-    lines.extend(f"- {branch.name}: {branch.calendar_url}" for branch in branches)
     plain_source_notes = [
         note for note, _ in _source_notes(source_errors, source_warnings)
     ]
     if plain_source_notes:
-        lines.extend(["", *plain_source_notes])
+        lines.extend(plain_source_notes)
+    lines.extend(["", "Full branch calendars:"])
+    lines.extend(f"- {branch.name}: {branch.calendar_url}" for branch in branches)
+    calendar_note = _calendar_placeholder_note(events, duration_minutes)
+    if calendar_note:
+        lines.extend(["", calendar_note])
     lines.extend(
         [
             "",
@@ -1194,6 +1888,138 @@ def _render_plain_text(
         ]
     )
     return "\n".join(lines)
+
+
+def select_digest_events(
+    events: Sequence[Event],
+    *,
+    birth_date: date,
+    filter_mode: str,
+    week_start: date,
+    week_end: date,
+) -> tuple[list[Event], list[Event]]:
+    """Return active weekly occurrences and the age-matched subset."""
+
+    weekly_events = merge_events(
+        [
+            event
+            for event in events
+            if week_start <= event.event_date <= week_end and event_is_active(event)
+        ]
+    )
+    return weekly_events, matching_events(
+        weekly_events,
+        birth_date,
+        filter_mode,
+        week_start,
+        week_end,
+    )
+
+
+def _display_event(event: Event) -> Event:
+    """Return an email-bounded event while preserving source data upstream."""
+
+    title = _bounded_text(event.title, MAX_DISPLAY_TITLE_LENGTH)
+    description = _bounded_text(event.description, MAX_CARD_DESCRIPTION_CHARS)
+    truncated = description != " ".join(event.description.split())
+    return replace(
+        event,
+        title=title,
+        description=description,
+        description_html="" if truncated else event.description_html,
+        description_truncated=truncated,
+    )
+
+
+def _distance_priority(
+    event: Event,
+    distance_by_branch_code: Mapping[str, float],
+) -> tuple[float, datetime, str, str]:
+    distance = distance_by_branch_code.get(event.branch.code, float("inf"))
+    return distance, event.starts_at, event.branch.name, event.title
+
+
+def _render_budgeted_html(
+    events: Sequence[Event],
+    *,
+    child_name: str,
+    birth_date: date,
+    week_start: date,
+    week_end: date,
+    branches: Sequence[Branch],
+    duration_minutes: int,
+    source_errors: Sequence[str],
+    source_warnings: Sequence[str],
+    distance_by_branch_code: Mapping[str, float],
+    initially_omitted_count: int,
+) -> tuple[str, list[Event], frozenset[str], int]:
+    """Fit rich cards into a safe HTML budget, favoring nearby branches."""
+
+    rendered_events = list(events)
+    priority = sorted(
+        rendered_events,
+        key=lambda event: _distance_priority(event, distance_by_branch_code),
+    )
+    omitted_count = initially_omitted_count
+
+    def render(full_ids: frozenset[str]) -> str:
+        return _render_html(
+            rendered_events,
+            child_name=child_name,
+            birth_date=birth_date,
+            week_start=week_start,
+            week_end=week_end,
+            branches=branches,
+            duration_minutes=duration_minutes,
+            source_errors=source_errors,
+            source_warnings=source_warnings,
+            full_event_ids=full_ids,
+            email_omitted_count=omitted_count,
+        )
+
+    compact_html = render(frozenset())
+    while len(compact_html.encode("utf-8")) > MAX_DIGEST_HTML_BYTES and rendered_events:
+        removed = priority.pop()
+        rendered_events.remove(removed)
+        omitted_count += 1
+        compact_html = render(frozenset())
+
+    html_bytes = len(compact_html.encode("utf-8"))
+    if priority:
+        nearest = priority[0]
+        nearest_delta = len(
+            _render_event_card(
+                nearest, duration_minutes=duration_minutes, compact=False
+            ).encode("utf-8")
+        ) - len(
+            _render_event_card(
+                nearest, duration_minutes=duration_minutes, compact=True
+            ).encode("utf-8")
+        )
+        while len(priority) > 1 and html_bytes + nearest_delta > MAX_DIGEST_HTML_BYTES:
+            removed = priority.pop()
+            rendered_events.remove(removed)
+            omitted_count += 1
+            compact_html = render(frozenset())
+            html_bytes = len(compact_html.encode("utf-8"))
+
+    full_ids: set[str] = set()
+    for event in priority:
+        identity = event_identity(event)
+        compact_card = _render_event_card(
+            event, duration_minutes=duration_minutes, compact=True
+        )
+        full_card = _render_event_card(
+            event, duration_minutes=duration_minutes, compact=False
+        )
+        delta = len(full_card.encode("utf-8")) - len(compact_card.encode("utf-8"))
+        if html_bytes + delta <= MAX_DIGEST_HTML_BYTES:
+            full_ids.add(identity)
+            html_bytes += delta
+
+    frozen_ids = frozenset(full_ids)
+    rendered = render(frozen_ids)
+    return rendered, rendered_events, frozen_ids, omitted_count
 
 
 def build_digest(
@@ -1210,6 +2036,9 @@ def build_digest(
     source_warnings: Sequence[str] = (),
     supplemental_age_failures: Sequence[str] = (),
     supplemental_age_limitations: Sequence[str] = (),
+    image_url_overrides: Mapping[str, str] | None = None,
+    image_layout_overrides: Mapping[str, Literal["side", "hero"]] | None = None,
+    distance_by_branch_code: Mapping[str, float] | None = None,
 ) -> dict[str, object]:
     """Build the complete JSON-serializable email response."""
 
@@ -1225,28 +2054,67 @@ def build_digest(
 
     week_start = next_week_start(reference_date)
     week_end = week_start + timedelta(days=6)
-    weekly_events = merge_events(
-        [
-            event
-            for event in events
-            if week_start <= event.event_date <= week_end and event_is_active(event)
-        ]
+    weekly_events, included = select_digest_events(
+        events,
+        birth_date=birth_date,
+        filter_mode=filter_mode,
+        week_start=week_start,
+        week_end=week_end,
     )
-    included = matching_events(
-        weekly_events,
-        birth_date,
-        filter_mode,
-        week_start,
-        week_end,
+    source_included = included
+    included = [
+        replace(
+            _display_event(event),
+            image_url=(
+                image_url_overrides.get(event_identity(event), "")
+                if image_url_overrides is not None
+                else event.image_url
+            ),
+            image_layout=(
+                image_layout_overrides.get(event_identity(event), "side")
+                if image_layout_overrides is not None
+                else event.image_layout
+            ),
+        )
+        for event in included
+    ]
+    distances = distance_by_branch_code or {}
+    budget_priority = sorted(
+        included,
+        key=lambda event: _distance_priority(event, distances),
+    )
+    initially_omitted_count = max(0, len(budget_priority) - MAX_EMAIL_EVENTS)
+    if initially_omitted_count:
+        kept_identities = {
+            event_identity(event) for event in budget_priority[:MAX_EMAIL_EVENTS]
+        }
+        included = [
+            event for event in included if event_identity(event) in kept_identities
+        ]
+    rendered_html, email_events, full_event_ids, email_omitted_count = (
+        _render_budgeted_html(
+            included,
+            child_name=child_name,
+            birth_date=birth_date,
+            week_start=week_start,
+            week_end=week_end,
+            branches=selected_branches,
+            duration_minutes=duration_minutes,
+            source_errors=source_errors,
+            source_warnings=source_warnings,
+            distance_by_branch_code=distances,
+            initially_omitted_count=initially_omitted_count,
+        )
     )
     subject = (
-        f"{len(included)} library activit{'y' if len(included) == 1 else 'ies'} "
+        f"{len(source_included)} library "
+        f"activit{'y' if len(source_included) == 1 else 'ies'} "
         f"for {child_name} this week \U0001f4da | {_subject_week_range(week_start, week_end)}"
     )
     return {
         "subject": subject,
         "message": _render_plain_text(
-            included,
+            email_events,
             child_name=child_name,
             birth_date=birth_date,
             week_start=week_start,
@@ -1256,27 +2124,31 @@ def build_digest(
             source_errors=source_errors,
             source_warnings=source_warnings,
         ),
-        "html": _render_html(
-            included,
-            child_name=child_name,
-            birth_date=birth_date,
-            week_start=week_start,
-            week_end=week_end,
-            branches=selected_branches,
-            duration_minutes=duration_minutes,
-            source_errors=source_errors,
-            source_warnings=source_warnings,
-        ),
+        "html": rendered_html,
         "metadata": {
             "week_start": week_start.isoformat(),
             "week_end": week_end.isoformat(),
             "filter_mode": filter_mode,
             "scanned_count": len(weekly_events),
-            "included_count": len(included),
-            "omitted_count": len(weekly_events) - len(included),
+            "included_count": len(source_included),
+            "omitted_count": len(weekly_events) - len(source_included),
             "included_event_ids": [
                 event.link.rsplit("/", 1)[-1] if event.link else event_identity(event)
-                for event in included
+                for event in source_included
+            ],
+            "html_bytes": len(rendered_html.encode("utf-8")),
+            "full_card_count": len(full_event_ids),
+            "compact_card_count": len(email_events) - len(full_event_ids),
+            "email_omitted_count": email_omitted_count,
+            "truncated_description_count": sum(
+                event.description_truncated for event in email_events
+            ),
+            "distance_priority_used": bool(distances)
+            and (len(full_event_ids) < len(source_included) or email_omitted_count > 0),
+            "full_card_event_ids": [
+                event_identity(event)
+                for event in email_events
+                if event_identity(event) in full_event_ids
             ],
             "source_counts": dict(source_counts),
             "source_errors": list(source_errors),

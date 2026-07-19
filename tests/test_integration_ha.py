@@ -9,6 +9,7 @@ import sys
 import types
 import unittest
 from unittest.mock import AsyncMock, patch
+from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -18,6 +19,7 @@ try:
     import pytest
 
     from homeassistant.config_entries import SOURCE_USER, ConfigEntryState
+    from homeassistant.components.smtp.helpers import _build_html_msg
     from homeassistant.core import HomeAssistant
     from homeassistant.data_entry_flow import FlowResultType
     from homeassistant.helpers import entity_registry as er
@@ -39,6 +41,7 @@ from custom_components.free_library_events.config import (  # noqa: E402
     selected_branches,
 )
 from custom_components.free_library_events.const import (  # noqa: E402
+    ATTR_EMBED_IMAGES,
     ATTR_FORCE_REFRESH,
     CONF_BIRTH_DATE,
     CONF_CALENDAR_DURATION,
@@ -68,9 +71,19 @@ from custom_components.free_library_events.digest import (  # noqa: E402
     DescriptionLink,
     Event,
 )
+from custom_components.free_library_events.email_images import (  # noqa: E402
+    DownloadedImage,
+    EMAIL_IMAGE_DIRECTORY,
+    ImageDownloadBatch,
+    StoredImageBundle,
+    remove_stored_image_run,
+    store_downloaded_images,
+)
 
 
 pytestmark = pytest.mark.usefixtures("enable_custom_integrations")
+
+LOCAL_TIME_ZONE = ZoneInfo("America/New_York")
 
 USER_INPUT = {
     CONF_CHILD_NAME: "Avery",
@@ -174,7 +187,7 @@ async def test_setup_entities_action_and_redacted_diagnostics(
             start_time=time(10, 30),
             description="Stories and songs for babies with caregivers.",
             link=f"https://example.test/events/{branch.code.lower()}-1001",
-            image_url="",
+            image_url="https://libwww.freelibrary.org/images/storytime.png",
             branch=branch,
             age_categories=(age_category,) if age_category else (),
             end_at=datetime(2026, 7, 22, 12, 0),
@@ -265,6 +278,85 @@ async def test_setup_entities_action_and_redacted_diagnostics(
     assert response["metadata"]["fetched_at"] == status_state.attributes["last_refresh"]
     assert "Avery" in response["subject"]
 
+    image_url = "https://libwww.freelibrary.org/images/storytime.png"
+    image_path = Path(
+        hass.config.path(
+            "www",
+            EMAIL_IMAGE_DIRECTORY,
+            "run-0123456789abcdef0123456789abcdef",
+            "event-01.png",
+        )
+    )
+    download_batch = ImageDownloadBatch(
+        images=(DownloadedImage(image_url, b"image", ".png"),),
+        requested_count=1,
+        failure_count=0,
+        failure_examples=(),
+    )
+    stored_bundle = StoredImageBundle(
+        {image_url: "cid:event-01.png"},
+        (str(image_path),),
+        image_path.parent,
+        {image_url: "hero"},
+    )
+    with (
+        patch(
+            "custom_components.free_library_events.async_download_event_images",
+            new_callable=AsyncMock,
+            return_value=download_batch,
+        ),
+        patch(
+            "custom_components.free_library_events.store_downloaded_images",
+            return_value=stored_bundle,
+        ),
+        patch("custom_components.free_library_events.purge_stale_image_runs"),
+        patch("custom_components.free_library_events.async_call_later") as schedule,
+        patch(
+            "custom_components.free_library_events.dt_util.now",
+            return_value=datetime(2026, 7, 17),
+        ),
+    ):
+        embedded = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_RENDER_DIGEST,
+            {ATTR_FORCE_REFRESH: False, ATTR_EMBED_IMAGES: True},
+            blocking=True,
+            return_response=True,
+        )
+    assert embedded["images"] == [str(image_path)]
+    assert embedded["metadata"]["embedded_image_count"] == 1
+    assert embedded["metadata"]["image_download_failure_count"] == 0
+    assert 'src="cid:event-01.png"' in embedded["html"]
+    assert 'class="event-hero-image-cell"' in embedded["html"]
+    schedule.assert_called_once()
+
+    with (
+        patch(
+            "custom_components.free_library_events.async_download_event_images",
+            new_callable=AsyncMock,
+            return_value=download_batch,
+        ),
+        patch(
+            "custom_components.free_library_events.store_downloaded_images",
+            side_effect=OSError("storage unavailable"),
+        ),
+        patch("custom_components.free_library_events.purge_stale_image_runs"),
+        patch(
+            "custom_components.free_library_events.dt_util.now",
+            return_value=datetime(2026, 7, 17),
+        ),
+    ):
+        remote_fallback = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_RENDER_DIGEST,
+            {ATTR_FORCE_REFRESH: False, ATTR_EMBED_IMAGES: True},
+            blocking=True,
+            return_response=True,
+        )
+    assert remote_fallback["images"] == []
+    assert remote_fallback["metadata"]["image_download_failure_count"] == 1
+    assert f'src="{image_url}"' in remote_fallback["html"]
+
     diagnostics = await async_get_config_entry_diagnostics(hass, entry)
     assert "Avery" not in repr(diagnostics)
     assert "2025-01-15" not in repr(diagnostics)
@@ -273,6 +365,50 @@ async def test_setup_entities_action_and_redacted_diagnostics(
         for branch in BRANCHES.values()
         for category in ("Baby", "Toddler", "Preschool", "School Age", "Young Adult")
     ]
+
+
+def test_stored_cid_images_match_home_assistant_smtp_mime_contract(
+    hass: HomeAssistant,
+    tmp_path: Path,
+) -> None:
+    source_url = "https://libwww.freelibrary.org/images/landscape.png"
+    png = (
+        b"\x89PNG\r\n\x1a\n"
+        + b"\x00\x00\x00\rIHDR"
+        + (1200).to_bytes(4, "big")
+        + (600).to_bytes(4, "big")
+        + b"rest"
+    )
+    batch = ImageDownloadBatch(
+        images=(DownloadedImage(source_url, png, ".png", 1200, 600),),
+        requested_count=1,
+        failure_count=0,
+        failure_examples=(),
+    )
+    hass.config.allowlist_external_dirs.add(str(tmp_path))
+    bundle = store_downloaded_images(tmp_path / EMAIL_IMAGE_DIRECTORY, batch)
+    try:
+        cid = bundle.source_url_to_cid[source_url]
+        message = _build_html_msg(
+            hass,
+            "Plain fallback",
+            f'<html><body><img src="{cid}" alt="Event details"></body></html>',
+            list(bundle.paths),
+        )
+        parts = list(message.walk())
+
+        image_part = next(
+            part for part in parts if part.get_content_maintype() == "image"
+        )
+        html_part = next(
+            part for part in parts if part.get_content_type() == "text/html"
+        )
+        expected_content_id = f"<{Path(bundle.paths[0]).name}>"
+        assert image_part["Content-ID"] == expected_content_id
+        assert cid in html_part.get_payload(decode=True).decode("utf-8")
+    finally:
+        assert bundle.run_directory is not None
+        remove_stored_image_run(bundle.run_directory)
 
 
 def test_feed_coverage_requires_evidence_past_a_capped_date() -> None:
@@ -906,7 +1042,7 @@ async def test_digest_discloses_an_operational_supplemental_failure(
         ),
         patch(
             "custom_components.free_library_events.dt_util.now",
-            return_value=datetime(2026, 7, 17),
+            return_value=datetime(2026, 7, 17, tzinfo=LOCAL_TIME_ZONE),
         ),
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
@@ -919,9 +1055,12 @@ async def test_digest_discloses_an_operational_supplemental_failure(
             return_response=True,
         )
 
-    assert "Source coverage is unresolved" in response["message"]
-    assert "Charles Santore Library — Young Adult" in response["message"]
-    assert "offline" in response["message"]
+    assert "Some library listings may be missing" in response["message"]
+    assert "Charles Santore Library — Young Adult" not in response["message"]
+    assert "offline" not in response["message"]
+    assert response["metadata"]["supplemental_age_failures"] == [
+        "Charles Santore Library — Young Adult could not be loaded: offline"
+    ]
 
 
 async def test_coordinator_retains_partial_source_success(

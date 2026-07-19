@@ -31,3 +31,4 @@ MAX_SCAN_INTERVAL = 24 * 60 * 60
 
 SERVICE_RENDER_DIGEST = "render_digest"
 ATTR_FORCE_REFRESH = "force_refresh"
+ATTR_EMBED_IMAGES = "embed_images"
