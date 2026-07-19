@@ -11,7 +11,7 @@ import aiohttp
 from .digest import Branch, Event, event_identity, merge_events, parse_feed
 
 RSS_ITEM_LIMIT = 10
-MAX_RSS_RESPONSE_BYTES = 2 * 1024 * 1024
+MAX_RSS_RESPONSE_BYTES = 256 * 1024
 MAX_RSS_REQUEST_CONCURRENCY = 8
 OFFICIAL_EVENT_TYPES = (
     "Arts and Crafts Programs",

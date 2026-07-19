@@ -609,6 +609,56 @@ async def test_coordinator_expands_every_current_age_source_before_supplemental_
     assert len(data.events) == MAX_TYPE_EXPANSIONS_PER_REFRESH
 
 
+async def test_coordinator_bounds_a_stalled_type_expansion(
+    hass: HomeAssistant,
+) -> None:
+    async def fetch_feed(_branch, age_category):
+        return BranchFeed(
+            events=(),
+            age_category=age_category,
+            source_count=10,
+            parsed_count=10,
+            last_event_date=date(2026, 7, 24),
+            ordered=True,
+        )
+
+    async def expand_feed(*_args):
+        await asyncio.sleep(60)
+
+    client = types.SimpleNamespace(
+        async_fetch_feed=AsyncMock(side_effect=fetch_feed),
+        async_expand_feed=AsyncMock(side_effect=expand_feed),
+    )
+    coordinator = LibraryDataCoordinator(
+        hass,
+        _entry(),
+        client,
+        (BRANCHES["CEN"],),
+        date(1990, 1, 1),
+        timedelta(hours=6),
+    )
+
+    with (
+        patch(
+            "custom_components.free_library_events.coordinator.dt_util.now",
+            return_value=datetime(2026, 7, 18),
+        ),
+        patch(
+            "custom_components.free_library_events.coordinator."
+            "TYPE_EXPANSION_TIMEOUT_SECONDS",
+            0.001,
+        ),
+    ):
+        data = await coordinator._async_update_data()
+
+    status = data.source_statuses["CEN:Adult"]
+    assert status.events == ()
+    assert status.type_shards_queried == len(OFFICIAL_EVENT_TYPES)
+    assert status.type_shard_failures == (
+        "Event-type expansion timed out after 0.001 seconds",
+    )
+
+
 async def test_client_propagates_type_shard_cancellation() -> None:
     branch = BRANCHES["CEN"]
     base_feed = BranchFeed(

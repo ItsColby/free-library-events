@@ -21,7 +21,8 @@
   unresolved feed through the publisher's official event-type filters. Invalid
   individual event rows are skipped while their published-versus-parsed mismatch
   remains observable. All RSS requests share an eight-request concurrency
-  ceiling, and each decoded response is stopped at 2 MiB.
+  ceiling, each decoded response is stopped at 256 KiB, and any one capped-source
+  expansion is stopped after 90 seconds without discarding its base events.
 - `coordinator.py` derives the configured person's current life-stage group from
   the local birth date, requests every official age category in that group for
   each selected branch, refreshes the plan concurrently, consolidates duplicate

@@ -192,9 +192,11 @@ cached event counts by branch.
   enough for all four branches when three official age windows overlap, and
   prioritizes every current-age source before the nearest supplemental age
   windows. All RSS traffic shares an eight-request ceiling. Each
-  decoded RSS response is capped at 2 MiB. Coverage is proven only when every
+  decoded RSS response is capped at 256 KiB. Coverage is proven only when every
   type shard covers the digest horizon and recovers the capped base prefix. A
-  healthy supplemental category that remains unresolved produces the honest
+  stalled source expansion stops after 90 seconds and retains its base events
+  with an explicit coverage warning. A healthy supplemental category that
+  remains unresolved produces the honest
   `limited` status; operational failures remain `partial`. Relevant current-age
   coverage problems and operational supplemental failures are also disclosed in
   the rendered digest; known cap limitations stay out of the event-focused email

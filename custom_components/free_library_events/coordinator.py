@@ -13,7 +13,13 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
-from .api import OFFICIAL_EVENT_TYPES, RSS_ITEM_LIMIT, BranchFeed, LibraryClient
+from .api import (
+    OFFICIAL_EVENT_TYPES,
+    RSS_ITEM_LIMIT,
+    BranchFeed,
+    LibraryApiError,
+    LibraryClient,
+)
 from .const import DOMAIN
 from .digest import (
     AGE_CATEGORY_ORDER,
@@ -31,6 +37,7 @@ from .digest import (
 _LOGGER = logging.getLogger(__name__)
 SOURCE_AGE_HORIZON = timedelta(days=90)
 MAX_TYPE_EXPANSIONS_PER_REFRESH = 12
+TYPE_EXPANSION_TIMEOUT_SECONDS = 90
 MAX_TYPE_FAILURE_EXAMPLES = 3
 
 
@@ -137,6 +144,32 @@ def type_expansion_source_keys(
             key=expansion_priority,
         )[:MAX_TYPE_EXPANSIONS_PER_REFRESH]
     )
+
+
+async def async_expand_source(
+    client: LibraryClient,
+    branch: Branch,
+    age_category: str,
+    base_feed: BranchFeed,
+    coverage_end: date,
+) -> BranchFeed:
+    """Expand one capped source without allowing a stalled refresh."""
+
+    try:
+        return await asyncio.wait_for(
+            client.async_expand_feed(
+                branch,
+                age_category,
+                base_feed,
+                coverage_end,
+            ),
+            timeout=TYPE_EXPANSION_TIMEOUT_SECONDS,
+        )
+    except TimeoutError as err:
+        raise LibraryApiError(
+            "Event-type expansion timed out after "
+            f"{TYPE_EXPANSION_TIMEOUT_SECONDS} seconds"
+        ) from err
 
 
 @dataclass(frozen=True, slots=True)
@@ -325,8 +358,8 @@ class LibraryDataCoordinator(DataUpdateCoordinator[LibraryData]):
         )
         expanded_results = await asyncio.gather(
             *(
-                self._client.async_expand_feed(
-                    *request_by_key[key], statuses[key], coverage_end
+                async_expand_source(
+                    self._client, *request_by_key[key], statuses[key], coverage_end
                 )
                 for key in expansion_keys
             ),

@@ -57,9 +57,10 @@
 - Reject malformed, credential-bearing, or non-HTTP event and contextual URLs;
   require publisher-hosted HTTPS images and resolve safe relative URLs against
   the official Free Library source.
-- Reject RSS responses over 2 MiB, propagate refresh cancellation, coerce
+- Reject RSS responses over 256 KiB, propagate refresh cancellation, coerce
   non-UI boolean values safely, and keep every RSS request under the same global
-  concurrency ceiling.
+  concurrency ceiling; stop a stalled capped-source expansion after 90 seconds
+  while retaining its base events and reporting unresolved coverage.
 - Normalize the configured display name to one bounded line before it reaches an
   email subject or HTML body.
 - Recognize mixed-unit and newborn numeric age ranges while keeping the child's
