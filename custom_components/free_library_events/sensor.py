@@ -16,11 +16,17 @@ from .const import CONF_BIRTH_DATE, CONF_FILTER_MODE, DOMAIN
 from .coordinator import (
     LibraryDataCoordinator,
     coverage_warnings,
-    discovery_coverage,
+    supplemental_coverage,
     source_keys_for_window,
     source_label,
 )
-from .digest import BRANCHES, classify_event, include_fit, next_week_start
+from .digest import (
+    BRANCHES,
+    classify_event,
+    event_is_active,
+    include_fit,
+    next_week_start,
+)
 from .entity import service_device_info
 from .runtime import LibraryConfigEntry
 
@@ -81,18 +87,18 @@ class LibraryStatusSensor(CoordinatorEntity, SensorEntity):
                 week_start,
                 week_end,
             )
-            discovery_failures, discovery_limitations = discovery_coverage(
-                self.coordinator.data, week_end
+            supplemental_failures, supplemental_limitations = supplemental_coverage(
+                self.coordinator.data, birth_date, week_start, week_end
             )
             if (
                 relevant_errors
                 or coverage_warnings(
                     self.coordinator.data, birth_date, week_start, week_end
                 )
-                or discovery_failures
+                or supplemental_failures
             ):
                 return "partial"
-            if discovery_limitations:
+            if supplemental_limitations:
                 return "limited"
         return "ok" if self.coordinator.data else "unknown"
 
@@ -100,7 +106,7 @@ class LibraryStatusSensor(CoordinatorEntity, SensorEntity):
     def extra_state_attributes(self) -> dict[str, object]:
         data = self.coordinator.data
         if data is None:
-            return {"cached_events": 0, "matched_events": 0}
+            return {"cached_events": 0, "next_week_events": 0}
         config = self._config
         birth_date = date.fromisoformat(config[CONF_BIRTH_DATE])
         filter_mode = config[CONF_FILTER_MODE]
@@ -108,7 +114,9 @@ class LibraryStatusSensor(CoordinatorEntity, SensorEntity):
         week_start = next_week_start(today)
         week_end = week_start + timedelta(days=6)
         warnings = coverage_warnings(data, birth_date, week_start, week_end)
-        discovery_failures, discovery_limitations = discovery_coverage(data, week_end)
+        supplemental_failures, supplemental_limitations = supplemental_coverage(
+            data, birth_date, week_start, week_end
+        )
         relevant_error_keys = source_keys_for_window(
             tuple(data.source_errors), birth_date, week_start, week_end
         )
@@ -116,6 +124,7 @@ class LibraryStatusSensor(CoordinatorEntity, SensorEntity):
             1
             for event in data.events
             if week_start <= event.event_date <= week_end
+            and event_is_active(event)
             and include_fit(classify_event(event, birth_date), filter_mode)
         )
         return {
@@ -125,11 +134,13 @@ class LibraryStatusSensor(CoordinatorEntity, SensorEntity):
             "cached_events_by_branch": {
                 BRANCHES[code].name: count for code, count in data.source_counts.items()
             },
-            "age_feed_coverage_complete": not warnings and not relevant_error_keys,
-            "discovery_coverage_complete": not discovery_failures
-            and not discovery_limitations,
-            "coverage_warnings": warnings,
-            "discovery_failures": discovery_failures,
-            "discovery_limitations": discovery_limitations,
-            "unavailable_sources": [source_label(key) for key in relevant_error_keys],
+            "current_age_coverage_complete": not warnings and not relevant_error_keys,
+            "supplemental_age_coverage_complete": not supplemental_failures
+            and not supplemental_limitations,
+            "current_age_coverage_warnings": warnings,
+            "supplemental_age_failures": supplemental_failures,
+            "supplemental_age_limitations": supplemental_limitations,
+            "unavailable_current_age_sources": [
+                source_label(key) for key in relevant_error_keys
+            ],
         }

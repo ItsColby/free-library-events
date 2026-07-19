@@ -21,25 +21,24 @@ from .digest import (
     Event,
     age_categories_for_window,
     merge_events,
+    source_age_categories_for_window,
 )
 
 _LOGGER = logging.getLogger(__name__)
 SOURCE_AGE_HORIZON = timedelta(days=90)
-DISCOVERY_SOURCE = "all"
 
 
-def source_key(branch: Branch, age_category: str | None) -> str:
+def source_key(branch: Branch, age_category: str) -> str:
     """Return a stable key for one branch feed."""
 
-    return f"{branch.code}:{age_category or DISCOVERY_SOURCE}"
+    return f"{branch.code}:{age_category}"
 
 
 def source_label(key: str) -> str:
     """Return a human-readable label for a source key."""
 
     branch_code, source = key.split(":", 1)
-    label = "supplemental discovery" if source == DISCOVERY_SOURCE else source
-    return f"{BRANCHES[branch_code].name} — {label}"
+    return f"{BRANCHES[branch_code].name} — {source}"
 
 
 def source_keys_for_window(
@@ -54,10 +53,16 @@ def source_keys_for_window(
     return [key for key in keys if key.split(":", 1)[1] in categories]
 
 
-def discovery_source_keys(keys: Sequence[str]) -> list[str]:
-    """Return supplemental all-event source keys."""
+def supplemental_source_keys(
+    keys: Sequence[str],
+    birth_date: date,
+    start_date: date,
+    end_date: date,
+) -> list[str]:
+    """Return source keys used for inclusive discovery beyond the current age."""
 
-    return [key for key in keys if key.split(":", 1)[1] == DISCOVERY_SOURCE]
+    relevant = set(age_categories_for_window(birth_date, start_date, end_date))
+    return [key for key in keys if key.split(":", 1)[1] not in relevant]
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,18 +111,24 @@ def coverage_warnings(
     return warnings
 
 
-def discovery_coverage(
+def supplemental_coverage(
     data: LibraryData,
+    birth_date: date,
+    start_date: date,
     end_date: date,
 ) -> tuple[list[str], list[str]]:
-    """Return discovery failures separately from official cap limitations."""
+    """Return supplemental-age failures separately from feed-cap limitations."""
 
     failures = [
         f"{source_label(key)} could not be loaded: {data.source_errors[key]}"
-        for key in discovery_source_keys(tuple(data.source_errors))
+        for key in supplemental_source_keys(
+            tuple(data.source_errors), birth_date, start_date, end_date
+        )
     ]
     limitations: list[str] = []
-    for key in discovery_source_keys(tuple(data.source_statuses)):
+    for key in supplemental_source_keys(
+        tuple(data.source_statuses), birth_date, start_date, end_date
+    ):
         feed = data.source_statuses[key]
         if feed.parsed_count != feed.source_count:
             failures.append(
@@ -167,7 +178,7 @@ class LibraryDataCoordinator(DataUpdateCoordinator[LibraryData]):
         """Fetch every selected branch, retaining partial successes."""
 
         today = dt_util.now().date()
-        age_categories = age_categories_for_window(
+        age_categories = source_age_categories_for_window(
             self.birth_date,
             today,
             today + SOURCE_AGE_HORIZON,
@@ -175,7 +186,7 @@ class LibraryDataCoordinator(DataUpdateCoordinator[LibraryData]):
         requests = tuple(
             (branch, age_category)
             for branch in self.branches
-            for age_category in (None, *age_categories)
+            for age_category in age_categories
         )
         results = await asyncio.gather(
             *(

@@ -19,7 +19,16 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import LibraryDataCoordinator
-from .digest import TIMEZONE, Event, classify_event, include_fit
+from .digest import (
+    TIMEZONE,
+    Event,
+    classify_event,
+    event_calendar_location,
+    event_details_url,
+    event_is_active,
+    include_fit,
+    related_link_lines,
+)
 from .entity import service_device_info
 from .runtime import LibraryConfigEntry
 
@@ -68,31 +77,35 @@ class LibraryCalendar(CoordinatorEntity, CalendarEntity):
         duration = config[CONF_CALENDAR_DURATION]
         events: list[CalendarEvent] = []
         for event in self.coordinator.data.events if self.coordinator.data else ():
+            if not event_is_active(event):
+                continue
             fit = classify_event(event, birth_date)
             if not include_fit(fit, filter_mode):
                 continue
             start = event.starts_at.replace(tzinfo=LIBRARY_TIME_ZONE)
             if event.end_at:
                 end = event.end_at.replace(tzinfo=LIBRARY_TIME_ZONE)
-                end_note = ""
+                end_note = None
             else:
                 end = start + timedelta(minutes=duration)
                 end_note = (
-                    "\n"
                     f"End time not published in the feed; using a {duration}-minute "
                     "placeholder."
                 )
+            description_parts = [
+                event.description,
+                *related_link_lines(event),
+                f"Official details: {event_details_url(event)}",
+            ]
+            if end_note:
+                description_parts.append(end_note)
             events.append(
                 CalendarEvent(
                     start=start,
                     end=end,
                     summary=event.title,
-                    description=(
-                        f"{event.description}\n\n"
-                        f"Official details: {event.link}"
-                        f"{end_note}"
-                    ),
-                    location=f"{event.branch.name}, {event.branch.address}",
+                    description="\n\n".join(description_parts),
+                    location=event_calendar_location(event),
                     uid=event.link or self._event_uid(event),
                 )
             )

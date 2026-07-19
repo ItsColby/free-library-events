@@ -91,6 +91,32 @@ class DigestTests(unittest.TestCase):
                     expected,
                 )
 
+    def test_source_plan_uses_complete_life_stage_provenance(self) -> None:
+        self.assertEqual(
+            digest.source_age_categories_for_window(
+                date(2025, 11, 7),
+                date(2026, 7, 18),
+                date(2026, 10, 16),
+            ),
+            ("Baby", "Toddler", "Preschool", "School Age", "Young Adult"),
+        )
+        self.assertEqual(
+            digest.source_age_categories_for_window(
+                date(1996, 7, 18),
+                date(2026, 7, 18),
+                date(2026, 10, 16),
+            ),
+            ("Adult", "Senior"),
+        )
+        self.assertEqual(
+            digest.source_age_categories_for_window(
+                date(2008, 8, 15),
+                date(2026, 6, 1),
+                date(2026, 9, 1),
+            ),
+            tuple(digest.AGE_CATEGORY_ORDER),
+        )
+
     def test_official_age_category_precedes_title_only_inference(self) -> None:
         event = digest.Event(
             title="Preschool Storytime",
@@ -192,6 +218,51 @@ class DigestTests(unittest.TestCase):
             ("Baby", "Toddler"),
         )
 
+    def test_merge_events_retains_richer_safe_source_fields(self) -> None:
+        base = digest.Event(
+            title="Baby Storytime",
+            event_date=date(2026, 7, 20),
+            start_time=digest.time(10, 30),
+            description="Stories for babies.",
+            link="https://example.test/events/shared",
+            image_url="",
+            branch=digest.BRANCHES["CEN"],
+            age_categories=("Baby",),
+        )
+        richer = digest.replace(
+            base,
+            image_url="https://example.test/event.jpg",
+            age_categories=("Toddler",),
+            end_at=digest.datetime(2026, 7, 20, 11, 30),
+            description_links=(
+                digest.DescriptionLink("Resource", "https://example.test/resource"),
+            ),
+            venue="Sister Cities Park",
+            room="Storyhour Room",
+        )
+
+        merged = digest.merge_events((base, richer))[0]
+
+        self.assertEqual(merged.image_url, richer.image_url)
+        self.assertEqual(merged.end_at, richer.end_at)
+        self.assertEqual(merged.description_links, richer.description_links)
+        self.assertEqual(merged.venue, richer.venue)
+        self.assertEqual(merged.room, richer.room)
+
+        payload = digest.build_digest(
+            child_name="Avery",
+            birth_date=date(2025, 10, 7),
+            filter_mode="Recommended",
+            duration_minutes=60,
+            selected_branches=[digest.BRANCHES["CEN"]],
+            reference_date=date(2026, 7, 18),
+            events=(base, richer),
+            source_counts={"Parkway Central Library": 2},
+        )
+        self.assertEqual(payload["metadata"]["scanned_count"], 1)
+        self.assertIn("Storyhour Room", payload["html"])
+        self.assertIn(richer.image_url, payload["html"])
+
     def test_next_week_start_treats_monday_as_current_week(self) -> None:
         self.assertEqual(digest.next_week_start(date(2026, 7, 20)), date(2026, 7, 20))
         self.assertEqual(digest.next_week_start(date(2026, 7, 17)), date(2026, 7, 20))
@@ -264,6 +335,184 @@ class DigestTests(unittest.TestCase):
         )
         self.assertEqual(events[0].image_url, item["image_url"])
 
+    def test_parser_rejects_non_http_event_and_image_urls(self) -> None:
+        item = {
+            "title": "07/25/26: Family Storytime - Charles Santore Library",
+            "description": "An inclusive storytime where all children can take part.",
+            "date": "07/25/26",
+            "time": "11:00 A.M.",
+            "branch": "Charles Santore Library",
+            "link": "javascript:alert(1)",
+            "image_url": "data:image/svg+xml,unsafe",
+        }
+
+        events, _source_count = digest.parse_feed(
+            rss([item]), digest.BRANCHES["SWK"], "Toddler"
+        )
+
+        self.assertEqual(events[0].link, "")
+        self.assertEqual(events[0].image_url, "")
+
+        payload = rss([item]).replace(
+            "<guid>javascript:alert(1)</guid>",
+            "<guid>https://example.test/fallback-event</guid>",
+        )
+        events, _source_count = digest.parse_feed(
+            payload, digest.BRANCHES["SWK"], "Toddler"
+        )
+        self.assertEqual(events[0].link, "https://example.test/fallback-event")
+
+    def test_parser_resolves_safe_relative_source_urls(self) -> None:
+        item = {
+            "title": "07/25/26: Family Storytime - Charles Santore Library",
+            "description": 'Read the <a href="/programs/literacy">literacy guide</a>.',
+            "date": "07/25/26",
+            "time": "11:00 A.M.",
+            "branch": "Charles Santore Library",
+            "link": "",
+            "image_url": "/assets/images/event.jpg",
+        }
+
+        events, _source_count = digest.parse_feed(
+            rss([item]), digest.BRANCHES["SWK"], "Toddler"
+        )
+
+        self.assertEqual(
+            events[0].image_url,
+            "https://libwww.freelibrary.org/assets/images/event.jpg",
+        )
+        self.assertEqual(
+            events[0].description_links[0].url,
+            "https://libwww.freelibrary.org/programs/literacy",
+        )
+        payload = digest.build_digest(
+            child_name="Avery",
+            birth_date=date(2025, 10, 7),
+            filter_mode="Recommended",
+            duration_minutes=60,
+            selected_branches=[digest.BRANCHES["SWK"]],
+            reference_date=date(2026, 7, 18),
+            events=events,
+            source_counts={"Charles Santore Library": 1},
+        )
+        self.assertIn(
+            f"Event details: {digest.BRANCHES['SWK'].calendar_url}",
+            payload["message"],
+        )
+
+    def test_parser_preserves_safe_description_links_and_explicit_room(self) -> None:
+        item = {
+            "title": "07/25/26: Family Storytime with AAC - Charles Santore Library",
+            "description": (
+                'Learn about <a href="https://www.asha.org/public/speech/disorders/aac/">'
+                "Augmentative and Alternative Communication (AAC)</a>. "
+                'Ignore <a href="javascript:alert(1)">this unsafe link</a>. '
+                "We will be meeting in the Storyhour Room."
+            ),
+            "date": "07/25/26",
+            "time": "11:00 A.M.",
+            "branch": "Charles Santore Library",
+            "link": "https://libwww.freelibrary.org/calendar/event/171403",
+        }
+
+        events, _source_count = digest.parse_feed(
+            rss([item]), digest.BRANCHES["SWK"], "Toddler"
+        )
+        event = events[0]
+
+        self.assertEqual(event.room, "Storyhour Room")
+        self.assertEqual(
+            event.description_links,
+            (
+                digest.DescriptionLink(
+                    "Augmentative and Alternative Communication (AAC)",
+                    "https://www.asha.org/public/speech/disorders/aac/",
+                ),
+            ),
+        )
+        payload = digest.build_digest(
+            child_name="Avery",
+            birth_date=date(2025, 10, 7),
+            filter_mode="Recommended",
+            duration_minutes=60,
+            selected_branches=[digest.BRANCHES["SWK"]],
+            reference_date=date(2026, 7, 18),
+            events=events,
+            source_counts={"Charles Santore Library": 1},
+        )
+        self.assertIn(
+            'href="https://www.asha.org/public/speech/disorders/aac/"', payload["html"]
+        )
+        self.assertNotIn("javascript:", payload["html"])
+        self.assertIn("Storyhour Room", payload["html"])
+        self.assertIn(
+            "Related: Augmentative and Alternative Communication (AAC): "
+            "https://www.asha.org/public/speech/disorders/aac/",
+            payload["message"],
+        )
+
+        self.assertEqual(
+            digest.explicit_room("The Storyhour Room is on the first floor."),
+            "Storyhour Room",
+        )
+        self.assertEqual(
+            digest.explicit_room("Meet on the ground floor in Room 22."),
+            "Room 22",
+        )
+        self.assertEqual(digest.explicit_room("Meet in the meeting room."), "")
+        self.assertEqual(
+            digest.explicit_room("8/3: Meeting Room\n8/10: Family craft night"),
+            "",
+        )
+
+    def test_explicit_offsite_venue_replaces_branch_map_destination(self) -> None:
+        cases = (
+            (
+                "Storytime at Sister Cities Park!",
+                "This outdoor storytime will take place at Sister Cities Park.",
+                "Sister Cities Park",
+            ),
+            (
+                "Read, Baby, Read Storytime",
+                "Join us in Rittenhouse Square by the Goat Statue for this program!",
+                "Rittenhouse Square",
+            ),
+        )
+        for title, description, expected in cases:
+            with self.subTest(title=title):
+                event = digest.Event(
+                    title=title,
+                    event_date=date(2026, 7, 22),
+                    start_time=digest.time(10, 30),
+                    description=description,
+                    link="https://example.test/event",
+                    image_url="",
+                    branch=digest.BRANCHES["CEN"],
+                    age_categories=("Baby",),
+                    venue=digest.explicit_venue(title, description),
+                )
+                self.assertEqual(event.venue, expected)
+                self.assertEqual(digest.event_location_name(event), expected)
+                self.assertIn(
+                    digest.urllib.parse.quote_plus(expected),
+                    digest.event_directions_url(event),
+                )
+                self.assertNotIn(
+                    digest.urllib.parse.quote_plus(digest.BRANCHES["CEN"].name),
+                    digest.event_directions_url(event),
+                )
+
+        self.assertEqual(
+            digest.explicit_venue(
+                "Storytime in the park", "Join us in the park for stories."
+            ),
+            "",
+        )
+        self.assertEqual(
+            digest.explicit_venue("Storytime at The Park", "Join us in The Park."),
+            "",
+        )
+
     def test_age_on_event_date(self) -> None:
         self.assertEqual(digest.age_on(date(2025, 1, 15), date(2026, 7, 24)), (1, 6, 9))
         self.assertEqual(
@@ -307,6 +556,36 @@ class DigestTests(unittest.TestCase):
                 "Playtime runs from 12:00 p.m. to 1:00 p.m.",
             )
         )
+        self.assertEqual(
+            digest.explicit_end_at(
+                date(2026, 7, 20),
+                digest.time(11, 30),
+                "The program runs from 11:30 to 1:00 p.m.",
+            ),
+            digest.datetime(2026, 7, 20, 13, 0),
+        )
+
+    def test_description_link_replaces_its_published_occurrence(self) -> None:
+        item = {
+            "title": "07/25/26: Family Storytime - Charles Santore Library",
+            "description": (
+                "The literacy guide is useful. Read the "
+                '<a href="https://example.test/guide">literacy guide</a>.'
+            ),
+            "date": "07/25/26",
+            "time": "11:00 A.M.",
+            "branch": "Charles Santore Library",
+            "link": "https://example.test/event",
+        }
+        events, _source_count = digest.parse_feed(
+            rss([item]), digest.BRANCHES["SWK"], "Toddler"
+        )
+
+        rendered = digest._description_html(events[0])
+
+        self.assertTrue(rendered.startswith("The literacy guide is useful."))
+        self.assertEqual(rendered.count("<a "), 1)
+        self.assertIn(">literacy guide</a>.", rendered)
 
     def test_explicit_age_range_overrides_all_ages_wording(self) -> None:
         event = digest.Event(
@@ -367,6 +646,45 @@ class DigestTests(unittest.TestCase):
                     digest.classify_event(event, date(2025, 1, 15)),
                     expected,
                 )
+
+    def test_inactive_events_are_not_returned(self) -> None:
+        event = digest.Event(
+            title="Art Workshop: POSTPONED to July 27",
+            event_date=date(2026, 7, 20),
+            start_time=digest.time(10, 0),
+            description="For babies and toddlers with caregivers.",
+            link="https://example.test/postponed",
+            image_url="",
+            branch=digest.BRANCHES["CEN"],
+            age_categories=("Baby",),
+        )
+
+        self.assertFalse(digest.event_is_active(event))
+        self.assertEqual(
+            digest.matching_events(
+                [event],
+                date(2025, 11, 7),
+                "Recommended",
+                date(2026, 7, 20),
+                date(2026, 7, 26),
+            ),
+            [],
+        )
+
+        payload = digest.build_digest(
+            child_name="Avery",
+            birth_date=date(2025, 11, 7),
+            filter_mode="Recommended",
+            duration_minutes=60,
+            selected_branches=[digest.BRANCHES["CEN"]],
+            reference_date=date(2026, 7, 18),
+            events=[event],
+            source_counts={"Parkway Central Library": 1},
+        )
+        self.assertEqual(payload["metadata"]["scanned_count"], 0)
+        self.assertEqual(payload["metadata"]["omitted_count"], 0)
+        self.assertNotIn(event.title, payload["message"])
+        self.assertNotIn(event.title, payload["html"])
 
     def test_digest_output_contains_google_links_and_expected_ids(self) -> None:
         fixture_items = {

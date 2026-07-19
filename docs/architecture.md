@@ -19,17 +19,22 @@
   shared HTTP session and records the evidence needed to evaluate the ten-item
   source boundary. Invalid individual event rows are skipped while their
   published-versus-parsed mismatch remains observable.
-- `coordinator.py` derives the relevant official age categories from the local
-  birth date, adds one supplemental all-event discovery request per selected
-  branch, refreshes the plan concurrently, consolidates duplicate events while
-  retaining their official classifications, and preserves partial source
-  success. It fails the update only when every selected source fails.
+- `coordinator.py` derives the configured person's current life-stage group from
+  the local birth date, requests every official age category in that group for
+  each selected branch, refreshes the plan concurrently, consolidates duplicate
+  events while retaining their official classifications and richer safe fields,
+  and preserves partial source success. A minor uses Baby through Young Adult;
+  an adult uses Adult and Senior while retaining Young Adult only during its
+  overlapping age window; a forward source window crossing adulthood uses both
+  groups. It fails the update only when every selected source fails.
 - `digest.py` is a deterministic, side-effect-free parser, age matcher, and
   HTML/plain-text renderer. Explicit numeric ranges take precedence, followed
   by matching official age-feed classifications and then explicit inclusive
   text. Strong published wording can correct an overly narrow feed category;
   generic family wording cannot. Age classification controls inclusion and
-  ordering; it is not repeated as per-event presentation copy. An end time is
+  ordering; it is not repeated as per-event presentation copy. Safe contextual
+  RSS links are preserved, and explicit off-site venues or named/numbered rooms
+  refine location without inventing data. An end time is
   accepted only from an explicit RSS description range that matches the
   published start; the digest and HA calendar both use that same evidence. It
   does not call an LLM.
@@ -50,14 +55,28 @@ requires public source metadata, parsing/feed validation, config-flow and
 translation changes, deterministic tests, and documentation. All supported
 sources default on and can be disabled individually in the config entry.
 
-For every selected branch, the coordinator requests the official age categories
-that overlap the child's age across its forward source horizon plus one
-unfiltered discovery feed. A feed below the ten-item limit is complete. At the
-limit, its parsed order and last event must prove coverage beyond the target
-digest week. Relevant age-feed gaps are operationally `partial` and are
-disclosed by the rendered digest. A healthy but capped discovery feed is
-`limited`: this truthfully records that later broadly inclusive events cannot be
-proven without conflating a publisher limitation with a source failure.
+For every selected branch, the coordinator requests every official age category
+in the configured person's current life-stage group. This preserves publisher
+age provenance, avoids the noise and ambiguity of an unclassified all-events
+feed, and still discovers explicitly inclusive events assigned to a narrower
+category. A feed below the ten-item limit is complete. At the limit, its parsed
+order and last event must prove coverage beyond the target digest week.
+Current-age feed gaps are operationally `partial` and are disclosed by the
+rendered digest. A healthy but capped supplemental age feed is `limited`: this
+truthfully records that later broadly inclusive events cannot be proven without
+conflating a publisher limitation with a source failure.
+
+Protected event HTML and ICS endpoints are deliberately outside the runtime
+source boundary. Home Assistant's asynchronous HTTP clients receive the
+publisher's browser challenge on those routes, so page scraping would make
+refresh health dependent on an unsupported access path. The integration
+retains safe embedded RSS links and explicit venue/room wording but does not
+infer unavailable topic, registration, cost, or end-time fields.
+
+The actionable calendar and digest omit items whose published title marks the
+occurrence cancelled, canceled, postponed, or rescheduled. This avoids
+presenting a stale dated row as an activity while leaving the official source
+page available outside the integration for schedule changes.
 
 ## Release Contract
 

@@ -4,7 +4,7 @@
     "step": {
       "user": {
         "title": "Set up weekly library events",
-        "description": "Choose the child and branches. Home Assistant will keep the calendar and weekly email age appropriate automatically.",
+        "description": "Choose the child and branches. Home Assistant will keep the calendar and weekly digest content age appropriate automatically.",
         "data": {
           "child_name": "Child's first name",
           "birth_date": "Child's birth date",
@@ -19,7 +19,7 @@
         "data_description": {
           "filter_mode": "Recommended balances age fit with family-friendly options. Strict includes only explicit best matches; Broad includes more general children's events.",
           "calendar_duration_minutes": "Used only when the library does not publish an end time.",
-          "scan_interval_seconds": "Six hours (21600 seconds) is recommended. The email always refreshes again immediately before sending."
+          "scan_interval_seconds": "Six hours (21600 seconds) is recommended. The render action refreshes again by default immediately before generating the digest."
         }
       }
     },
@@ -57,7 +57,7 @@
         "data_description": {
           "filter_mode": "Recommended balances age fit with family-friendly options. Strict includes only explicit best matches; Broad includes more general children's events.",
           "calendar_duration_minutes": "Used only when the library does not publish an end time.",
-          "scan_interval_seconds": "Six hours (21600 seconds) is recommended. The email always refreshes again immediately before sending."
+          "scan_interval_seconds": "Six hours (21600 seconds) is recommended. The render action refreshes again by default immediately before generating the digest."
         }
       }
     },

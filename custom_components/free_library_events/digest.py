@@ -35,6 +35,15 @@ AGE_CATEGORY_ORDER = {
     category: index
     for index, (category, _minimum, _maximum) in enumerate(AGE_CATEGORY_WINDOWS)
 }
+MINOR_SOURCE_CATEGORIES = (
+    "Baby",
+    "Toddler",
+    "Preschool",
+    "School Age",
+    "Young Adult",
+)
+ADULT_SOURCE_CATEGORIES = ("Adult", "Senior")
+ADULT_START_MONTHS = 18 * 12
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +95,15 @@ BRANCHES = {
 
 
 @dataclass(frozen=True, slots=True)
+class DescriptionLink:
+    """A safe link explicitly embedded in official RSS description HTML."""
+
+    label: str
+    url: str
+    occurrence: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class Event:
     """A normalized Free Library event."""
 
@@ -98,6 +116,9 @@ class Event:
     branch: Branch
     age_categories: tuple[str, ...] = ()
     end_at: datetime | None = None
+    description_links: tuple[DescriptionLink, ...] = ()
+    venue: str = ""
+    room: str = ""
 
     @property
     def starts_at(self) -> datetime:
@@ -107,22 +128,48 @@ class Event:
 type FitRank = Literal["best", "good", "possible", "broad", "exclude"]
 
 
+def _safe_http_url(value: str, base_url: str = "") -> str:
+    url = urllib.parse.urljoin(base_url, value.strip())
+    parsed = urllib.parse.urlparse(url)
+    return url if parsed.scheme in {"http", "https"} and parsed.netloc else ""
+
+
 class _HTMLTextExtractor(HTMLParser):
-    def __init__(self) -> None:
+    def __init__(self, base_url: str = "") -> None:
         super().__init__(convert_charrefs=True)
+        self.base_url = base_url
         self.parts: list[str] = []
+        self.links: list[DescriptionLink] = []
+        self._link_url = ""
+        self._link_parts: list[str] | None = None
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        del attrs
-        if tag.lower() in {"br", "p", "li", "div"}:
+        tag = tag.lower()
+        if tag in {"br", "p", "li", "div"}:
             self.parts.append("\n")
+        if tag == "a":
+            values = {key.lower(): value or "" for key, value in attrs}
+            self._link_url = _safe_http_url(values.get("href", ""), self.base_url)
+            self._link_parts = []
 
     def handle_endtag(self, tag: str) -> None:
-        if tag.lower() in {"p", "li", "div"}:
+        tag = tag.lower()
+        if tag in {"p", "li", "div"}:
             self.parts.append("\n")
+        if tag == "a" and self._link_parts is not None:
+            label = " ".join(" ".join(self._link_parts).split())
+            if self._link_url and label:
+                occurrence = max(self.text().count(label) - 1, 0)
+                link = DescriptionLink(label, self._link_url, occurrence)
+                if link not in self.links:
+                    self.links.append(link)
+            self._link_url = ""
+            self._link_parts = None
 
     def handle_data(self, data: str) -> None:
         self.parts.append(data)
+        if self._link_parts is not None:
+            self._link_parts.append(data)
 
     def text(self) -> str:
         lines = [" ".join(line.split()) for line in "".join(self.parts).splitlines()]
@@ -178,6 +225,31 @@ def age_categories_for_window(
         for category, minimum, maximum in AGE_CATEGORY_WINDOWS
         if end_months >= minimum and start_months < maximum
     )
+
+
+def source_age_categories_for_window(
+    birth_date: date,
+    start_date: date,
+    end_date: date,
+) -> tuple[str, ...]:
+    """Return official age feeds that preserve useful publisher provenance.
+
+    A minor's source plan includes every official child/teen category so an
+    inclusive event remains discoverable even when the publisher assigned it a
+    narrower category. At adulthood the plan uses Adult and Senior plus any
+    official category whose published semantic window still overlaps the
+    person's age, such as Young Adult. A window crossing adulthood uses both
+    groups, so the plan advances without household-specific literals.
+    """
+
+    if end_date < start_date:
+        raise ValueError("Source age-category window end cannot precede its start")
+    categories = set(age_categories_for_window(birth_date, start_date, end_date))
+    if age_in_months(birth_date, start_date) < ADULT_START_MONTHS:
+        categories.update(MINOR_SOURCE_CATEGORIES)
+    if age_in_months(birth_date, end_date) >= ADULT_START_MONTHS:
+        categories.update(ADULT_SOURCE_CATEGORIES)
+    return tuple(category for category in AGE_CATEGORY_ORDER if category in categories)
 
 
 def format_age(birth_date: date, event_date: date) -> str:
@@ -244,11 +316,21 @@ def explicit_end_at(
 
     for match in TIME_RANGE_RE.finditer(description):
         end_meridiem = match.group("end_meridiem")
-        source_start = _clock_time(
-            match.group("start_hour"),
-            match.group("start_minute"),
-            match.group("start_meridiem") or end_meridiem,
-        )
+        if start_meridiem := match.group("start_meridiem"):
+            source_start = _clock_time(
+                match.group("start_hour"),
+                match.group("start_minute"),
+                start_meridiem,
+            )
+        else:
+            source_hour = int(match.group("start_hour"))
+            source_minute = int(match.group("start_minute") or 0)
+            published_hour = start_time.hour % 12 or 12
+            source_start = (
+                start_time
+                if (source_hour, source_minute) == (published_hour, start_time.minute)
+                else None
+            )
         source_end = _clock_time(
             match.group("end_hour"),
             match.group("end_minute"),
@@ -271,13 +353,72 @@ def _repair_bare_numeric_entities(value: str) -> str:
     return re.sub(r"(?<!&)#(\d{2,6});", replace, value)
 
 
-def clean_description(raw_html: str, trailer: str) -> str:
-    extractor = _HTMLTextExtractor()
+def _description_data(
+    raw_html: str,
+    trailer: str,
+    base_url: str = "",
+) -> tuple[str, tuple[DescriptionLink, ...]]:
+    extractor = _HTMLTextExtractor(base_url)
     extractor.feed(_repair_bare_numeric_entities(raw_html))
     value = html.unescape(extractor.text()).strip()
     if trailer and value.endswith(trailer):
         value = value[: -len(trailer)].rstrip()
-    return value
+    return value, tuple(extractor.links)
+
+
+_VENUE_NAME = r"[A-Z][A-Za-z0-9&' .-]{1,70}?(?:Park|Square|Playground|Garden|Museum)"
+_TITLE_VENUE_RE = re.compile(
+    rf"\bat\s+(?P<venue>{_VENUE_NAME})\s*[!?.]*$",
+    re.IGNORECASE,
+)
+_DESCRIPTION_VENUE_RES = (
+    re.compile(
+        rf"\b(?:will take|takes) place at\s+(?P<venue>{_VENUE_NAME})\b",
+        re.IGNORECASE,
+    ),
+    re.compile(rf"\bjoin us in\s+(?P<venue>{_VENUE_NAME})\b", re.IGNORECASE),
+)
+_ROOM_RES = (
+    re.compile(
+        r"\b(?:[Tt]he|[Oo]ur)[ \t]+"
+        r"(?P<room>[A-Z][A-Za-z0-9&' -]{1,60}[ \t]+Room)\b"
+    ),
+    re.compile(r"\b(?P<room>Room[ \t]+(?:[A-Z]|\d{1,4}[A-Za-z]?))\b"),
+)
+
+
+def explicit_venue(title: str, description: str) -> str:
+    """Return a confidently named off-site venue from published event text."""
+
+    if match := _TITLE_VENUE_RE.search(title):
+        if venue := _named_venue(match.group("venue")):
+            return venue
+    for pattern in _DESCRIPTION_VENUE_RES:
+        if match := pattern.search(description):
+            if venue := _named_venue(match.group("venue")):
+                return venue
+    return ""
+
+
+def _named_venue(value: str) -> str:
+    """Reject generic location phrases matched by case-insensitive lead-in text."""
+
+    venue = value.strip()
+    if not venue:
+        return ""
+    first_word = venue.split(maxsplit=1)[0]
+    if not venue[0].isupper() or first_word.lower() in {"a", "an", "our", "the"}:
+        return ""
+    return venue
+
+
+def explicit_room(description: str) -> str:
+    """Return a specifically named room, excluding generic room references."""
+
+    for pattern in _ROOM_RES:
+        if match := pattern.search(description):
+            return match.group("room").strip()
+    return ""
 
 
 def clean_title(raw_title: str, branch: Branch) -> str:
@@ -289,14 +430,14 @@ def clean_title(raw_title: str, branch: Branch) -> str:
     return value.replace("Storytime  Playgroup", "Storytime & Playgroup").strip()
 
 
-def clean_image_url(raw_url: str) -> str:
-    """Suppress structurally empty image filenames published by the feed."""
+def clean_image_url(raw_url: str, base_url: str = "") -> str:
+    """Return a safe image URL, excluding structurally empty feed values."""
 
     value = raw_url.strip().replace("\\", "/")
     filename = urllib.parse.urlparse(value).path.rsplit("/", 1)[-1]
     if filename.lower() in {".gif", ".jpeg", ".jpg", ".png", ".webp"}:
         return ""
-    return value
+    return _safe_http_url(value, base_url)
 
 
 def parse_feed(
@@ -320,19 +461,32 @@ def parse_feed(
             start_time = datetime.strptime(normalized_time, "%I:%M %p").time()
         except (TypeError, ValueError):
             continue
+        link = _safe_http_url(item.findtext("link") or "") or _safe_http_url(
+            item.findtext("guid") or ""
+        )
         trailer = f"{start_date_text}, {start_time_text} - {branch.name}"
-        description = clean_description(item.findtext("description") or "", trailer)
+        description, description_links = _description_data(
+            item.findtext("description") or "",
+            trailer,
+            link or branch.calendar_url,
+        )
+        title = clean_title(item.findtext("title") or "Library event", branch)
         events.append(
             Event(
-                title=clean_title(item.findtext("title") or "Library event", branch),
+                title=title,
                 event_date=event_date,
                 start_time=start_time,
                 description=description,
-                link=(item.findtext("link") or item.findtext("guid") or "").strip(),
-                image_url=clean_image_url(item.findtext("eventimage") or ""),
+                link=link,
+                image_url=clean_image_url(
+                    item.findtext("eventimage") or "", branch.rss_url
+                ),
                 branch=branch,
                 age_categories=(age_category,) if age_category else (),
                 end_at=explicit_end_at(event_date, start_time, description),
+                description_links=description_links,
+                venue=explicit_venue(title, description),
+                room=explicit_room(description),
             )
         )
     return events, len(items)
@@ -343,9 +497,7 @@ def merge_events(events: Sequence[Event]) -> list[Event]:
 
     merged: dict[str, Event] = {}
     for event in events:
-        key = event.link or (
-            f"{event.branch.code}:{event.event_date}:{event.start_time}:{event.title}"
-        )
+        key = event_identity(event)
         if existing := merged.get(key):
             age_categories = tuple(
                 sorted(
@@ -353,10 +505,42 @@ def merge_events(events: Sequence[Event]) -> list[Event]:
                     key=lambda category: AGE_CATEGORY_ORDER.get(category, 999),
                 )
             )
-            merged[key] = replace(existing, age_categories=age_categories)
+            description_links = tuple(
+                dict.fromkeys((*existing.description_links, *event.description_links))
+            )
+            merged[key] = replace(
+                existing,
+                description=existing.description or event.description,
+                image_url=existing.image_url or event.image_url,
+                age_categories=age_categories,
+                end_at=existing.end_at or event.end_at,
+                description_links=description_links,
+                venue=existing.venue or event.venue,
+                room=existing.room or event.room,
+            )
         else:
             merged[key] = event
     return list(merged.values())
+
+
+def event_identity(event: Event) -> str:
+    """Return a stable identity even when an item omits its details URL."""
+
+    return event.link or (
+        f"{event.branch.code}:{event.event_date}:{event.start_time}:{event.title}"
+    )
+
+
+INACTIVE_TITLE_RE = re.compile(
+    r"\b(?:cancelled|canceled|postponed|rescheduled)\b",
+    re.IGNORECASE,
+)
+
+
+def event_is_active(event: Event) -> bool:
+    """Return whether an event title still presents an actionable occurrence."""
+
+    return INACTIVE_TITLE_RE.search(event.title) is None
 
 
 AGE_RANGE_RE = re.compile(
@@ -551,18 +735,17 @@ def matching_events(
 ) -> list[Event]:
     """Return deduplicated, sorted, included events in a date range."""
 
-    deduplicated: dict[str, Event] = {}
-    for event in events:
-        if not start_date <= event.event_date <= end_date:
-            continue
-        key = event.link or (
-            f"{event.branch.code}:{event.event_date}:{event.start_time}:{event.title}"
-        )
-        deduplicated[key] = event
+    relevant_events = merge_events(
+        [
+            event
+            for event in events
+            if start_date <= event.event_date <= end_date and event_is_active(event)
+        ]
+    )
 
     rank_order = {"best": 0, "good": 1, "possible": 2, "broad": 3}
     included: list[tuple[Event, FitRank]] = []
-    for event in deduplicated.values():
+    for event in relevant_events:
         fit = classify_event(event, birth_date)
         if include_fit(fit, filter_mode):
             included.append((event, fit))
@@ -593,9 +776,48 @@ def icon_for(event: Event) -> str:
     return "\N{SPARKLES}"
 
 
+def event_location_name(event: Event) -> str:
+    """Return the most specific confidently published location name."""
+
+    return event.venue or event.branch.name
+
+
+def event_location_summary(event: Event) -> str:
+    """Return the visible venue plus useful within-building room detail."""
+
+    location = event_location_name(event)
+    return f"{location} {MIDDLE_DOT} {event.room}" if event.room else location
+
+
+def event_calendar_location(event: Event) -> str:
+    """Return a geocodable calendar location without a redundant email address."""
+
+    if event.venue:
+        return f"{event.venue}, Philadelphia, PA"
+    room = f", {event.room}" if event.room else ""
+    return f"{event.branch.name}{room}, {event.branch.address}"
+
+
+def related_link_lines(event: Event) -> list[str]:
+    """Return plain-text equivalents for official links embedded in description."""
+
+    unique_links = dict.fromkeys(
+        (link.label, link.url) for link in event.description_links
+    )
+    return [f"Related: {label}: {url}" for label, url in unique_links]
+
+
+def event_details_url(event: Event) -> str:
+    """Return the event page or the closest official calendar fallback."""
+
+    return event.link or event.branch.calendar_url
+
+
 def google_calendar_url(event: Event, duration_minutes: int) -> str:
     end = event.end_at or event.starts_at + timedelta(minutes=duration_minutes)
-    details = f"{event.description}\n\nOfficial event details: {event.link}"
+    detail_parts = [event.description, *related_link_lines(event)]
+    details = "\n\n".join(detail_parts)
+    details += f"\n\nOfficial event details: {event_details_url(event)}"
     if event.end_at is None:
         details += (
             "\n\nThe library did not publish an end time. "
@@ -607,7 +829,7 @@ def google_calendar_url(event: Event, duration_minutes: int) -> str:
             "text": event.title,
             "dates": f"{event.starts_at:%Y%m%dT%H%M%S}/{end:%Y%m%dT%H%M%S}",
             "ctz": TIMEZONE,
-            "location": f"{event.branch.name}, {event.branch.address}",
+            "location": event_calendar_location(event),
             "details": details,
         }
     )
@@ -617,6 +839,45 @@ def directions_url(branch: Branch) -> str:
     return "https://www.google.com/maps/search/?" + urllib.parse.urlencode(
         {"api": "1", "query": f"{branch.name}, {branch.address}"}
     )
+
+
+def event_directions_url(event: Event) -> str:
+    """Return a map link for an explicit venue or the hosting branch."""
+
+    if not event.venue:
+        return directions_url(event.branch)
+    return "https://www.google.com/maps/search/?" + urllib.parse.urlencode(
+        {"api": "1", "query": f"{event.venue}, Philadelphia, PA"}
+    )
+
+
+def _description_html(event: Event) -> str:
+    """Render normalized text while restoring only validated source links."""
+
+    parts: list[str] = []
+    cursor = 0
+    for link in event.description_links:
+        start = -1
+        search_from = 0
+        for _ in range(link.occurrence + 1):
+            start = event.description.find(link.label, search_from)
+            if start < 0:
+                break
+            search_from = start + len(link.label)
+        if start < cursor:
+            continue
+        parts.append(html.escape(event.description[cursor:start]))
+        label = html.escape(link.label)
+        anchor = (
+            f'<a href="{html.escape(link.url, quote=True)}" '
+            'style="color:#174ea6;text-decoration:underline;'
+            'text-decoration-color:#a8c7fa;text-underline-offset:3px">'
+            f"{label}</a>"
+        )
+        parts.append(anchor)
+        cursor = start + len(link.label)
+    parts.append(html.escape(event.description[cursor:]))
+    return "".join(parts)
 
 
 def _button(label: str, url: str, primary: bool = False) -> str:
@@ -663,7 +924,7 @@ def _render_event_card(
     *,
     duration_minutes: int,
 ) -> str:
-    event_url = html.escape(event.link, quote=True)
+    event_url = html.escape(event_details_url(event), quote=True)
     image = ""
     if event.image_url:
         image = (
@@ -674,14 +935,14 @@ def _render_event_card(
             'style="display:block;width:auto;max-width:100%;height:auto;max-height:560px;'
             'margin:0 auto;object-fit:contain"></a></div>'
         )
-    map_url = html.escape(directions_url(event.branch), quote=True)
+    map_url = html.escape(event_directions_url(event), quote=True)
     return f"""
     <div style="margin:0 0 12px;background:#ffffff;border:1px solid #e3e7ee;border-radius:14px;overflow:hidden">
       {image}
       <div style="padding:18px 20px">
         <h3 style="margin:0 0 6px;color:#202124;font-size:22px;line-height:1.25">{icon_for(event)} <a href="{event_url}" style="color:#174ea6;text-decoration:underline;text-decoration-color:#a8c7fa;text-underline-offset:3px">{html.escape(event.title)}</a></h3>
-        <div style="font-size:16px;font-weight:700;color:#202124">{format_event_time(event)} {MIDDLE_DOT} <a href="{map_url}" style="color:#202124;text-decoration:underline;text-decoration-color:#c4c7c5;text-underline-offset:3px">{html.escape(event.branch.name)}</a></div>
-        <p style="margin:16px 0 12px;color:#3c4043;font-size:15px;line-height:1.65;white-space:pre-line">{html.escape(event.description)}</p>
+        <div style="font-size:16px;font-weight:700;color:#202124">{format_event_time(event)} {MIDDLE_DOT} <a href="{map_url}" style="color:#202124;text-decoration:underline;text-decoration-color:#c4c7c5;text-underline-offset:3px">{html.escape(event_location_summary(event))}</a></div>
+        <p style="margin:16px 0 12px;color:#3c4043;font-size:15px;line-height:1.65;white-space:pre-line">{_description_html(event)}</p>
         <div style="margin-top:12px">
           {_button("Add to Google Calendar", google_calendar_url(event, duration_minutes), primary=True)}
         </div>
@@ -802,16 +1063,19 @@ def _render_plain_text(
             lines.extend(
                 [
                     f"{format_event_time(event)} | {event.title}",
-                    f"{event.branch.name}: {directions_url(event.branch)}",
+                    f"{event_location_summary(event)}: {event_directions_url(event)}",
                     "",
                     event.description,
                     "",
+                    *related_link_lines(event),
                 ]
             )
+            if event.description_links:
+                lines.append("")
             lines.extend(
                 [
                     f"Add to Google Calendar: {google_calendar_url(event, duration_minutes)}",
-                    f"Event details: {event.link}",
+                    f"Event details: {event_details_url(event)}",
                     "",
                 ]
             )
@@ -860,14 +1124,15 @@ def build_digest(
 
     week_start = next_week_start(reference_date)
     week_end = week_start + timedelta(days=6)
-    weekly_events = {
-        event.link
-        or f"{event.branch.code}:{event.event_date}:{event.start_time}:{event.title}": event
-        for event in events
-        if week_start <= event.event_date <= week_end
-    }
+    weekly_events = merge_events(
+        [
+            event
+            for event in events
+            if week_start <= event.event_date <= week_end and event_is_active(event)
+        ]
+    )
     included = matching_events(
-        list(weekly_events.values()),
+        weekly_events,
         birth_date,
         filter_mode,
         week_start,
@@ -908,7 +1173,10 @@ def build_digest(
             "scanned_count": len(weekly_events),
             "included_count": len(included),
             "omitted_count": len(weekly_events) - len(included),
-            "included_event_ids": [event.link.rsplit("/", 1)[-1] for event in included],
+            "included_event_ids": [
+                event.link.rsplit("/", 1)[-1] if event.link else event_identity(event)
+                for event in included
+            ],
             "source_counts": dict(source_counts),
             "source_errors": list(source_errors),
             "source_warnings": list(source_warnings),
