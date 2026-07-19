@@ -452,9 +452,11 @@ class DigestTests(unittest.TestCase):
         self.assertIn("padding:0 0 12px", card)
         self.assertNotIn('<div style="margin:0 0 12px', card)
         self.assertIn('colspan="2"', card)
-        self.assertIn(f'width="{digest.EMAIL_SIDE_IMAGE_WIDTH}"', card)
+        self.assertIn('class="event-poster-image-cell" colspan="2"', card)
+        self.assertIn(f'width="{digest.EMAIL_POSTER_IMAGE_WIDTH}"', card)
         self.assertIn(
-            f"width:100%;max-width:{digest.EMAIL_SIDE_IMAGE_WIDTH}px;height:auto",
+            f"width:100%;max-width:{digest.EMAIL_POSTER_IMAGE_WIDTH}px;"
+            "height:auto;margin:0 auto",
             card,
         )
         self.assertNotIn("background:#f8fafd", card)
@@ -1211,17 +1213,15 @@ class DigestTests(unittest.TestCase):
         self.assertEqual(payload["message"].count("WEDNESDAY, JULY 22"), 1)
         self.assertIn("text-decoration:underline", payload["html"])
         self.assertIn("@media only screen and (max-width:620px)", payload["html"])
-        self.assertEqual(digest.EMAIL_MOBILE_SIDE_IMAGE_WIDTH, 152)
+        self.assertEqual(digest.EMAIL_POSTER_IMAGE_WIDTH, 440)
         self.assertIn(
-            f"width:{digest.EMAIL_MOBILE_SIDE_IMAGE_WIDTH}px!important;"
-            f"max-width:{digest.EMAIL_MOBILE_SIDE_IMAGE_WIDTH}px!important",
+            ".event-poster-image-cell img "
+            "{width:100%!important;max-width:100%!important;"
+            "height:auto!important;margin:0 auto!important}",
             payload["html"],
         )
         self.assertIn("@media only screen and (max-width:390px)", payload["html"])
-        self.assertIn(
-            "width:100%!important;max-width:100%!important;margin:0!important",
-            payload["html"],
-        )
+        self.assertNotIn(".event-image-cell", payload["html"])
         self.assertIn('class="email-shell"', payload["html"])
         self.assertIn('class="email-header"', payload["html"])
         self.assertIn('class="email-title"', payload["html"])
@@ -1438,7 +1438,7 @@ class DigestTests(unittest.TestCase):
         self.assertNotIn("Registration</td>", card)
         self.assertNotIn("Cost</td>", card)
         self.assertNotIn("object-fit:cover", card)
-        self.assertIn("object-fit:contain", card)
+        self.assertIn("width:100%;max-width:440px;height:auto", card)
         self.assertNotIn("Why included", card)
         self.assertNotIn("The published maximum age includes Avery.", card)
         self.assertNotIn(digest.BRANCHES["CEN"].address, card)
@@ -1503,7 +1503,10 @@ class DigestTests(unittest.TestCase):
         self.assertIn('src="cid:event-01.png"', payload["html"])
         self.assertNotIn(first.image_url, payload["html"])
         self.assertNotIn(second.image_url, payload["html"])
-        self.assertEqual(payload["html"].count('class="event-image-cell"'), 1)
+        self.assertEqual(
+            payload["html"].count('class="event-poster-image-cell"'),
+            1,
+        )
 
     def test_child_name_is_configurable(self) -> None:
         payload = digest.build_digest(
@@ -1782,6 +1785,37 @@ class DigestTests(unittest.TestCase):
         self.assertIn(f'width="{digest.EMAIL_CONTENT_WIDTH}"', card)
         self.assertIn("width:100%;max-width:100%;height:auto", card)
         self.assertNotIn('class="event-image-cell"', card)
+
+    def test_square_images_use_a_media_first_poster_row(self) -> None:
+        event = digest.Event(
+            title="Baby and Toddler Storytime",
+            event_date=date(2026, 7, 20),
+            start_time=digest.time(10, 30),
+            description="Stories, songs, and playtime for young children.",
+            link="https://example.test/poster",
+            image_url="cid:event-02.png",
+            branch=digest.BRANCHES["CEN"],
+            age_categories=("Baby", "Toddler"),
+            image_layout="side",
+        )
+
+        card = digest._render_event_card(event, duration_minutes=60)
+
+        self.assertIn(
+            'class="event-poster-image-cell" colspan="2"',
+            card,
+        )
+        self.assertIn('width="440" align="center"', card)
+        self.assertIn(
+            "width:100%;max-width:440px;height:auto;margin:0 auto",
+            card,
+        )
+        self.assertIn('class="event-heading-cell" colspan="2"', card)
+        self.assertNotIn('class="event-image-cell"', card)
+        self.assertLess(
+            card.index('class="event-poster-image-cell"'),
+            card.index('class="event-heading-cell"'),
+        )
 
     def test_calendar_url_and_distance_prioritized_html_are_bounded(self) -> None:
         description = "A detailed activity description with useful information. " * 80

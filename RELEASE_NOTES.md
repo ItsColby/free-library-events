@@ -1,3 +1,12 @@
+# Unreleased
+
+## Fixed
+
+- Render square and portrait event artwork in a centered poster row above the
+  full-width title and metadata. The safe base table no longer depends on a
+  Gmail mobile media query to avoid a cramped image/title split, while clients
+  that honor responsive CSS can still expand the poster to the card width.
+
 # Free Library Events v2026.7.25
 
 ## Fixed

@@ -135,11 +135,12 @@ The digest states the child's conversational age once: weeks before 2 completed
 months, months through 23 months, half-years near the half-year mark below age
 5, and years thereafter. Each event keeps its description primary without
 repeating the matching rationale. Source paragraph boundaries are preserved so
-multi-paragraph descriptions do not collapse into one dense block. On wider
-screens landscape artwork uses a full-width hero row; square and portrait
-artwork uses the full width of its side column without cropping. The full
-description uses the card width below, and narrow clients stack the image,
-heading, and body. Official age categories appear once in a muted
+multi-paragraph descriptions do not collapse into one dense block. Landscape
+artwork uses a full-width hero row; square and portrait artwork uses a centered,
+fluid poster row above full-width metadata without cropping. This stacked base
+structure remains readable even when a mobile email client ignores responsive
+CSS. The full description uses the card width below. Official age categories
+appear once in a muted
 `Library age listing:`
 line directly with the title, time, and location. Strongly evidenced secondary
 activities, accessibility, participation, take-home materials, and planning

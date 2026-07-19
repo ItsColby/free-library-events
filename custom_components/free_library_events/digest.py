@@ -32,8 +32,7 @@ MAX_DIGEST_HTML_BYTES = 80_000
 MAX_EMAIL_EVENTS = 100
 MAX_EVENT_CHIPS = 5
 EMAIL_CONTENT_WIDTH = 680
-EMAIL_SIDE_IMAGE_WIDTH = 220
-EMAIL_MOBILE_SIDE_IMAGE_WIDTH = 152
+EMAIL_POSTER_IMAGE_WIDTH = 440
 TRUSTED_IMAGE_HOSTS = frozenset({"libwww.freelibrary.org", "www.freelibrary.org"})
 
 # Stable source taxonomy with intentionally overlapping local windows. The
@@ -1709,10 +1708,9 @@ def _render_event_card(
     </td></tr><tr><td height="10" style="height:10px;font-size:1px;line-height:10px">&nbsp;</td></tr>
     </table>
     """
-    image_cell = ""
-    hero_image = ""
+    event_image = ""
     if event.image_url and not compact and event.image_layout == "hero":
-        hero_image = (
+        event_image = (
             '<tr><td class="event-hero-image-cell" colspan="2" style="padding:0;'
             'background:#ffffff;text-align:center">'
             f'<a href="{event_url}" style="display:block;width:100%;text-decoration:none">'
@@ -1723,22 +1721,19 @@ def _render_event_card(
             'border:0;border-radius:13px 13px 0 0"></a></td></tr>'
         )
     elif event.image_url and not compact:
-        image_cell = (
-            f'<td class="event-image-cell" width="{EMAIL_SIDE_IMAGE_WIDTH}" '
-            f'valign="top" style="width:{EMAIL_SIDE_IMAGE_WIDTH}px;padding:0;'
-            'background:#ffffff;text-align:center">'
+        event_image = (
+            '<tr><td class="event-poster-image-cell" colspan="2" '
+            'style="padding:0;background:#ffffff;text-align:center">'
             f'<a href="{event_url}" style="display:block;width:100%;'
             'text-decoration:none">'
-            f'<img width="{EMAIL_SIDE_IMAGE_WIDTH}" '
+            f'<img width="{EMAIL_POSTER_IMAGE_WIDTH}" align="center" '
             f'src="{html.escape(event.image_url, quote=True)}" '
             f'alt="View official event details for '
             f'{html.escape(display_title, quote=True)}" '
-            f'style="display:block;width:100%;max-width:{EMAIL_SIDE_IMAGE_WIDTH}px;'
-            "height:auto;margin:0;border:0;border-radius:13px 0 0 0;"
-            'object-fit:contain">'
-            "</a></td>"
+            f'style="display:block;width:100%;max-width:{EMAIL_POSTER_IMAGE_WIDTH}px;'
+            'height:auto;margin:0 auto;border:0;border-radius:13px 13px 0 0">'
+            "</a></td></tr>"
         )
-    heading_colspan = "" if image_cell else ' colspan="2"'
     location_html = _event_location_html(event)
     shortened_note = ""
     if event.description_truncated:
@@ -1759,10 +1754,9 @@ def _render_event_card(
     <table class="event-card-shell" role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse">
     <tr><td style="padding:0 0 12px">
       <table class="event-card-table" role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" bgcolor="#ffffff" style="width:100%;border-collapse:separate;border-spacing:0;background:#ffffff;border:1px solid #e3e7ee;border-radius:14px;overflow:hidden">
-      {hero_image}
+      {event_image}
       <tr>
-      {image_cell}
-      <td class="event-heading-cell"{heading_colspan} valign="top" style="padding:16px 20px 14px;overflow-wrap:anywhere;word-break:break-word">
+      <td class="event-heading-cell" colspan="2" valign="top" style="padding:16px 20px 14px;overflow-wrap:anywhere;word-break:break-word">
         <h3 class="event-title" style="margin:0 0 6px;color:#202124;font-size:22px;line-height:125%"><span aria-hidden="true">{icon_for(event)}</span> <a href="{event_url}" style="color:#174ea6;text-decoration:underline;text-decoration-color:#a8c7fa;text-underline-offset:3px">{html.escape(display_title)}</a></h3>
         <div class="event-meta" style="font-size:16px;font-weight:700;color:#202124;line-height:145%">
           <div class="event-time">{format_event_time(event)}</div>
@@ -1908,9 +1902,7 @@ html,body {{color-scheme:only light}}
   .email-content {{padding:18px 0!important}}
   .email-footer {{padding:16px!important;font-size:14px!important}}
   .event-day-title {{font-size:19px!important}}
-  .event-card-table {{table-layout:fixed!important}}
-  .event-image-cell {{width:{EMAIL_MOBILE_SIDE_IMAGE_WIDTH}px!important;max-width:{EMAIL_MOBILE_SIDE_IMAGE_WIDTH}px!important;padding:0!important;text-align:center!important}}
-  .event-image-cell a,.event-image-cell img {{width:{EMAIL_MOBILE_SIDE_IMAGE_WIDTH}px!important;max-width:{EMAIL_MOBILE_SIDE_IMAGE_WIDTH}px!important;height:auto!important;margin:0!important}}
+  .event-poster-image-cell img {{width:100%!important;max-width:100%!important;height:auto!important;margin:0 auto!important}}
   .event-hero-image-cell img {{width:100%!important;max-width:100%!important;height:auto!important}}
   .event-heading-cell {{width:auto!important;max-width:none!important;padding:14px 14px 12px!important}}
   .event-title {{font-size:20px!important;line-height:125%!important}}
@@ -1928,8 +1920,6 @@ html,body {{color-scheme:only light}}
   .branch-calendar-link {{padding:13px 10px!important;font-size:15px!important}}
 }}
 @media only screen and (max-width:390px) {{
-  .event-image-cell,.event-heading-cell {{display:block!important;width:auto!important;max-width:100%!important}}
-  .event-image-cell a,.event-image-cell img {{width:100%!important;max-width:100%!important;margin:0!important;border-radius:13px 13px 0 0!important}}
   .event-heading-cell {{padding:15px 16px 13px!important}}
   .branch-calendar-cell {{display:block!important;width:auto!important}}
   .branch-calendar-empty {{display:none!important}}

@@ -79,11 +79,13 @@
   clients may still load those trusted URLs. Unsafe redirects, unsupported
   content, true missing-image responses, and individually oversized files are
   omitted. Landscape images use a full-width hero row;
-  square and portrait images use the full width of an unpadded side column,
-  including a compact thumbnail beside the scan-first metadata at common phone
-  widths. The mobile side-image column is 152 CSS pixels for poster legibility.
-  That side image and its heading stack at 390 CSS pixels or below; the body
-  remains full width below. Explicit online events omit map links; hybrid events
+  square and portrait images use a centered, fluid poster row above the
+  scan-first metadata. The base table structure is stacked rather than relying
+  on a mobile media query, because some Gmail mobile render paths preserve the
+  desktop table while ignoring responsive rules. The poster grows to the card
+  width on responsive clients and is capped at 440 CSS pixels otherwise;
+  descriptions remain full width below. Explicit online events omit map links;
+  hybrid events
   retain their physical destination and name the online option. Explicit
   off-site venues or named/numbered rooms and floor locations refine the
   map/calendar destination without inventing data, while an off-site summary
