@@ -21,7 +21,6 @@ jobs:
       - run: python -m ruff format --check custom_components tests scripts
       - run: python -m ruff check custom_components tests scripts
       - run: python -m unittest discover -s tests -p "test_digest.py"
-      - run: python -m unittest discover -s tests -p "test_email_images.py"
       - run: python -m unittest discover -s tests -p "test_public_safety.py"
       - run: python -m compileall -q custom_components/free_library_events tests scripts
       - run: python scripts/check_public_safety.py

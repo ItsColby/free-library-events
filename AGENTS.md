@@ -31,7 +31,6 @@ Use Python 3.14 and run:
 
 ```powershell
 python -m unittest discover -s tests -p "test_digest.py"
-python -m unittest discover -s tests -p "test_email_images.py"
 python -m unittest discover -s tests -p "test_public_safety.py"
 python -m compileall -q custom_components\free_library_events tests scripts
 python scripts\check_public_safety.py
@@ -42,7 +41,7 @@ Home Assistant tests require the dependencies in `requirements-ha-test.txt`:
 
 ```powershell
 python -m pip install -r requirements-ha-test.txt
-python -m pytest tests\test_integration_ha.py -q
+python -m pytest tests\test_integration_ha.py tests\test_email_images.py -q
 ```
 
 Before reporting complete, read back `git status --short --branch` and list

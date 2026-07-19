@@ -138,13 +138,13 @@ multi-paragraph descriptions do not collapse into one dense block. On wider
 screens landscape artwork uses a full-width hero row; square and portrait
 artwork uses the full width of its side column without cropping. The full
 description uses the card width below, and narrow clients stack the image,
-heading, and body. Official age
-categories appear once in a muted `Listed for:` line directly with the title,
-time, and location. Strongly evidenced secondary activities, accessibility,
-participation, take-home materials, and planning details appear there as compact
-highlights, but a format already obvious in the title is not repeated. Action
-items are shown first, followed by logistics and then secondary topics, with a
-five-highlight cap. Negated or audience-qualified claims are not promoted. A
+heading, and body. Official age categories appear once in a muted `Listed for:`
+line directly with the title, time, and location. Strongly evidenced secondary
+activities, accessibility, participation, take-home materials, and planning
+details appear there as compact highlights, but a format already obvious in the
+title is not repeated. Action items are shown first, followed by logistics and
+then secondary topics, with a five-highlight cap. Negated or
+audience-qualified claims are not promoted. A
 more specific highlight suppresses its broader equivalent, and a generic breadth
 label is omitted when the published audience already conveys it. Generic
 event-page labels such as Family Programs, Storytimes, Children, and Family are
@@ -156,13 +156,15 @@ location name links to Google Maps, while the title and image link to the
 official event. An explicitly online event uses `Online` with no misleading map
 link. A hybrid event retains the physical destination and visibly names its
 online option.
+
 When the RSS text explicitly names an off-site park, square, playground,
 garden, museum, community/recreation center, school, theater, studio, gallery,
 plaza, courtyard, field, pool, market, pavilion, campus, or center, that venue
 replaces the hosting branch as the map and calendar destination. Specifically
-named/numbered rooms and floor locations are shown with their
-branch. An off-site location line also identifies the hosting branch without
-making that context part of the Maps link.
+named/numbered rooms and floor locations are shown with their branch. An
+off-site location line also identifies the hosting branch without making that
+context part of the Maps link.
+
 Contextual links embedded by the library remain linked in HTML and are listed
 after the description in plain text. The email-client-safe calendar button opens
 a prefilled Google Calendar event. The linked event title and image remain the
@@ -319,7 +321,6 @@ Python 3.14 is required for the Home Assistant 2026.7 test boundary.
 
 ```powershell
 python -m unittest discover -s tests -p "test_digest.py"
-python -m unittest discover -s tests -p "test_email_images.py"
 python -m unittest discover -s tests -p "test_public_safety.py"
 python -m compileall -q custom_components\free_library_events tests scripts
 python scripts\check_public_safety.py

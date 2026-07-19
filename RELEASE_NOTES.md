@@ -21,7 +21,8 @@
   source-backed provided materials remain visible. Activity labels already
   obvious in the title and generic event-page taxonomy are omitted. Cap each
   card at five highlights, prioritizing required actions, logistics, then
-  secondary topics, and reject negated or audience-qualified claims.
+  secondary topics, and reject negated or audience-qualified claims, including
+  both spellings of canceled/cancelled and explicit no-materials wording.
 - Bound display titles, descriptions, Google Calendar details/URLs, event count,
   and final HTML at 80,000 UTF-8 bytes. When compaction is required, use
   ephemeral distance from Home Assistant's configured location to public branch
@@ -29,10 +30,12 @@
   storing coordinates/distances; keep visible order chronological and disclose
   any farthest overflow omission.
 - Preserve distinct recurring occurrences when a series reuses one event URL by
-  including branch, date, and start time in its identity.
+  including branch, date, and start time in its identity; retain both the simple
+  publisher event IDs and exact occurrence IDs in response metadata.
 - Recognize explicit online and hybrid events, broader confidently named venue
   types, rooms, and floors; omit misleading map links for online-only events and
-  retain the physical destination plus online context for hybrid events.
+  retain the physical destination plus unlinked online context for hybrid
+  events. Keep off-site hosting context in compact as well as rich cards.
 - Restore a generic title after whitespace cleanup and match dynamic event icons
   on whole words so titles such as `Community Party` and `Bread Making` do not
   receive unrelated art/book icons.
@@ -63,6 +66,8 @@
   transient transport/server, storage, and digest-level count/total-size
   failures. Unsafe redirects, unsupported content, permanent HTTP failures, and
   individually oversized images remain omitted.
+- Keep image tests in the Home Assistant dependency job while the
+  dependency-light unit job remains runnable with only Ruff installed.
 
 # Free Library Events v2026.7.22
 

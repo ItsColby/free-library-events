@@ -43,51 +43,53 @@
   line with the title, time, and location. Presentation highlights render in
   that same scan-first metadata area and are derived deterministically from the
   RSS title, description, or explicit venue; title-redundant activity labels,
-  broader
-  equivalents of specific take-home details, audience-redundant breadth labels,
-  and generic taxonomy are omitted. At most five highlights render, with
+  broader equivalents of specific take-home details, audience-redundant breadth
+  labels, and generic taxonomy are omitted. At most five highlights render, with
   actionable cautions ahead of logistics and secondary topics; negated and
   audience-qualified claims are excluded. Safe contextual RSS links, paragraph
   boundaries, emphasis, and list structure are preserved through an allow-list
-  sanitizer. Presentation tables,
-  percentage line heights, a complementary hidden preheader, and table-cell
-  spacing for day, card, and button layout improve compatibility across email
-  rendering engines. Linked event images use functional alternative text that
-  identifies their official-details
-  destination. By default, email clients load event images only from the
-  publisher's HTTPS hosts; the renderer keeps the publisher's working
-  dot-prefixed image paths and does not resolve a blank image field to the feed
-  URL. An explicit SMTP embedding option deterministically downloads only the
-  selected events' unique images through Home Assistant's shared HTTP session,
-  follows at most two HTTPS redirects that remain on trusted publisher hosts,
+  sanitizer. Presentation tables, percentage line heights, a complementary
+  hidden preheader, and table-cell spacing for day, card, and button layout
+  improve compatibility across email rendering engines. Linked event images use
+  functional alternative text that identifies their official details page. By
+  default, email clients load event
+  images only from the publisher's HTTPS hosts; the renderer keeps the
+  publisher's working dot-prefixed image paths and does not resolve a blank
+  image field to the feed URL. An explicit SMTP embedding option
+  deterministically downloads only the selected events' unique images through
+  Home Assistant's shared HTTP session, follows at most two HTTPS redirects that
+  remain on trusted publisher hosts,
   validates signatures and dimensions, and writes them to a random
-  integration-owned run under
-  the default-allowed `www` root, substitutes basename-matched `cid:` sources,
-  and returns the local paths for the caller's legacy HTML/images-capable SMTP
+  integration-owned run under the default-allowed `www` root, substitutes
+  basename-matched `cid:` sources, and returns the local paths for the caller's
+  legacy HTML/images-capable SMTP
   notify action. The newer plain-text SMTP notify entity is outside this CID
-  contract. It never calls an LLM. Each run expires after one hour; scheduled, pre-render stale, and startup
-  cleanup remove owned run directories while marker and name checks preserve all
-  other files. Transient transport/server failures, storage failures, and
-  digest-level count/total-size limits may retain the already trusted publisher
-  URL as a remote fallback; unsafe redirects, unsupported content, permanent
-  HTTP failures, and individually oversized files are omitted. Landscape images
+  contract. It never calls an LLM. Each run expires after one hour. Scheduled,
+  pre-render stale, and startup cleanup remove owned run directories while
+  marker and name checks preserve all other files. Transient transport/server
+  failures, storage failures, and digest-level count/total-size limits may
+  retain the already trusted publisher URL as a remote fallback; unsafe
+  redirects, unsupported content, permanent HTTP failures, and individually
+  oversized files are omitted. Landscape images
   use a full-width hero row; square and portrait images use the full width of an
   unpadded side column, with a full-width body below. Image, heading, and body
   stack in narrow clients. Explicit online events omit map links; hybrid events
   retain their physical destination and name the online option. Explicit
   off-site venues or named/numbered rooms and floor locations refine the
-  map/calendar destination without inventing data, while an off-site summary retains unlinked
-  hosting-branch context. An end time is accepted only from an explicit RSS
-  description range that matches the
-  published start or a conservative whole-event duration statement; the digest
-  and HA calendar both use that same evidence. Recurring rows use an occurrence
-  identity containing source URL/title, branch, date, and start time so a shared
-  series URL cannot collapse distinct dates. Display titles, descriptions,
-  calendar details/URLs, event count, and the final HTML byte size have separate
-  bounds. The renderer keeps chronological presentation, reserves rich cards
-  for nearest branches when a large result requires compaction, and removes
-  farthest compact overflow only when necessary to remain within 80,000 UTF-8
-  bytes. It visibly discloses any email-only omission. It does not call an LLM.
+  map/calendar destination without inventing data, while an off-site summary
+  retains unlinked hosting-branch context. An end time is accepted only from an
+  explicit RSS description range that matches the published start or a
+  conservative whole-event duration statement; the digest and HA calendar both
+  use that same evidence. Recurring rows use an occurrence identity containing
+  source URL/title, branch, date, and start time so a shared
+  series URL cannot collapse distinct dates. Response metadata retains both
+  simple publisher event IDs and exact occurrence IDs. Display titles,
+  descriptions, calendar details/URLs, event count, and the final HTML byte size
+  have separate bounds. The renderer keeps chronological presentation, reserves
+  rich cards for nearest branches when a large result requires compaction, and
+  removes farthest compact overflow only when necessary to remain within 80,000
+  UTF-8 bytes. It visibly discloses any email-only omission. It does not call an
+  LLM.
 - `calendar.py`, `sensor.py`, and `button.py` expose the native user-facing
   calendar, diagnostic status, and manual refresh surfaces.
 - `__init__.py` registers the response-only `render_digest` action. The caller
@@ -103,8 +105,8 @@
 - `email_images.py` owns the deterministic publisher-image download limits,
   trusted redirect policy, dimension/orientation classification, CID filenames,
   integration-owned temporary storage, and guarded cleanup. Remote-image
-  rendering remains the no-storage default so
-  generic response consumers do not receive unusable CID references.
+  rendering remains the no-storage default so generic response consumers do not
+  receive unusable CID references.
 - `diagnostics.py` redacts child name and birth date and exposes only bounded
   per-source counts, type-expansion evidence, ordering, coverage boundaries, and
   health. High-volume shard failures remain available in on-demand diagnostics;
@@ -126,20 +128,20 @@ feed, and still discovers explicitly inclusive events assigned to a narrower
 category. A feed below the observed ten-item boundary is complete. At or above
 that boundary, its parsed order and last event must prove coverage beyond the
 target digest week. If they do not, the coordinator requests the stable official
-event-type taxonomy and merges the resulting overlapping rows. Expansion proves
-coverage only when all
-type shards cover the week and collectively recover the capped base prefix;
+event-type taxonomy and merges the resulting overlapping rows. Expansion
+proves coverage only when all type shards cover the week and collectively
+recover the capped base prefix;
 otherwise the limitation remains visible. At most twelve capped sources are
 expanded in one refresh, enough for the maximum three overlapping current-age
 categories across all four supported branches while the worst case stays
 bounded. Current-age sources are always selected before supplemental discovery.
 Current-age feed gaps are operationally `partial` and are disclosed by the
 rendered digest. A healthy but still-capped supplemental age feed is `limited`:
-this truthfully records that
-later broadly inclusive events cannot be proven without conflating a publisher
-limitation with a source failure. Render-response metadata retains supplemental
-failures, cap limitations, and expansion evidence for native HA trace/readback
-without adding diagnostic clutter to the email body.
+this truthfully records that later broadly inclusive events cannot be proven
+without conflating a publisher limitation with a source failure.
+Render-response metadata retains supplemental failures, cap limitations, and
+expansion evidence for native HA trace/readback without adding diagnostic
+clutter to the email body.
 
 Protected event HTML and ICS endpoints are deliberately outside the runtime
 source boundary. Home Assistant's asynchronous HTTP clients receive the

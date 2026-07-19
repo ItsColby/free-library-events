@@ -1184,6 +1184,33 @@ def event_location_summary(event: Event) -> str:
     return summary
 
 
+def _event_location_html(event: Event) -> str:
+    """Render map-linked physical context without linking virtual/host context."""
+
+    if event.modality == "online":
+        return html.escape(event_location_name(event))
+
+    physical_label = event_location_name(event)
+    if event.room:
+        physical_label += f" {MIDDLE_DOT} {event.room}"
+    directions = event_directions_url(event)
+    if directions:
+        rendered = (
+            f'<a href="{html.escape(directions, quote=True)}" '
+            'style="color:#202124;text-decoration:underline;'
+            'text-decoration-color:#c4c7c5;text-underline-offset:3px">'
+            f"{html.escape(physical_label)}</a>"
+        )
+    else:
+        rendered = html.escape(physical_label)
+
+    if event.modality == "hybrid":
+        rendered += f" {MIDDLE_DOT} Online option"
+    if event.venue:
+        rendered += f" {MIDDLE_DOT} Hosted by {html.escape(event.branch.name)}"
+    return rendered
+
+
 def event_calendar_location(event: Event) -> str:
     """Return a geocodable calendar location without a redundant email address."""
 
@@ -1410,7 +1437,9 @@ def _event_chip_specs(event: Event) -> tuple[tuple[str, str], ...]:
         re.IGNORECASE,
     )
     weather_negated = re.search(
-        r"\b(?:will|does|do) not be cancelled for weather\b|"
+        r"\bwill not be cancel(?:l)?ed (?:for|due to|because of) (?:the )?weather\b|"
+        r"\b(?:does|do) not cancel (?:for|due to|because of) (?:the )?weather\b|"
+        r"\bweather[^.]{0,35}\bwill not cancel\b|"
         r"\bregardless of (?:the )?weather\b",
         searchable,
         re.IGNORECASE,
@@ -1448,7 +1477,8 @@ def _event_chip_specs(event: Event) -> tuple[tuple[str, str], ...]:
         searchable,
         re.I,
     ) and not re.search(
-        r"\b(?:materials?|supplies) (?:are |will be )?not provided\b",
+        r"\b(?:materials?|supplies) (?:are |will be )?not provided\b|"
+        r"\bno (?:materials?|supplies) (?:are |will be )?provided\b",
         searchable,
         re.I,
     ):
@@ -1593,15 +1623,7 @@ def _render_event_card(
     event_url = html.escape(event_details_url(event), quote=True)
     display_title = _bounded_text(event.title, MAX_DISPLAY_TITLE_LENGTH)
     if compact:
-        location_label = html.escape(event_location_label(event))
-        directions = event_directions_url(event)
-        location_html = (
-            f'<a href="{html.escape(directions, quote=True)}" '
-            'style="color:#202124;text-decoration:underline">'
-            f"{location_label}</a>"
-            if directions
-            else location_label
-        )
+        location_html = _event_location_html(event)
         calendar_url = html.escape(
             google_calendar_url(event, duration_minutes, compact=True), quote=True
         )
@@ -1641,22 +1663,7 @@ def _render_event_card(
             'margin:0 auto;border:0;object-fit:contain"></a></td>'
         )
     heading_colspan = "" if image_cell else ' colspan="2"'
-    location_label = html.escape(event_location_label(event))
-    host_context = (
-        f" {MIDDLE_DOT} Hosted by {html.escape(event.branch.name)}"
-        if event.venue and event.modality != "online"
-        else ""
-    )
-    directions = event_directions_url(event)
-    if directions:
-        location_html = (
-            f'<a href="{html.escape(directions, quote=True)}" '
-            'style="color:#202124;text-decoration:underline;'
-            'text-decoration-color:#c4c7c5;text-underline-offset:3px">'
-            f"{location_label}</a>"
-        )
-    else:
-        location_html = location_label
+    location_html = _event_location_html(event)
     shortened_note = ""
     if event.description_truncated:
         shortened_note = (
@@ -1681,7 +1688,7 @@ def _render_event_card(
       {image_cell}
       <td class="event-heading-cell"{heading_colspan} valign="top" style="padding:16px 20px 14px;overflow-wrap:anywhere;word-break:break-word">
         <h3 style="margin:0 0 6px;color:#202124;font-size:22px;line-height:125%"><span aria-hidden="true">{icon_for(event)}</span> <a href="{event_url}" style="color:#174ea6;text-decoration:underline;text-decoration-color:#a8c7fa;text-underline-offset:3px">{html.escape(display_title)}</a></h3>
-        <div style="font-size:16px;font-weight:700;color:#202124;line-height:145%">{format_event_time(event)} {MIDDLE_DOT} {location_html}{host_context}</div>
+        <div style="font-size:16px;font-weight:700;color:#202124;line-height:145%">{format_event_time(event)} {MIDDLE_DOT} {location_html}</div>
         {_event_audience_html(event)}
         {_event_chips_html(event)}
       </td>
@@ -1846,10 +1853,14 @@ def _render_plain_text(
         for event in day_items:
             chip_labels = [label for _kind, label in _event_chip_specs(event)]
             age_categories = _event_age_categories(event)
+            directions = event_directions_url(event)
+            location_line = event_location_summary(event)
+            if directions:
+                location_line += f": {directions}"
             lines.extend(
                 [
                     f"{format_event_time(event)} | {event.title}",
-                    f"{event_location_summary(event)}: {event_directions_url(event)}",
+                    location_line,
                     *(
                         [f"Listed for: {f' {MIDDLE_DOT} '.join(age_categories)}"]
                         if age_categories
@@ -2135,6 +2146,9 @@ def build_digest(
             "included_event_ids": [
                 event.link.rsplit("/", 1)[-1] if event.link else event_identity(event)
                 for event in source_included
+            ],
+            "included_occurrence_ids": [
+                event_identity(event) for event in source_included
             ],
             "html_bytes": len(rendered_html.encode("utf-8")),
             "full_card_count": len(full_event_ids),

@@ -116,6 +116,27 @@ class EmailImageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([request[0] for request in session.requests], [first_url])
         self.assertEqual(batch.fallback_urls, (second_url,))
 
+    async def test_total_size_limit_keeps_earlier_images_and_falls_back(self) -> None:
+        first_url = "https://libwww.freelibrary.org/images/first.png"
+        second_url = "https://libwww.freelibrary.org/images/second.png"
+        session = _Session(
+            {
+                first_url: _Response(_PNG),
+                second_url: _Response(_PNG),
+            }
+        )
+
+        with patch.object(email_images, "MAX_TOTAL_IMAGE_BYTES", len(_PNG) + 1):
+            batch = await email_images.async_download_event_images(
+                session,  # type: ignore[arg-type]
+                [_event("First event", first_url), _event("Second event", second_url)],
+            )
+
+        self.assertEqual([image.source_url for image in batch.images], [first_url])
+        self.assertEqual(batch.failure_count, 1)
+        self.assertIn("size limit", batch.failure_examples[0])
+        self.assertEqual(batch.fallback_urls, (second_url,))
+
     async def test_rejects_non_publisher_image_urls_before_request(self) -> None:
         session = _Session({})
 
@@ -161,6 +182,28 @@ class EmailImageTests(unittest.IsolatedAsyncioTestCase):
                 Path(temporary_directory), batch
             )
             self.assertEqual(bundle.source_url_to_layout[first_url], "hero")
+
+    def test_reads_jpeg_dimensions_and_classifies_realistic_flyer_layouts(
+        self,
+    ) -> None:
+        jpeg = (
+            b"\xff\xd8\xff\xc0\x00\x11\x08"
+            + (600).to_bytes(2, "big")
+            + (1200).to_bytes(2, "big")
+            + b"\x03\x01\x11\x00\x02\x11\x00\x03\x11\x00"
+            + b"\xff\xd9"
+        )
+
+        dimensions = email_images._image_dimensions(jpeg, ".jpg")
+
+        self.assertEqual(dimensions, (1200, 600))
+        image = email_images.DownloadedImage(
+            "https://libwww.freelibrary.org/images/flyer.jpg",
+            jpeg,
+            ".jpg",
+            *dimensions,
+        )
+        self.assertEqual(email_images._image_layout(image), "hero")
 
     async def test_remote_fallback_is_reason_aware(self) -> None:
         unavailable_url = "https://libwww.freelibrary.org/images/unavailable.png"

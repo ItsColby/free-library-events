@@ -821,6 +821,11 @@ class DigestTests(unittest.TestCase):
                 card = digest._render_event_card(event, duration_minutes=60)
                 self.assertIn(f">{expected}</a>", card)
                 self.assertIn("Hosted by Parkway Central Library", card)
+                compact_card = digest._render_event_card(
+                    event, duration_minutes=60, compact=True
+                )
+                self.assertIn(f">{expected}</a>", compact_card)
+                self.assertIn("Hosted by Parkway Central Library", compact_card)
                 self.assertIn(
                     digest.urllib.parse.quote_plus(expected),
                     digest.event_directions_url(event),
@@ -1415,6 +1420,24 @@ class DigestTests(unittest.TestCase):
         self.assertNotEqual(digest.event_identity(first), digest.event_identity(second))
         self.assertEqual(len(digest.merge_events([first, second])), 2)
 
+        payload = digest.build_digest(
+            child_name="Avery",
+            birth_date=date(2025, 10, 7),
+            filter_mode="Recommended",
+            duration_minutes=60,
+            selected_branches=[digest.BRANCHES["CEN"]],
+            reference_date=date(2026, 7, 19),
+            events=[first, second],
+            source_counts={"Parkway Central Library": 2},
+        )
+        self.assertEqual(
+            payload["metadata"]["included_event_ids"], ["series", "series"]
+        )
+        self.assertEqual(
+            payload["metadata"]["included_occurrence_ids"],
+            [digest.event_identity(first), digest.event_identity(second)],
+        )
+
     def test_blank_title_restores_the_generic_fallback(self) -> None:
         payload = rss(
             [
@@ -1486,14 +1509,26 @@ class DigestTests(unittest.TestCase):
             description=(
                 "Registration is required for adults only; children may drop in. "
                 "AAC boards are not provided. The event will not be cancelled for "
-                "weather."
+                "weather. No materials are provided."
             ),
         )
         labels = {label for _kind, label in digest._event_chip_specs(negated)}
         self.assertNotIn("Registration required", labels)
         self.assertNotIn("AAC board provided", labels)
         self.assertNotIn("Weather dependent", labels)
+        self.assertNotIn("Materials provided", labels)
         self.assertIn("Drop-in", labels)
+
+        american_spelling = digest.replace(
+            event,
+            description=(
+                "Weather update: the event will not be canceled because of the weather."
+            ),
+        )
+        self.assertNotIn(
+            "Weather dependent",
+            {label for _kind, label in digest._event_chip_specs(american_spelling)},
+        )
 
     def test_online_and_hybrid_events_do_not_get_misleading_map_links(self) -> None:
         online = digest.Event(
@@ -1518,6 +1553,27 @@ class DigestTests(unittest.TestCase):
         self.assertEqual(digest.event_calendar_location(online), "Online")
         self.assertIn("Online", digest.event_location_label(hybrid))
         self.assertTrue(digest.event_directions_url(hybrid))
+
+        online_card = digest._render_event_card(online, duration_minutes=60)
+        self.assertIn(f"{digest.MIDDLE_DOT} Online</div>", online_card)
+        self.assertNotIn(">Online</a>", online_card)
+        hybrid_card = digest._render_event_card(hybrid, duration_minutes=60)
+        self.assertIn(f"</a> {digest.MIDDLE_DOT} Online option", hybrid_card)
+        self.assertNotRegex(hybrid_card, r">[^<]*Online option</a>")
+
+        plain_text = digest._render_plain_text(
+            [online],
+            child_name="Avery",
+            birth_date=date(2025, 10, 7),
+            week_start=date(2026, 7, 20),
+            week_end=date(2026, 7, 26),
+            branches=[digest.BRANCHES["CEN"]],
+            duration_minutes=60,
+            source_errors=(),
+            source_warnings=(),
+        )
+        self.assertIn("\nOnline\n", plain_text)
+        self.assertNotIn("\nOnline: \n", plain_text)
 
     def test_feed_modality_requires_explicit_event_wording(self) -> None:
         items = [
