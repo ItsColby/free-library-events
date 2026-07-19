@@ -31,6 +31,8 @@ MAX_CALENDAR_URL_LENGTH = 4_096
 MAX_DIGEST_HTML_BYTES = 80_000
 MAX_EMAIL_EVENTS = 100
 MAX_EVENT_CHIPS = 5
+EMAIL_CONTENT_WIDTH = 680
+EMAIL_SIDE_IMAGE_WIDTH = 220
 TRUSTED_IMAGE_HOSTS = frozenset({"libwww.freelibrary.org", "www.freelibrary.org"})
 
 # Stable source taxonomy with intentionally overlapping local windows. The
@@ -1561,7 +1563,7 @@ def _button(label: str, url: str, primary: bool = False) -> str:
         '<table class="email-button" role="presentation" border="0" '
         'cellpadding="0" cellspacing="0" '
         'style="border-collapse:separate;margin:12px 0 0">'
-        f'<tr><td bgcolor="{background}" style="padding:11px 15px;'
+        f'<tr><td bgcolor="{background}" style="padding:12px 16px;'
         f'border:1px solid #1967d2;border-radius:8px;background:{background}">'
         f'<a href="{html.escape(url, quote=True)}" style="display:block;'
         f"color:{color};font-weight:700;text-decoration:none;font-size:14px;"
@@ -1645,22 +1647,27 @@ def _render_event_card(
             '<tr><td class="event-hero-image-cell" colspan="2" style="padding:0;'
             'background:#ffffff;text-align:center">'
             f'<a href="{event_url}" style="display:block;width:100%;text-decoration:none">'
-            f'<img width="638" src="{html.escape(event.image_url, quote=True)}" '
+            f'<img width="{EMAIL_CONTENT_WIDTH}" '
+            f'src="{html.escape(event.image_url, quote=True)}" '
             f'alt="View official event details for {html.escape(display_title, quote=True)}" '
-            'style="display:block;width:100%;max-width:638px;height:auto;margin:0 auto;'
-            'border:0"></a></td></tr>'
+            'style="display:block;width:100%;max-width:100%;height:auto;margin:0;'
+            'border:0;border-radius:13px 13px 0 0"></a></td></tr>'
         )
     elif event.image_url and not compact:
         image_cell = (
-            '<td class="event-image-cell" width="190" valign="top" '
-            'style="width:190px;padding:0;background:#ffffff;text-align:center">'
+            f'<td class="event-image-cell" width="{EMAIL_SIDE_IMAGE_WIDTH}" '
+            f'valign="top" style="width:{EMAIL_SIDE_IMAGE_WIDTH}px;padding:0;'
+            'background:#ffffff;text-align:center">'
             f'<a href="{event_url}" style="display:block;width:100%;'
             'text-decoration:none">'
-            f'<img width="190" src="{html.escape(event.image_url, quote=True)}" '
+            f'<img width="{EMAIL_SIDE_IMAGE_WIDTH}" '
+            f'src="{html.escape(event.image_url, quote=True)}" '
             f'alt="View official event details for '
             f'{html.escape(display_title, quote=True)}" '
-            'style="display:block;width:100%;max-width:190px;height:auto;'
-            'margin:0 auto;border:0;object-fit:contain"></a></td>'
+            f'style="display:block;width:100%;max-width:{EMAIL_SIDE_IMAGE_WIDTH}px;'
+            "height:auto;margin:0;border:0;border-radius:13px 0 0 0;"
+            'object-fit:contain">'
+            "</a></td>"
         )
     heading_colspan = "" if image_cell else ' colspan="2"'
     location_html = _event_location_html(event)
@@ -1799,7 +1806,7 @@ html,body {{color-scheme:light only}}
 @media only screen and (max-width:620px) {{
   .event-image-cell,.event-heading-cell,.event-body-cell {{display:block!important;width:auto!important;max-width:100%!important}}
   .event-image-cell {{padding:0!important;text-align:center!important}}
-  .event-image-cell img {{width:100%!important;max-width:360px!important;margin:0 auto!important}}
+  .event-image-cell img {{width:100%!important;max-width:100%!important;margin:0!important;border-radius:13px 13px 0 0!important}}
   .event-hero-image-cell img {{width:100%!important;max-width:100%!important;height:auto!important}}
   .event-heading-cell {{padding:16px 18px 14px!important}}
   .event-body-cell {{padding:16px 18px 18px!important}}
@@ -1808,7 +1815,7 @@ html,body {{color-scheme:light only}}
 <body style="margin:0;padding:0;background:#f3f6fb;font-family:Arial,Helvetica,sans-serif;color:#202124">
   <div style="display:none!important;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all">{html.escape(preheader)}&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;</div>
   <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" bgcolor="#f3f6fb" style="width:100%;border-collapse:collapse;background:#f3f6fb"><tr><td align="center" style="padding:20px 10px">
-    <table role="presentation" width="680" border="0" cellpadding="0" cellspacing="0" style="width:100%;max-width:680px;border-collapse:collapse">
+    <table role="presentation" width="{EMAIL_CONTENT_WIDTH}" border="0" cellpadding="0" cellspacing="0" style="width:100%;max-width:{EMAIL_CONTENT_WIDTH}px;border-collapse:collapse">
       <tr><td style="padding:24px 24px 20px;background:#174ea6;border-radius:16px 16px 0 0;color:#ffffff">
         <div style="font-size:13px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;opacity:.85">{_format_week_range(week_start, week_end)}</div>
         <h1 style="margin:8px 0 8px;font-size:30px;line-height:120%"><span aria-hidden="true">&#128218;</span> Library fun for {html.escape(child_name)}</h1>

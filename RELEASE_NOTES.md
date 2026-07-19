@@ -1,4 +1,4 @@
-# Unreleased
+# Free Library Events v2026.7.23
 
 ## Changed
 
@@ -7,11 +7,12 @@
   Home Assistant `www` run, rewritten to matching CID references, and returned
   as notifier-ready local paths. Individual image failures omit only the image
   and remain visible in bounded response metadata.
-- Rework each digest card into a larger full-column image beside scan-first
+- Rework each digest card into a wider full-column image beside scan-first
   title, time, location, audience, and highlights, followed by a divided
-  full-width description and action row. Landscape artwork becomes a full-width
-  hero while square/portrait artwork uses the side column; both preserve the
-  publisher's aspect ratio without the prior mobile height cap.
+  full-width description and action row. Landscape artwork becomes an
+  edge-to-edge full-width hero while square/portrait artwork uses a wider side
+  column and fills stacked narrow cards; both preserve the publisher's aspect
+  ratio without cropping or artificial gutters.
 - Preserve safe publisher paragraphs, links, bold/emphasis, and list structure
   while stripping scripts, styles, event handlers, and unsafe URLs.
 - Show all official age categories in one muted `Listed for:` audience line and
@@ -49,9 +50,9 @@
   response metadata and diagnostics.
 - Add a complementary schedule-and-action preheader; improve highlight
   size/contrast, harden preheader hiding, card/day spacing, and the calendar
-  button across email clients, use compatible percentage line heights, give
-  linked images functional alternative text, and hide decorative event emoji
-  from assistive technology.
+  button's touch target across email clients, use compatible percentage line
+  heights, give linked images functional alternative text, and hide decorative
+  event emoji from assistive technology.
 
 ## Maintenance
 

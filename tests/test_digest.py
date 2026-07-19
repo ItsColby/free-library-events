@@ -452,8 +452,11 @@ class DigestTests(unittest.TestCase):
         self.assertIn("padding:0 0 12px", card)
         self.assertNotIn('<div style="margin:0 0 12px', card)
         self.assertIn('colspan="2"', card)
-        self.assertIn('width="190"', card)
-        self.assertIn("width:100%;max-width:190px;height:auto", card)
+        self.assertIn(f'width="{digest.EMAIL_SIDE_IMAGE_WIDTH}"', card)
+        self.assertIn(
+            f"width:100%;max-width:{digest.EMAIL_SIDE_IMAGE_WIDTH}px;height:auto",
+            card,
+        )
         self.assertNotIn("background:#f8fafd", card)
         self.assertIn("border-top:1px solid #eef1f5", card)
         self.assertIn(
@@ -1145,7 +1148,7 @@ class DigestTests(unittest.TestCase):
         self.assertNotIn(">Other calendars</a>", payload["html"])
         self.assertIn('class="email-button"', payload["html"])
         self.assertIn('<td bgcolor="#1967d2"', payload["html"])
-        self.assertIn("padding:11px 15px", payload["html"])
+        self.assertIn("padding:12px 16px", payload["html"])
         self.assertIn("line-height:160%", payload["html"])
         self.assertNotRegex(
             payload["html"],
@@ -1196,7 +1199,7 @@ class DigestTests(unittest.TestCase):
         self.assertIn("text-decoration:underline", payload["html"])
         self.assertIn("@media only screen and (max-width:620px)", payload["html"])
         self.assertIn(
-            "width:100%!important;max-width:360px!important;margin:0 auto!important",
+            "width:100%!important;max-width:100%!important;margin:0!important",
             payload["html"],
         )
 
@@ -1626,7 +1629,8 @@ class DigestTests(unittest.TestCase):
         card = digest._render_event_card(event, duration_minutes=60)
 
         self.assertIn('class="event-hero-image-cell"', card)
-        self.assertIn('width="638"', card)
+        self.assertIn(f'width="{digest.EMAIL_CONTENT_WIDTH}"', card)
+        self.assertIn("width:100%;max-width:100%;height:auto", card)
         self.assertNotIn('class="event-image-cell"', card)
 
     def test_calendar_url_and_distance_prioritized_html_are_bounded(self) -> None:
