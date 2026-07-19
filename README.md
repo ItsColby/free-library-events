@@ -25,7 +25,8 @@ service is used at runtime.
 - Official branch-and-age RSS queries for every category in the configured
   person's current life-stage group, with duplicate consolidation
 - Coverage-aware operation that distinguishes source failures from the official
-  ten-item limit on supplemental age-category feeds
+  ten-item limit and adaptively expands unresolved capped feeds through official
+  event-type filters
 - Redacted integration diagnostics
 - Response-only `free_library_events.render_digest` action returning:
   - subject
@@ -161,7 +162,8 @@ The status sensor reports:
 - `ok` when every selected source loaded and both current-age and supplemental
   age-category coverage are proven through the upcoming digest week
 - `limited` when every source is healthy but an official ten-item supplemental
-  age feed cannot prove that later broadly inclusive events were returned
+  age feed remains unable to prove that later broadly inclusive events were
+  returned after bounded event-type expansion
 - `partial` when a current or supplemental source failed, parsed incompletely,
   or was unordered
 - `error` after a complete refresh failure
@@ -172,8 +174,9 @@ branch and disclose the unavailable source. If every selected feed fails,
 
 Diagnostics redact the child name and birth date. They include per-branch and
 age-category published/parsed counts, ordering and coverage-boundary evidence,
-source availability, bounded errors, last refresh time, next-week match count,
-and cached event counts by branch.
+adaptive type-feed request/failure counts, discovered-event counts, source
+availability, bounded errors, last refresh time, next-week match count, and
+cached event counts by branch.
 
 ## Source limitations
 
@@ -182,9 +185,13 @@ and cached event counts by branch.
   then consolidates duplicate copies. This retains the publisher's complete
   available age provenance and discovers clearly inclusive events even when
   they were assigned to a narrower child category, without mixing in an
-  unclassified all-events feed. A healthy capped supplemental category that
-  ends before the digest week is complete produces the honest `limited` status;
-  operational failures remain `partial`. Relevant current-age coverage
+  unclassified all-events feed. The RSS endpoint ignores `page=2`, so an
+  unresolved capped feed is instead queried through all official event-type
+  filters and deduplicated. Expansion is bounded to four feeds per refresh and
+  prioritizes current-age categories. Coverage is proven only when every type
+  shard covers the digest horizon and recovers the capped base prefix. A healthy
+  supplemental category that remains unresolved produces the honest `limited`
+  status; operational failures remain `partial`. Relevant current-age coverage
   problems and operational supplemental failures are also disclosed in the
   rendered digest; known cap limitations stay out of the event-focused email but
   remain available in status, diagnostics, and render-response metadata.

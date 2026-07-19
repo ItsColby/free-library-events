@@ -17,6 +17,7 @@ from .coordinator import (
     LibraryDataCoordinator,
     coverage_warnings,
     supplemental_coverage,
+    source_expansion_details,
     source_keys_for_window,
     source_label,
 )
@@ -140,6 +141,7 @@ class LibraryStatusSensor(CoordinatorEntity, SensorEntity):
             "current_age_coverage_warnings": warnings,
             "supplemental_age_failures": supplemental_failures,
             "supplemental_age_limitations": supplemental_limitations,
+            "expanded_capped_sources": source_expansion_details(data),
             "unavailable_current_age_sources": [
                 source_label(key) for key in relevant_error_keys
             ],

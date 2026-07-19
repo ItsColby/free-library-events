@@ -65,6 +65,14 @@ class Branch:
             raise ValueError(f"Unsupported official age category: {age_category}")
         return f"{self.rss_url}&{urllib.parse.urlencode({'age': age_category})}"
 
+    def rss_url_for_age_and_type(self, age_category: str, event_type: str) -> str:
+        """Return an official age feed narrowed by one publisher event type."""
+
+        return (
+            f"{self.rss_url_for_age(age_category)}&"
+            f"{urllib.parse.urlencode({'type': event_type})}"
+        )
+
     @property
     def calendar_url(self) -> str:
         return f"https://libwww.freelibrary.org/calendar/?location_code={self.code}"

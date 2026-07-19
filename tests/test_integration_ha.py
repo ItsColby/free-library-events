@@ -26,8 +26,10 @@ except ModuleNotFoundError as err:  # pragma: no cover - local non-HA test env
     raise unittest.SkipTest(f"Home Assistant test harness unavailable: {err}") from err
 
 from custom_components.free_library_events.api import (  # noqa: E402
+    OFFICIAL_EVENT_TYPES,
     BranchFeed,
     LibraryApiError,
+    LibraryClient,
 )
 from custom_components.free_library_events.config import (  # noqa: E402
     normalize_config,
@@ -48,6 +50,7 @@ from custom_components.free_library_events.const import (  # noqa: E402
     SERVICE_RENDER_DIGEST,
 )
 from custom_components.free_library_events.coordinator import (  # noqa: E402
+    MAX_TYPE_EXPANSIONS_PER_REFRESH,
     LibraryDataCoordinator,
     source_keys_for_window,
     supplemental_coverage,
@@ -139,7 +142,7 @@ async def test_setup_entities_action_and_redacted_diagnostics(
     entry = _entry()
     entry.add_to_hass(hass)
 
-    async def fetch_filtered(branch, age_category):
+    async def fetch_filtered(branch, age_category, _coverage_end=None):
         event = Event(
             title="Baby Storytime",
             event_date=date(2026, 7, 22),
@@ -209,6 +212,7 @@ async def test_setup_entities_action_and_redacted_diagnostics(
     assert status_state.attributes["next_week_events"] == 4
     assert status_state.attributes["current_age_coverage_complete"] is True
     assert status_state.attributes["supplemental_age_coverage_complete"] is True
+    assert status_state.attributes["expanded_capped_sources"] == {}
     assert status_state.attributes["cached_events_by_branch"] == {
         "Charles Santore Library": 1,
         "Independence Library": 1,
@@ -232,6 +236,7 @@ async def test_setup_entities_action_and_redacted_diagnostics(
             return_response=True,
         )
     assert response["metadata"]["included_count"] == 4
+    assert response["metadata"]["expanded_capped_sources"] == {}
     assert "Avery" in response["subject"]
 
     diagnostics = await async_get_config_entry_diagnostics(hass, entry)
@@ -273,6 +278,201 @@ def test_feed_coverage_requires_evidence_past_a_capped_date() -> None:
     assert complete_short_feed.covers_through(date(2026, 7, 26))
     assert not ambiguous_capped_feed.covers_through(date(2026, 7, 26))
     assert proven_capped_feed.covers_through(date(2026, 7, 26))
+
+
+async def test_client_expands_only_an_unresolved_capped_feed() -> None:
+    branch = BRANCHES["CEN"]
+    base_events = tuple(
+        Event(
+            title=f"Event {index}",
+            event_date=date(2026, 7, 20 + index // 2),
+            start_time=time(10, index),
+            description="Published event",
+            link=f"https://example.test/events/{index}",
+            image_url="",
+            branch=branch,
+            age_categories=("Young Adult",),
+        )
+        for index in range(10)
+    )
+    recovered_event = Event(
+        title="Recovered event",
+        event_date=date(2026, 7, 25),
+        start_time=time(12, 0),
+        description="Published after the base-feed cap",
+        link="https://example.test/events/recovered",
+        image_url="",
+        branch=branch,
+        age_categories=("Young Adult",),
+    )
+    base_feed = BranchFeed(
+        events=base_events,
+        age_category="Young Adult",
+        source_count=10,
+        parsed_count=10,
+        last_event_date=date(2026, 7, 24),
+        ordered=True,
+    )
+
+    async def fetch_single(_branch, age_category, event_type=None):
+        if event_type is None:
+            return base_feed
+        index = OFFICIAL_EVENT_TYPES.index(event_type)
+        events = (base_events[index % len(base_events)],)
+        if index == 0:
+            events += (recovered_event,)
+        return BranchFeed(
+            events=events,
+            age_category=age_category,
+            source_count=len(events),
+            parsed_count=len(events),
+            last_event_date=max(event.event_date for event in events),
+            ordered=True,
+        )
+
+    client = LibraryClient(None)  # type: ignore[arg-type]
+    client._async_fetch_single = AsyncMock(side_effect=fetch_single)
+
+    expanded = await client.async_expand_feed(
+        branch, "Young Adult", base_feed, date(2026, 7, 26)
+    )
+
+    assert len(expanded.events) == 11
+    assert expanded.source_count == 10
+    assert expanded.type_shards_queried == len(OFFICIAL_EVENT_TYPES)
+    assert expanded.type_shard_failures == ()
+    assert expanded.expanded_through == date(2026, 7, 26)
+    assert expanded.covers_through(date(2026, 7, 26))
+    assert client._async_fetch_single.await_count == len(OFFICIAL_EVENT_TYPES)
+
+
+async def test_client_keeps_recovered_rows_but_discloses_a_shard_failure() -> None:
+    branch = BRANCHES["CEN"]
+    event = Event(
+        title="Base event",
+        event_date=date(2026, 7, 24),
+        start_time=time(10, 0),
+        description="Published event",
+        link="https://example.test/events/base",
+        image_url="",
+        branch=branch,
+        age_categories=("Young Adult",),
+    )
+    base_feed = BranchFeed(
+        events=(event,),
+        age_category="Young Adult",
+        source_count=10,
+        parsed_count=10,
+        last_event_date=event.event_date,
+        ordered=True,
+    )
+
+    async def fetch_single(_branch, age_category, event_type=None):
+        if event_type is None:
+            return base_feed
+        if event_type == OFFICIAL_EVENT_TYPES[0]:
+            raise LibraryApiError("offline")
+        return BranchFeed(
+            events=(event,),
+            age_category=age_category,
+            source_count=1,
+            parsed_count=1,
+            last_event_date=event.event_date,
+            ordered=True,
+        )
+
+    client = LibraryClient(None)  # type: ignore[arg-type]
+    client._async_fetch_single = AsyncMock(side_effect=fetch_single)
+
+    expanded = await client.async_expand_feed(
+        branch, "Young Adult", base_feed, date(2026, 7, 26)
+    )
+
+    assert expanded.events == (event,)
+    assert len(expanded.type_shard_failures) == 1
+    assert expanded.expanded_through is None
+    assert not expanded.covers_through(date(2026, 7, 26))
+
+
+async def test_client_base_fetch_does_not_expand() -> None:
+    feed = BranchFeed(
+        events=(),
+        age_category="Baby",
+        source_count=9,
+        parsed_count=9,
+        last_event_date=date(2026, 7, 20),
+        ordered=True,
+    )
+    client = LibraryClient(None)  # type: ignore[arg-type]
+    client._async_fetch_single = AsyncMock(return_value=feed)
+
+    result = await client.async_fetch_feed(BRANCHES["CEN"], "Baby")
+
+    assert result is feed
+    client._async_fetch_single.assert_awaited_once()
+
+
+async def test_coordinator_bounds_and_prioritizes_type_expansion(
+    hass: HomeAssistant,
+) -> None:
+    async def fetch_feed(_branch, age_category):
+        return BranchFeed(
+            events=(),
+            age_category=age_category,
+            source_count=10,
+            parsed_count=10,
+            last_event_date=date(2026, 7, 24),
+            ordered=True,
+        )
+
+    async def expand_feed(branch, age_category, feed, coverage_end):
+        event = Event(
+            title=f"Recovered {age_category} event",
+            event_date=date(2026, 7, 25),
+            start_time=time(10, 0),
+            description="Recovered through official type expansion",
+            link=f"https://example.test/events/{age_category}",
+            image_url="",
+            branch=branch,
+            age_categories=(age_category,),
+        )
+        return BranchFeed(
+            events=(event,),
+            age_category=feed.age_category,
+            source_count=feed.source_count,
+            parsed_count=feed.parsed_count,
+            last_event_date=feed.last_event_date,
+            ordered=True,
+            type_shards_queried=len(OFFICIAL_EVENT_TYPES),
+            expanded_through=coverage_end,
+        )
+
+    client = types.SimpleNamespace(
+        async_fetch_feed=AsyncMock(side_effect=fetch_feed),
+        async_expand_feed=AsyncMock(side_effect=expand_feed),
+    )
+    coordinator = LibraryDataCoordinator(
+        hass,
+        _entry(),
+        client,
+        (BRANCHES["CEN"],),
+        date(2025, 11, 7),
+        timedelta(hours=6),
+    )
+
+    with patch(
+        "custom_components.free_library_events.coordinator.dt_util.now",
+        return_value=datetime(2026, 7, 18),
+    ):
+        data = await coordinator._async_update_data()
+
+    expanded_categories = [
+        call.args[1] for call in client.async_expand_feed.await_args_list
+    ]
+    assert len(expanded_categories) == MAX_TYPE_EXPANSIONS_PER_REFRESH
+    assert expanded_categories[0] == "Baby"
+    assert "Young Adult" not in expanded_categories
+    assert len(data.events) == MAX_TYPE_EXPANSIONS_PER_REFRESH
 
 
 def test_source_plan_is_recomputed_for_the_target_age_window() -> None:
@@ -334,7 +534,7 @@ async def test_coordinator_recomputes_age_feeds_as_time_advances(
 
     entry = _entry()
 
-    async def fetch_feed(_branch, age_category):
+    async def fetch_feed(_branch, age_category, _coverage_end=None):
         return BranchFeed(
             events=(),
             age_category=age_category,
@@ -386,7 +586,7 @@ async def test_status_separates_a_healthy_supplemental_limit_from_partial_failur
     entry = _entry()
     entry.add_to_hass(hass)
 
-    async def fetch_feed(_branch, age_category):
+    async def fetch_feed(_branch, age_category, _coverage_end=None):
         is_limited = age_category == "Young Adult"
         return BranchFeed(
             events=(),
@@ -395,6 +595,7 @@ async def test_status_separates_a_healthy_supplemental_limit_from_partial_failur
             parsed_count=10 if is_limited else 1,
             last_event_date=date(2026, 7, 25 if is_limited else 27),
             ordered=True,
+            type_shards_queried=len(OFFICIAL_EVENT_TYPES) if is_limited else 0,
         )
 
     with (
@@ -417,6 +618,7 @@ async def test_status_separates_a_healthy_supplemental_limit_from_partial_failur
     assert status.attributes["supplemental_age_coverage_complete"] is False
     assert status.attributes["supplemental_age_failures"] == []
     assert len(status.attributes["supplemental_age_limitations"]) == 4
+    assert len(status.attributes["expanded_capped_sources"]) == 4
 
     with patch(
         "custom_components.free_library_events.dt_util.now",
@@ -431,6 +633,7 @@ async def test_status_separates_a_healthy_supplemental_limit_from_partial_failur
         )
     assert response["metadata"]["supplemental_age_failures"] == []
     assert len(response["metadata"]["supplemental_age_limitations"]) == 4
+    assert len(response["metadata"]["expanded_capped_sources"]) == 4
     assert "later broadly inclusive events may be missing" not in response["message"]
 
 
@@ -440,7 +643,7 @@ async def test_digest_discloses_an_operational_supplemental_failure(
     entry = _entry()
     entry.add_to_hass(hass)
 
-    async def fetch_feed(branch, age_category):
+    async def fetch_feed(branch, age_category, _coverage_end=None):
         if branch.code == "SWK" and age_category == "Young Adult":
             raise LibraryApiError("offline")
         event = Event(
@@ -500,7 +703,7 @@ async def test_coordinator_retains_partial_source_success(
         ordered=True,
     )
 
-    async def fetch_feed(_branch, age_category):
+    async def fetch_feed(_branch, age_category, _coverage_end=None):
         if age_category == "Baby":
             return success
         raise LibraryApiError("source unavailable")

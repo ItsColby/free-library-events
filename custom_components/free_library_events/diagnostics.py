@@ -50,6 +50,23 @@ async def async_get_config_entry_diagnostics(
                 "ordered": data.source_statuses[key].ordered
                 if key in data.source_statuses
                 else None,
+                "discovered_event_count": len(data.source_statuses[key].events)
+                if key in data.source_statuses
+                else None,
+                "type_feeds_queried": data.source_statuses[key].type_shards_queried
+                if key in data.source_statuses
+                else 0,
+                "type_feed_failures": list(
+                    data.source_statuses[key].type_shard_failures
+                )
+                if key in data.source_statuses
+                else [],
+                "expanded_through": data.source_statuses[
+                    key
+                ].expanded_through.isoformat()
+                if key in data.source_statuses
+                and data.source_statuses[key].expanded_through
+                else None,
                 "available": key not in data.source_errors,
                 "error": data.source_errors.get(key),
             }

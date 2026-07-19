@@ -5,6 +5,9 @@
 - Query every official age category in the configured person's current
   life-stage group so explicitly inclusive events remain discoverable and every
   cached event retains publisher age provenance.
+- Expand an unresolved ten-item feed across the publisher's official event-type
+  filters, recovering later events even though the RSS endpoint ignores
+  `page=2`.
 
 ## Changed
 
@@ -13,6 +16,8 @@
   wording alone.
 - Distinguish the official ten-item supplemental age-feed limit (`limited`) from
   operational source or parsing failures (`partial`).
+- Bound adaptive type expansion to four capped feeds per refresh and prioritize
+  the configured person's current age categories before supplemental discovery.
 - Replace ambiguous status attributes with the next-week event count, cached
   events by branch, and separate current-age and supplemental-age coverage
   indicators.
@@ -32,6 +37,9 @@
 - Return supplemental-age failures and feed-cap limitations in render-response
   metadata so native Home Assistant traces retain completeness evidence without
   adding diagnostic clutter to the email.
+- Expose each expanded source's discovered-event count, type-feed request count,
+  failures, and proven coverage boundary in the status sensor, diagnostics, and
+  render-response metadata.
 
 ## Maintenance
 

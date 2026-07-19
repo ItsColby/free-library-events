@@ -17,16 +17,20 @@
   child identity remains only in private config data and rendered content.
 - `api.py` reads official custom branch RSS feeds through Home Assistant's
   shared HTTP session and records the evidence needed to evaluate the ten-item
-  source boundary. Invalid individual event rows are skipped while their
-  published-versus-parsed mismatch remains observable.
+  source boundary. Because the endpoint ignores `page=2`, it can expand one
+  unresolved feed through the publisher's official event-type filters. Invalid
+  individual event rows are skipped while their published-versus-parsed mismatch
+  remains observable.
 - `coordinator.py` derives the configured person's current life-stage group from
   the local birth date, requests every official age category in that group for
   each selected branch, refreshes the plan concurrently, consolidates duplicate
   events while retaining their official classifications and richer safe fields,
-  and preserves partial source success. A minor uses Baby through Young Adult;
-  an adult uses Adult and Senior while retaining Young Adult only during its
-  overlapping age window; a forward source window crossing adulthood uses both
-  groups. It fails the update only when every selected source fails.
+  and preserves partial source success. It adaptively expands at most four
+  unresolved capped feeds per refresh, prioritizing current-age categories. A
+  minor uses Baby through Young Adult; an adult uses Adult and Senior while
+  retaining Young Adult only during its overlapping age window; a forward source
+  window crossing adulthood uses both groups. It fails the update only when
+  every selected source fails.
 - `digest.py` is a deterministic, side-effect-free parser, age matcher, and
   HTML/plain-text renderer. Explicit numeric ranges take precedence, followed
   by matching official age-feed classifications and then explicit inclusive
@@ -44,7 +48,8 @@
   owns scheduling, recipient selection, and email delivery; no parallel sender
   or scheduler exists inside the integration.
 - `diagnostics.py` redacts child name and birth date and exposes only bounded
-  per-source counts, ordering, coverage boundaries, and health.
+  per-source counts, type-expansion evidence, ordering, coverage boundaries, and
+  health.
 
 ## Supported Source Boundary
 
@@ -60,13 +65,17 @@ in the configured person's current life-stage group. This preserves publisher
 age provenance, avoids the noise and ambiguity of an unclassified all-events
 feed, and still discovers explicitly inclusive events assigned to a narrower
 category. A feed below the ten-item limit is complete. At the limit, its parsed
-order and last event must prove coverage beyond the target digest week.
-Current-age feed gaps are operationally `partial` and are disclosed by the
-rendered digest. A healthy but capped supplemental age feed is `limited`: this
-truthfully records that later broadly inclusive events cannot be proven without
-conflating a publisher limitation with a source failure. Render-response
-metadata retains both supplemental failures and cap limitations for native HA
-trace/readback without adding diagnostic clutter to the email body.
+order and last event must prove coverage beyond the target digest week. If they
+do not, the coordinator requests the stable official event-type taxonomy and
+merges the resulting overlapping rows. Expansion proves coverage only when all
+type shards cover the week and collectively recover the capped base prefix;
+otherwise the limitation remains visible. Current-age feed gaps are
+operationally `partial` and are disclosed by the rendered digest. A healthy but
+still-capped supplemental age feed is `limited`: this truthfully records that
+later broadly inclusive events cannot be proven without conflating a publisher
+limitation with a source failure. Render-response metadata retains supplemental
+failures, cap limitations, and expansion evidence for native HA trace/readback
+without adding diagnostic clutter to the email body.
 
 Protected event HTML and ICS endpoints are deliberately outside the runtime
 source boundary. Home Assistant's asynchronous HTTP clients receive the

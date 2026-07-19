@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 import logging
 from typing import Sequence
@@ -13,7 +13,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
-from .api import BranchFeed, LibraryClient
+from .api import OFFICIAL_EVENT_TYPES, RSS_ITEM_LIMIT, BranchFeed, LibraryClient
 from .const import DOMAIN
 from .digest import (
     BRANCHES,
@@ -21,11 +21,13 @@ from .digest import (
     Event,
     age_categories_for_window,
     merge_events,
+    next_week_start,
     source_age_categories_for_window,
 )
 
 _LOGGER = logging.getLogger(__name__)
 SOURCE_AGE_HORIZON = timedelta(days=90)
+MAX_TYPE_EXPANSIONS_PER_REFRESH = 4
 
 
 def source_key(branch: Branch, age_category: str) -> str:
@@ -65,6 +67,23 @@ def supplemental_source_keys(
     return [key for key in keys if key.split(":", 1)[1] not in relevant]
 
 
+def source_expansion_details(data: LibraryData) -> dict[str, dict[str, object]]:
+    """Return compact diagnostics for adaptively expanded capped sources."""
+
+    return {
+        source_label(key): {
+            "discovered_event_count": len(feed.events),
+            "type_feeds_queried": feed.type_shards_queried,
+            "type_feed_failures": list(feed.type_shard_failures),
+            "coverage_through": feed.expanded_through.isoformat()
+            if feed.expanded_through
+            else None,
+        }
+        for key, feed in data.source_statuses.items()
+        if feed.type_shards_queried
+    }
+
+
 @dataclass(frozen=True, slots=True)
 class LibraryData:
     """Latest normalized events and branch-source health."""
@@ -102,6 +121,18 @@ def coverage_warnings(
             warnings.append(f"{label} was not ordered by event date")
         elif feed.last_event_date is None:
             warnings.append(f"{label} did not expose a usable coverage boundary")
+        elif feed.type_shard_failures:
+            warnings.append(
+                f"{label} event-type expansion failed for "
+                f"{len(feed.type_shard_failures)} official feeds; later events "
+                "in this digest week may be missing"
+            )
+        elif feed.type_shards_queried:
+            warnings.append(
+                f"{label} remained limited after querying "
+                f"{feed.type_shards_queried} official event types; later events "
+                "in this digest week may be missing"
+            )
         else:
             warnings.append(
                 f"{label} reached its {feed.source_count}-item limit through "
@@ -137,6 +168,11 @@ def supplemental_coverage(
             )
         elif not feed.ordered:
             failures.append(f"{source_label(key)} was not ordered by event date")
+        elif feed.type_shard_failures:
+            failures.append(
+                f"{source_label(key)} event-type expansion failed for "
+                f"{len(feed.type_shard_failures)} official feeds"
+            )
         elif not feed.covers_through(end_date):
             boundary = (
                 f"{feed.last_event_date:%B} {feed.last_event_date.day}"
@@ -144,8 +180,14 @@ def supplemental_coverage(
                 else "an unknown date"
             )
             limitations.append(
-                f"{source_label(key)} reached its {feed.source_count}-item limit "
-                f"through {boundary}; later broadly inclusive events may be missing"
+                f"{source_label(key)} "
+                + (
+                    f"remained limited after querying {feed.type_shards_queried} "
+                    "official event types"
+                    if feed.type_shards_queried
+                    else f"reached its {feed.source_count}-item limit through {boundary}"
+                )
+                + "; later broadly inclusive events may be missing"
             )
     return failures, limitations
 
@@ -178,6 +220,7 @@ class LibraryDataCoordinator(DataUpdateCoordinator[LibraryData]):
         """Fetch every selected branch, retaining partial successes."""
 
         today = dt_util.now().date()
+        coverage_end = next_week_start(today) + timedelta(days=6)
         age_categories = source_age_categories_for_window(
             self.birth_date,
             today,
@@ -195,7 +238,6 @@ class LibraryDataCoordinator(DataUpdateCoordinator[LibraryData]):
             ),
             return_exceptions=True,
         )
-        events: list[Event] = []
         statuses: dict[str, BranchFeed] = {}
         errors: dict[str, str] = {}
         for (branch, age_category), result in zip(requests, results, strict=True):
@@ -207,7 +249,6 @@ class LibraryDataCoordinator(DataUpdateCoordinator[LibraryData]):
             if not isinstance(feed, BranchFeed):
                 errors[key] = f"Unexpected response from {source_label(key)}"
                 continue
-            events.extend(feed.events)
             statuses[key] = feed
 
         if not statuses:
@@ -215,6 +256,61 @@ class LibraryDataCoordinator(DataUpdateCoordinator[LibraryData]):
                 "; ".join(errors.values()) or "No selected library feed could be loaded"
             )
 
+        current_categories = set(
+            age_categories_for_window(
+                self.birth_date,
+                next_week_start(today),
+                coverage_end,
+            )
+        )
+        request_by_key = {
+            source_key(branch, age_category): (branch, age_category)
+            for branch, age_category in requests
+        }
+        expansion_keys = sorted(
+            (
+                key
+                for key, feed in statuses.items()
+                if feed.type_shards_queried == 0
+                and feed.source_count == RSS_ITEM_LIMIT
+                and feed.parsed_count == feed.source_count
+                and feed.ordered
+                and not feed.covers_through(coverage_end)
+            ),
+            key=lambda key: (
+                key.split(":", 1)[1] not in current_categories,
+                key,
+            ),
+        )[:MAX_TYPE_EXPANSIONS_PER_REFRESH]
+        expanded_results = await asyncio.gather(
+            *(
+                self._client.async_expand_feed(
+                    *request_by_key[key], statuses[key], coverage_end
+                )
+                for key in expansion_keys
+            ),
+            return_exceptions=True,
+        )
+        for key, result in zip(expansion_keys, expanded_results, strict=True):
+            if isinstance(result, BaseException):
+                _LOGGER.warning("Unable to expand %s: %s", source_label(key), result)
+                statuses[key] = replace(
+                    statuses[key],
+                    type_shards_queried=len(OFFICIAL_EVENT_TYPES),
+                    type_shard_failures=(str(result) or "unexpected failure",),
+                )
+                continue
+            if isinstance(result, BranchFeed):
+                statuses[key] = result
+                continue
+            _LOGGER.warning("Unexpected expansion response from %s", source_label(key))
+            statuses[key] = replace(
+                statuses[key],
+                type_shards_queried=len(OFFICIAL_EVENT_TYPES),
+                type_shard_failures=("unexpected response",),
+            )
+
+        events = [event for feed in statuses.values() for event in feed.events]
         merged_events = merge_events(events)
         merged_events.sort(
             key=lambda event: (event.starts_at, event.branch.name, event.title)

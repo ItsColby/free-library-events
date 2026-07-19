@@ -60,6 +60,14 @@ class DigestTests(unittest.TestCase):
         self.assertIn("age=Baby", url)
         self.assertNotIn("ages=", url)
 
+        expanded_url = digest.BRANCHES["CEN"].rss_url_for_age_and_type(
+            "Young Adult", "Family Programs"
+        )
+        self.assertIn("location=CEN", expanded_url)
+        self.assertIn("age=Young+Adult", expanded_url)
+        self.assertIn("type=Family+Programs", expanded_url)
+        self.assertNotIn("types=", expanded_url)
+
     def test_age_source_plan_includes_overlapping_official_categories(self) -> None:
         self.assertEqual(
             digest.age_categories_for_window(

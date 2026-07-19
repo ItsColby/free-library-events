@@ -37,6 +37,7 @@ from .coordinator import (
     LibraryDataCoordinator,
     coverage_warnings,
     supplemental_coverage,
+    source_expansion_details,
     source_keys_for_window,
     source_label,
 )
@@ -161,5 +162,8 @@ async def _async_render_digest(call: ServiceCall) -> ServiceResponse:
         source_warnings=source_warnings,
         supplemental_age_failures=supplemental_failures,
         supplemental_age_limitations=supplemental_limitations,
+    )
+    response["metadata"]["expanded_capped_sources"] = source_expansion_details(
+        coordinator.data
     )
     return response
