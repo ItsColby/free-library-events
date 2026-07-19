@@ -1,3 +1,15 @@
+# Free Library Events v2026.7.25
+
+## Fixed
+
+- Preserve trusted publisher image URLs when Home Assistant receives a
+  Cloudflare challenge or rate-limit response while embedding them, so the
+  email retains its photo elements for clients that can load the trusted URLs
+  instead of removing the images entirely. Unsafe redirects, unsupported
+  content, oversized files, and true missing-image responses remain omitted.
+- Keep the map pin inside the linked location on narrow email clients so it
+  cannot be stranded on a line by itself.
+
 # Free Library Events v2026.7.24
 
 ## Changed

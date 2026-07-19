@@ -207,11 +207,15 @@ class EmailImageTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_remote_fallback_is_reason_aware(self) -> None:
         unavailable_url = "https://libwww.freelibrary.org/images/unavailable.png"
+        challenged_url = "https://libwww.freelibrary.org/images/challenged.png"
+        missing_url = "https://libwww.freelibrary.org/images/missing.png"
         invalid_url = "https://libwww.freelibrary.org/images/invalid.png"
         unsafe_url = "https://libwww.freelibrary.org/images/redirect.png"
         session = _Session(
             {
                 unavailable_url: _Response(b"", 503),
+                challenged_url: _Response(b"challenge", 403),
+                missing_url: _Response(b"", 404),
                 invalid_url: _Response(b"not an image"),
                 unsafe_url: _Response(
                     b"", 302, {"Location": "https://example.test/image.png"}
@@ -223,13 +227,15 @@ class EmailImageTests(unittest.IsolatedAsyncioTestCase):
             session,  # type: ignore[arg-type]
             [
                 _event("Unavailable", unavailable_url),
+                _event("Cloudflare challenge", challenged_url),
+                _event("Missing", missing_url),
                 _event("Invalid", invalid_url),
                 _event("Unsafe redirect", unsafe_url),
             ],
         )
 
-        self.assertEqual(batch.fallback_urls, (unavailable_url,))
-        self.assertEqual(batch.failure_count, 3)
+        self.assertEqual(batch.fallback_urls, (unavailable_url, challenged_url))
+        self.assertEqual(batch.failure_count, 5)
 
     def test_storage_uses_cid_basenames_and_removes_only_managed_runs(self) -> None:
         batch = email_images.ImageDownloadBatch(

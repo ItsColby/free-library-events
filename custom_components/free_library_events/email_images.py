@@ -23,6 +23,7 @@ MAX_EMBEDDED_IMAGES = 12
 MAX_IMAGE_BYTES = 3 * 1024 * 1024
 MAX_TOTAL_IMAGE_BYTES = 15 * 1024 * 1024
 MAX_IMAGE_REQUEST_CONCURRENCY = 4
+REMOTE_FALLBACK_HTTP_STATUSES = frozenset({403, 408, 425, 429})
 MAX_FAILURE_EXAMPLES = 3
 
 _MANAGED_MARKER = ".managed-by-free-library-events"
@@ -207,7 +208,10 @@ async def _async_download_one(
                             )
                         current_url = redirected_url
                         continue
-                    if response.status >= 500:
+                    if (
+                        response.status >= 500
+                        or response.status in REMOTE_FALLBACK_HTTP_STATUSES
+                    ):
                         raise _ImageDownloadFailure(
                             f"HTTP {response.status}", allow_remote_fallback=True
                         )

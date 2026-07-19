@@ -74,9 +74,11 @@
   pre-render stale, and startup cleanup remove owned run directories while
   marker and name checks preserve all other files. Transient transport/server
   failures, storage failures, and digest-level count/total-size limits may
-  retain the already trusted publisher URL as a remote fallback; unsafe
-  redirects, unsupported content, permanent HTTP failures, and individually
-  oversized files are omitted. Landscape images use a full-width hero row;
+  retain the already trusted publisher URL as a remote fallback. Publisher
+  challenge and rate-limit responses do the same because browser-capable email
+  clients may still load those trusted URLs. Unsafe redirects, unsupported
+  content, true missing-image responses, and individually oversized files are
+  omitted. Landscape images use a full-width hero row;
   square and portrait images use the full width of an unpadded side column,
   including a compact thumbnail beside the scan-first metadata at common phone
   widths. The mobile side-image column is 152 CSS pixels for poster legibility.

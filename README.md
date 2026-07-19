@@ -184,10 +184,11 @@ Home Assistant's `www` directory, rewrites the matching HTML sources to SMTP
 use an LLM. Downloads are limited to 12 images, 3 MiB per image, 15 MiB in
 total, four concurrent requests, and 15 seconds per request. A trusted original
 URL remains available as a remote-image fallback for transient transport/server,
-storage, and digest count/total-size limits. Unsupported content, untrusted or
-excessive redirects, oversized individual files, and permanent HTTP errors are
-omitted rather than relaxed. Image failure never suppresses its event; bounded
-failure details remain in response metadata.
+storage, digest count/total-size limits, and publisher challenge or rate-limit
+responses. Unsupported content, untrusted or excessive redirects, oversized
+individual files, and true missing-image responses are omitted rather than
+relaxed. Image failure never suppresses its event; bounded failure details
+remain in response metadata.
 
 The HTML body is capped at 80,000 UTF-8 bytes. Long descriptions and calendar
 details are independently bounded. If a large week needs compact cards, Home

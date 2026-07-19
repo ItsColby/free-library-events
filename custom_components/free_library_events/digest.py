@@ -1194,8 +1194,9 @@ def event_location_summary(event: Event) -> str:
 def _event_location_html(event: Event) -> str:
     """Render map-linked physical context without linking virtual/host context."""
 
+    location_pin = '<span aria-hidden="true">&#128205;</span>&nbsp;'
     if event.modality == "online":
-        return html.escape(event_location_name(event))
+        return f"{location_pin}{html.escape(event_location_name(event))}"
 
     physical_label = event_location_name(event)
     if event.room:
@@ -1208,10 +1209,10 @@ def _event_location_html(event: Event) -> str:
             'style="display:inline-block;padding:5px 0;color:#202124;'
             "text-decoration:underline;"
             'text-decoration-color:#c4c7c5;text-underline-offset:3px">'
-            f"{html.escape(physical_label)}</a>"
+            f"{location_pin}{html.escape(physical_label)}</a>"
         )
     else:
-        rendered = html.escape(physical_label)
+        rendered = f"{location_pin}{html.escape(physical_label)}"
 
     if event.modality == "hybrid":
         rendered += f" {MIDDLE_DOT} Online option"
@@ -1700,7 +1701,7 @@ def _render_event_card(
       <h3 class="event-title" style="margin:0 0 5px;color:#202124;font-size:19px;line-height:130%"><span aria-hidden="true">{icon_for(event)}</span> <a href="{event_url}" style="color:#174ea6;text-decoration:underline">{html.escape(display_title)}</a></h3>
       <div class="event-meta" style="font-size:14px;font-weight:700;color:#202124;line-height:145%">
         <div class="event-time">{format_event_time(event)}</div>
-        <div class="event-location" style="margin:2px 0 0"><span aria-hidden="true">&#128205;</span> {location_html}</div>
+        <div class="event-location" style="margin:2px 0 0">{location_html}</div>
       </div>
       {_event_audience_html(event)}
       {_event_chips_html(event)}
@@ -1765,7 +1766,7 @@ def _render_event_card(
         <h3 class="event-title" style="margin:0 0 6px;color:#202124;font-size:22px;line-height:125%"><span aria-hidden="true">{icon_for(event)}</span> <a href="{event_url}" style="color:#174ea6;text-decoration:underline;text-decoration-color:#a8c7fa;text-underline-offset:3px">{html.escape(display_title)}</a></h3>
         <div class="event-meta" style="font-size:16px;font-weight:700;color:#202124;line-height:145%">
           <div class="event-time">{format_event_time(event)}</div>
-          <div class="event-location" style="margin:2px 0 0"><span aria-hidden="true">&#128205;</span> {location_html}</div>
+          <div class="event-location" style="margin:2px 0 0">{location_html}</div>
         </div>
         {_event_audience_html(event)}
         {_event_chips_html(event)}

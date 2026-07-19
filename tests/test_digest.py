@@ -826,12 +826,12 @@ class DigestTests(unittest.TestCase):
                     f"{expected} {digest.MIDDLE_DOT} Hosted by Parkway Central Library",
                 )
                 card = digest._render_event_card(event, duration_minutes=60)
-                self.assertIn(f">{expected}</a>", card)
+                self.assertIn(f"&nbsp;{expected}</a>", card)
                 self.assertIn("Hosted by Parkway Central Library", card)
                 compact_card = digest._render_event_card(
                     event, duration_minutes=60, compact=True
                 )
-                self.assertIn(f">{expected}</a>", compact_card)
+                self.assertIn(f"&nbsp;{expected}</a>", compact_card)
                 self.assertIn("Hosted by Parkway Central Library", compact_card)
                 self.assertIn(
                     digest.urllib.parse.quote_plus(expected),
@@ -1232,6 +1232,20 @@ class DigestTests(unittest.TestCase):
         self.assertIn('class="event-time"', payload["html"])
         self.assertIn('class="event-location"', payload["html"])
         self.assertIn('class="event-location-link"', payload["html"])
+        self.assertIn(
+            'class="event-location-link" href=',
+            payload["html"],
+        )
+        self.assertIn(
+            'text-underline-offset:3px"><span aria-hidden="true">'
+            "&#128205;</span>&nbsp;",
+            payload["html"],
+        )
+        self.assertNotIn(
+            '<div class="event-location" style="margin:2px 0 0">'
+            '<span aria-hidden="true">&#128205;</span> <a ',
+            payload["html"],
+        )
         self.assertIn('class="branch-calendar-table"', payload["html"])
         self.assertEqual(payload["html"].count('class="branch-calendar-cell"'), 4)
         self.assertEqual(payload["html"].count('class="branch-calendar-link"'), 4)
@@ -1688,9 +1702,14 @@ class DigestTests(unittest.TestCase):
 
         online_card = digest._render_event_card(online, duration_minutes=60)
         self.assertIn('class="event-location"', online_card)
-        self.assertIn(" Online</div>", online_card)
+        self.assertIn("&#128205;</span>&nbsp;Online</div>", online_card)
         self.assertNotIn(">Online</a>", online_card)
         hybrid_card = digest._render_event_card(hybrid, duration_minutes=60)
+        self.assertRegex(
+            hybrid_card,
+            r'class="event-location-link"[^>]*><span aria-hidden="true">'
+            r"&#128205;</span>&nbsp;[^<]+</a>",
+        )
         self.assertIn(f"</a> {digest.MIDDLE_DOT} Online option", hybrid_card)
         self.assertNotRegex(hybrid_card, r">[^<]*Online option</a>")
 
