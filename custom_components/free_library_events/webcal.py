@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from email.utils import format_datetime
+from hashlib import sha256
 from http import HTTPStatus
 import secrets
 from urllib.parse import urlsplit, urlunsplit
@@ -113,31 +115,75 @@ class FreeLibraryEventsCalendarFeedView(HomeAssistantView):
     async def get(self, request: web.Request, token: str) -> web.Response:
         """Return a calendar only when the opaque capability token matches."""
 
-        hass: HomeAssistant = request.app[KEY_HASS]
-        entry = _loaded_entry_for_token(hass, token)
-        if entry is None:
-            raise web.HTTPNotFound
-        coordinator = entry.runtime_data
-        if coordinator.data is None:
-            raise web.HTTPServiceUnavailable(headers={"Retry-After": "300"})
+        return _calendar_response(request, token)
 
-        config = entry_config(entry.data, entry.options)
-        body = render_icalendar(
-            build_calendar_items(coordinator.data.events, config),
-            fetched_at=coordinator.data.fetched_at,
-            refresh_seconds=int(config[CONF_SCAN_INTERVAL]),
-            calendar_name=str(config[CONF_WEBCAL_NAME]),
+    async def head(self, request: web.Request, token: str) -> web.Response:
+        """Return the same metadata as GET without transferring the calendar."""
+
+        return _calendar_response(request, token)
+
+
+def _calendar_response(request: web.Request, token: str) -> web.Response:
+    """Build a cache-aware calendar response for GET or HEAD."""
+
+    hass: HomeAssistant = request.app[KEY_HASS]
+    entry = _loaded_entry_for_token(hass, token)
+    if entry is None:
+        raise web.HTTPNotFound
+    coordinator = entry.runtime_data
+    if coordinator.data is None:
+        raise web.HTTPServiceUnavailable(headers={"Retry-After": "300"})
+
+    config = entry_config(entry.data, entry.options)
+    body = render_icalendar(
+        build_calendar_items(coordinator.data.events, config),
+        fetched_at=coordinator.data.fetched_at,
+        refresh_seconds=int(config[CONF_SCAN_INTERVAL]),
+        calendar_name=str(config[CONF_WEBCAL_NAME]),
+    ).encode("utf-8")
+    last_modified = _as_utc_second(coordinator.data.fetched_at)
+    etag = f'"{sha256(body).hexdigest()}"'
+    cache_headers = {
+        "Cache-Control": "private, max-age=300, must-revalidate",
+        "ETag": etag,
+        "Last-Modified": format_datetime(last_modified, usegmt=True),
+    }
+    if _is_not_modified(request, etag, last_modified):
+        return web.Response(status=HTTPStatus.NOT_MODIFIED, headers=cache_headers)
+
+    return web.Response(
+        body=body,
+        status=HTTPStatus.OK,
+        headers={
+            **cache_headers,
+            "Content-Disposition": 'inline; filename="free-library-events.ics"',
+            "Content-Type": "text/calendar; charset=utf-8",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+def _as_utc_second(value: datetime) -> datetime:
+    """Normalize a coordinator timestamp for HTTP date comparisons."""
+
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC).replace(microsecond=0)
+
+
+def _is_not_modified(request: web.Request, etag: str, last_modified: datetime) -> bool:
+    """Apply RFC conditional-request precedence for a safe read-only feed."""
+
+    if_none_match = request.headers.get("If-None-Match")
+    if if_none_match is not None:
+        return any(
+            candidate == "*" or candidate.removeprefix("W/") == etag
+            for candidate in (value.strip() for value in if_none_match.split(","))
         )
-        return web.Response(
-            body=body.encode("utf-8"),
-            status=HTTPStatus.OK,
-            headers={
-                "Cache-Control": "private, max-age=300, must-revalidate",
-                "Content-Disposition": 'inline; filename="free-library-events.ics"',
-                "Content-Type": "text/calendar; charset=utf-8",
-                "X-Content-Type-Options": "nosniff",
-            },
-        )
+    modified_since = request.if_modified_since
+    if modified_since is None:
+        return False
+    return _as_utc_second(modified_since) >= last_modified
 
 
 def _loaded_entry_for_token(

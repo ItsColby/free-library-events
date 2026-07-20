@@ -1,3 +1,22 @@
+# Free Library Events v2026.7.29
+
+## Fixed
+
+- Serve standards-compatible `HEAD` responses for the private calendar feed so
+  subscription services can validate the URL without downloading the body.
+- Add representation-derived `ETag` and coordinator-derived `Last-Modified`
+  validators. Conditional `GET` and `HEAD` requests now return `304` when the
+  cached calendar is unchanged, while a newly fetched event snapshot produces
+  a new validator.
+
+## Documentation
+
+- Identify the canonical HTTPS URL as the form to paste into Google Calendar
+  and reserve `webcal://` for client/OS subscription handoff.
+- Document that every published DNS address must reach the reverse proxy and
+  that the calendar path must bypass interactive or proxy Basic Auth. The
+  opaque feed token remains the sole credential for this narrowly scoped path.
+
 # Free Library Events v2026.7.28
 
 ## Added

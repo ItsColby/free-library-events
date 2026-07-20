@@ -120,7 +120,10 @@
   same current coordinator cache as RFC 5545 iCalendar and serves it through an
   opt-in, token-protected, unauthenticated HTTP view for subscription clients
   that cannot send Home Assistant bearer authentication. The view never forces
-  a source refresh. Disabled, invalid, and unloaded tokens fail closed as `404`.
+  a source refresh. It serves equivalent `GET` and `HEAD` metadata plus
+  representation-derived `ETag` and coordinator-derived `Last-Modified`
+  validators; matching conditional requests return `304`. Disabled, invalid,
+  and unloaded tokens fail closed as `404`.
 - `calendar.py`, `sensor.py`, and `button.py` expose the native user-facing
   calendar, diagnostic status, and manual refresh surfaces.
 - `config_flow.py` generates, displays, explicitly confirms rotation of, and
@@ -131,6 +134,12 @@
   excluded from diagnostics, entity state, integration-authored logs, and public
   source fixtures. Home Assistant or reverse-proxy HTTP access logs may still
   contain the requested URL and therefore require private handling.
+- External DNS and reverse-proxy policy remain deployment-owned. Every
+  published address family must reach Home Assistant, and only the calendar
+  route may bypass interactive or proxy Basic Auth so the opaque capability
+  token remains its sole credential. Google Calendar and other server-side
+  importers receive the canonical HTTPS form; `webcal://` is a client/OS
+  handoff convenience.
 - `__init__.py` registers the process-lifetime webcal route and the response-only
   `render_digest` action. The caller
   owns scheduling, recipient selection, and email delivery; no parallel sender

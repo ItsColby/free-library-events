@@ -160,6 +160,13 @@ https://home-assistant.example/api/free_library_events/calendar/<token>.ics
 webcal://home-assistant.example/api/free_library_events/calendar/<token>.ics
 ```
 
+Paste the canonical `https://` URL into Google Calendar's **From URL** field.
+The `webcal://` form is only a convenience URI for clients or operating systems
+that register a calendar-subscription handler; server-side importers are not
+required to resolve that scheme. The endpoint supports `GET`, `HEAD`, `ETag`,
+and `Last-Modified`, so a client can validate or recheck an unchanged feed
+without transferring the full calendar.
+
 The opaque token is the feed credential because calendar subscription clients
 generally cannot sign in through Home Assistant's interactive authentication.
 Treat the full URL as a password. It may appear in Home Assistant or reverse
@@ -168,9 +175,14 @@ does not include the configured person's display name, birth date, or calculated
 age.
 Invalid, disabled, and unloaded tokens return `404` without identifying which
 part failed. External subscriptions require the configured Home Assistant URL
-and proxy to route this path to Home Assistant over HTTPS; no additional public
-port is required when the existing proxy forwards all paths. For a DuckDNS
-deployment, the generated HTTPS URL uses the configured DuckDNS external URL.
+and proxy to route this path to Home Assistant over HTTPS without interactive,
+SSO, or reverse-proxy Basic Auth; the opaque path token is the authentication
+for this feed. Keep the rest of Home Assistant behind its existing controls and
+exempt only `/api/free_library_events/calendar/`. Every public `A` or `AAAA`
+record must reach that proxy; do not publish IPv6 until the complete IPv6 path
+works. No additional public port is required when the existing proxy forwards
+the route. For a DuckDNS deployment, the generated HTTPS URL uses the
+configured DuckDNS external URL.
 
 ## Weekly email action
 

@@ -859,6 +859,8 @@ async def test_webcal_view_is_token_gated_dynamic_and_unloads(
     client = await hass_client_no_auth()
     response = await client.get(WEBCAL_PATH.format(token="wrong-token"))
     assert response.status == 404
+    response = await client.head(WEBCAL_PATH.format(token="wrong-token"))
+    assert response.status == 404
     response = await client.get(WEBCAL_PATH.format(token="invalid-☃"))
     assert response.status == 404
 
@@ -869,10 +871,62 @@ async def test_webcal_view_is_token_gated_dynamic_and_unloads(
         'inline; filename="free-library-events.ics"'
     )
     assert response.headers["X-Content-Type-Options"] == "nosniff"
+    assert response.headers["ETag"].startswith('"')
+    assert response.headers["ETag"].endswith('"')
     first_body = await response.text()
+    first_etag = response.headers["ETag"]
+    first_last_modified = response.headers["Last-Modified"]
+    first_length = response.headers["Content-Length"]
     assert "Storytime" in first_body
     assert "X-WR-CALNAME:Neighborhood Library Events" in first_body
     assert USER_INPUT[CONF_CHILD_NAME] not in first_body
+
+    response = await client.head(WEBCAL_PATH.format(token=token))
+    assert response.status == 200
+    assert response.headers["Content-Type"] == "text/calendar; charset=utf-8"
+    assert response.headers["Content-Disposition"] == (
+        'inline; filename="free-library-events.ics"'
+    )
+    assert response.headers["ETag"] == first_etag
+    assert response.headers["Content-Length"] == first_length
+    assert await response.read() == b""
+
+    response = await client.head(
+        WEBCAL_PATH.format(token=token), headers={"If-None-Match": first_etag}
+    )
+    assert response.status == 304
+    assert response.headers["ETag"] == first_etag
+    assert await response.read() == b""
+
+    response = await client.get(
+        WEBCAL_PATH.format(token=token), headers={"If-None-Match": first_etag}
+    )
+    assert response.status == 304
+    assert response.headers["ETag"] == first_etag
+    assert await response.read() == b""
+
+    response = await client.get(
+        WEBCAL_PATH.format(token=token), headers={"If-None-Match": "*"}
+    )
+    assert response.status == 304
+    assert await response.read() == b""
+
+    response = await client.get(
+        WEBCAL_PATH.format(token=token),
+        headers={"If-Modified-Since": first_last_modified},
+    )
+    assert response.status == 304
+    assert response.headers["Last-Modified"] == first_last_modified
+    assert await response.read() == b""
+
+    response = await client.get(
+        WEBCAL_PATH.format(token=token),
+        headers={
+            "If-None-Match": '"different-representation"',
+            "If-Modified-Since": first_last_modified,
+        },
+    )
+    assert response.status == 200
     diagnostics = await async_get_config_entry_diagnostics(hass, entry)
     assert token not in repr(diagnostics)
     assert CONF_WEBCAL_TOKEN not in repr(diagnostics)
@@ -897,6 +951,8 @@ async def test_webcal_view_is_token_gated_dynamic_and_unloads(
 
     response = await client.get(WEBCAL_PATH.format(token=token))
     assert response.status == 200
+    assert response.headers["ETag"] != first_etag
+    assert response.headers["Last-Modified"] == "Sun, 19 Jul 2026 17:00:00 GMT"
     assert "Newly fetched event" in await response.text()
 
     hass.config_entries.async_update_entry(
