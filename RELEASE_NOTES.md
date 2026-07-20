@@ -1,4 +1,33 @@
-# Free Library Events v2026.7.27
+# Free Library Events v2026.7.28
+
+## Added
+
+- Add an opt-in, token-protected iCalendar subscription generated dynamically
+  from the same current, age-filtered coordinator cache as the native Home
+  Assistant calendar. The flow presents canonical HTTPS and `webcal://` URLs,
+  supports a user-defined calendar name, and does not force a publisher refresh
+  when a calendar client polls the feed.
+
+## Changed
+
+- Separate required profile data from optional behavior: setup and Reconfigure
+  own the person's display name, birth date, and a registry-generated branch
+  multi-select, while Configure provides matching, advanced timing, and calendar
+  subscription menus.
+- Add a version-2 config-entry migration that preserves existing profile,
+  branch, matching, timing, and WebCal values while moving them to their native
+  data or options owner.
+- Show whether the subscription URL uses an external/cloud or internal-only
+  Home Assistant base URL. Regenerating an active URL now requires an explicit
+  confirmation and immediately invalidates the prior token after reload.
+
+## Security
+
+- Keep the WebCal capability token out of entities, diagnostics,
+  integration-authored logs, and public fixtures. Disabled, invalid, and
+  unloaded subscription URLs fail closed with `404`, and the feed contains only
+  filtered public event information—not the configured name, birth date, or
+  calculated age.
 
 ## Fixed
 
