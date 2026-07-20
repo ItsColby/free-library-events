@@ -60,7 +60,7 @@ def source_keys_for_window(
     start_date: date,
     end_date: date,
 ) -> list[str]:
-    """Return source keys relevant to the child's age in a target window."""
+    """Return source keys relevant to the configured person's age."""
 
     categories = set(age_categories_for_window(birth_date, start_date, end_date))
     return [key for key in keys if key.split(":", 1)[1] in categories]

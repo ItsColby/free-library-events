@@ -19,7 +19,7 @@ async def async_get_config_entry_diagnostics(
     hass: HomeAssistant,
     entry: LibraryConfigEntry,
 ) -> dict[str, Any]:
-    """Return source health and counts without the child's identity or birth date."""
+    """Return source health without the person's identity or birth date."""
 
     del hass
     coordinator: LibraryDataCoordinator | None = getattr(entry, "runtime_data", None)

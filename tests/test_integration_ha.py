@@ -48,6 +48,7 @@ from custom_components.free_library_events.calendar_data import (  # noqa: E402
     build_calendar_items,
 )
 from custom_components.free_library_events.config import (  # noqa: E402
+    LEGACY_BRANCH_CONFIG_KEYS,
     normalize_config,
     normalize_options,
     normalize_profile,
@@ -126,6 +127,13 @@ PROFILE_INPUT = {
     CONF_BRANCHES: ["SWK", "CEN"],
 }
 
+PROFILE_DATA = PROFILE_INPUT | {
+    CONF_INCLUDE_SANTORE: True,
+    CONF_INCLUDE_INDEPENDENCE: False,
+    CONF_INCLUDE_PARKWAY_CENTRAL: True,
+    CONF_INCLUDE_PCI: False,
+}
+
 BEHAVIOR_INPUT = {
     CONF_FILTER_MODE: "Recommended",
     CONF_CALENDAR_DURATION: 60,
@@ -152,7 +160,7 @@ async def test_user_flow_creates_single_entry(hass: HomeAssistant) -> None:
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["title"] == "Free Library Events"
-    assert result["data"] == PROFILE_INPUT
+    assert result["data"] == PROFILE_DATA
 
 
 async def test_reconfigure_flow_updates_profile_data_only(
@@ -162,9 +170,10 @@ async def test_reconfigure_flow_updates_profile_data_only(
         domain=DOMAIN,
         title="Free Library Events",
         unique_id=DOMAIN,
-        data=PROFILE_INPUT,
+        data=PROFILE_DATA,
         options=BEHAVIOR_INPUT,
-        version=2,
+        version=1,
+        minor_version=2,
     )
     entry.add_to_hass(hass)
 
@@ -186,7 +195,12 @@ async def test_reconfigure_flow_updates_profile_data_only(
 
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reconfigure_successful"
-    assert entry.data == updated_profile
+    assert entry.data == updated_profile | {
+        CONF_INCLUDE_SANTORE: False,
+        CONF_INCLUDE_INDEPENDENCE: True,
+        CONF_INCLUDE_PARKWAY_CENTRAL: False,
+        CONF_INCLUDE_PCI: True,
+    }
     assert entry.options == BEHAVIOR_INPUT
 
 
@@ -207,9 +221,10 @@ async def test_options_flow_enables_and_rotates_webcal_feed(
         domain=DOMAIN,
         title="Free Library Events",
         unique_id=DOMAIN,
-        data=PROFILE_INPUT,
+        data=PROFILE_DATA,
         options=BEHAVIOR_INPUT,
-        version=2,
+        version=1,
+        minor_version=2,
     )
     entry.add_to_hass(hass)
     hass.config.external_url = "https://ha.example.test"
@@ -293,14 +308,15 @@ async def test_options_flow_disables_webcal_and_removes_token(
         domain=DOMAIN,
         title="Free Library Events",
         unique_id=DOMAIN,
-        data=PROFILE_INPUT,
+        data=PROFILE_DATA,
         options={
             **BEHAVIOR_INPUT,
             CONF_PUBLISH_WEBCAL: True,
             CONF_WEBCAL_TOKEN: old_token,
             CONF_WEBCAL_NAME: "Free Library Events",
         },
-        version=2,
+        version=1,
+        minor_version=2,
     )
     entry.add_to_hass(hass)
 
@@ -328,9 +344,10 @@ async def test_options_flow_updates_behavior_without_profile_data(
         domain=DOMAIN,
         title="Free Library Events",
         unique_id=DOMAIN,
-        data=PROFILE_INPUT,
+        data=PROFILE_DATA,
         options=BEHAVIOR_INPUT,
-        version=2,
+        version=1,
+        minor_version=2,
     )
     entry.add_to_hass(hass)
 
@@ -343,7 +360,7 @@ async def test_options_flow_updates_behavior_without_profile_data(
     )
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert entry.data == PROFILE_INPUT
+    assert entry.data == PROFILE_DATA
     assert entry.options[CONF_FILTER_MODE] == "Strict"
     assert entry.options[CONF_CALENDAR_DURATION] == 60
     assert entry.options[CONF_SCAN_INTERVAL] == 21600
@@ -357,6 +374,14 @@ def test_normalize_config_enforces_non_ui_bounds() -> None:
 
 
 def test_profile_and_webcal_validation_reject_unknown_or_unsafe_values() -> None:
+    with pytest.raises(ValueError, match="child_name_required"):
+        normalize_profile(
+            {
+                key: value
+                for key, value in PROFILE_INPUT.items()
+                if key != CONF_CHILD_NAME
+            }
+        )
     with pytest.raises(ValueError, match="invalid_branches"):
         normalize_profile(PROFILE_INPUT | {CONF_BRANCHES: ["SWK", "UNKNOWN"]})
     with pytest.raises(ValueError, match="branch_required"):
@@ -424,17 +449,27 @@ async def test_version_one_entry_migrates_profile_and_behavior_without_token_lea
 
     assert await async_migrate_entry(hass, entry)
 
-    assert entry.version == 2
+    assert entry.version == 1
+    assert entry.minor_version == 2
     assert entry.data == {
         CONF_CHILD_NAME: "Jordan",
         CONF_BIRTH_DATE: "2025-01-15",
         CONF_BRANCHES: ["SWK", "IND", "CEN"],
+        CONF_INCLUDE_SANTORE: True,
+        CONF_INCLUDE_INDEPENDENCE: True,
+        CONF_INCLUDE_PARKWAY_CENTRAL: True,
+        CONF_INCLUDE_PCI: False,
     }
     assert entry.options[CONF_FILTER_MODE] == "Strict"
     assert entry.options[CONF_WEBCAL_TOKEN] == token
     assert CONF_CHILD_NAME not in entry.options
     assert CONF_BIRTH_DATE not in entry.options
     assert token not in repr(entry.data)
+    assert [
+        branch_code
+        for config_key, branch_code in LEGACY_BRANCH_CONFIG_KEYS
+        if entry.data[config_key]
+    ] == ["SWK", "IND", "CEN"]
 
 
 async def test_setup_entities_action_and_redacted_diagnostics(
@@ -1129,6 +1164,8 @@ async def test_client_base_fetch_does_not_expand() -> None:
 
 async def test_client_rejects_an_oversized_rss_response() -> None:
     response = types.SimpleNamespace(
+        status=200,
+        headers={},
         content=types.SimpleNamespace(
             readexactly=AsyncMock(return_value=b"x" * (MAX_RSS_RESPONSE_BYTES + 1))
         ),
@@ -1146,7 +1183,9 @@ async def test_client_rejects_an_oversized_rss_response() -> None:
     client = LibraryClient(session)
 
     with pytest.raises(LibraryApiError, match="exceeded"):
-        await client._async_get("https://example.test/feed")
+        await client._async_get(
+            "https://libwww.freelibrary.org/rss/eventsrss.cfm?location=CEN"
+        )
 
 
 async def test_client_returns_a_complete_response_below_the_size_limit() -> None:
@@ -1156,6 +1195,8 @@ async def test_client_returns_a_complete_response_below_the_size_limit() -> None
         raise asyncio.IncompleteReadError(payload, MAX_RSS_RESPONSE_BYTES + 1)
 
     response = types.SimpleNamespace(
+        status=200,
+        headers={},
         content=types.SimpleNamespace(readexactly=readexactly),
         raise_for_status=lambda: None,
     )
@@ -1170,7 +1211,98 @@ async def test_client_returns_a_complete_response_below_the_size_limit() -> None
     session = types.SimpleNamespace(get=lambda *_args, **_kwargs: ResponseContext())
     client = LibraryClient(session)
 
-    assert await client._async_get("https://example.test/feed") == payload
+    assert (
+        await client._async_get(
+            "https://libwww.freelibrary.org/rss/eventsrss.cfm?location=CEN"
+        )
+        == payload
+    )
+
+
+async def test_client_follows_only_trusted_https_rss_redirects() -> None:
+    payload = b"<?xml version='1.0'?><rss><channel></channel></rss>"
+
+    async def complete_read(_size):
+        raise asyncio.IncompleteReadError(payload, MAX_RSS_RESPONSE_BYTES + 1)
+
+    redirect_response = types.SimpleNamespace(
+        status=302,
+        headers={"Location": "/rss/redirected.cfm"},
+    )
+    final_response = types.SimpleNamespace(
+        status=200,
+        headers={},
+        content=types.SimpleNamespace(readexactly=complete_read),
+        raise_for_status=lambda: None,
+    )
+    responses = iter((redirect_response, final_response))
+    requests = []
+
+    class ResponseContext:
+        def __init__(self, response):
+            self.response = response
+
+        async def __aenter__(self):
+            return self.response
+
+        async def __aexit__(self, *_args):
+            return None
+
+    def get(url, **kwargs):
+        requests.append((url, kwargs))
+        return ResponseContext(next(responses))
+
+    client = LibraryClient(types.SimpleNamespace(get=get))
+
+    assert (
+        await client._async_get(
+            "https://libwww.freelibrary.org/rss/eventsrss.cfm?location=CEN"
+        )
+        == payload
+    )
+    assert [request[0] for request in requests] == [
+        "https://libwww.freelibrary.org/rss/eventsrss.cfm?location=CEN",
+        "https://libwww.freelibrary.org/rss/redirected.cfm",
+    ]
+    assert all(request[1]["allow_redirects"] is False for request in requests)
+
+
+@pytest.mark.parametrize(
+    "location",
+    (
+        "https://example.test/feed",
+        "https://[::1]/feed",
+        "http://libwww.freelibrary.org/feed",
+        "https://libwww.freelibrary.org:8443/feed",
+        "https://libwww.freelibrary.org:not-a-port/feed",
+    ),
+)
+async def test_client_rejects_untrusted_rss_redirects(location: str) -> None:
+    response = types.SimpleNamespace(
+        status=302,
+        headers={"Location": location},
+        content=types.SimpleNamespace(
+            readexactly=AsyncMock(
+                side_effect=asyncio.IncompleteReadError(b"", MAX_RSS_RESPONSE_BYTES + 1)
+            )
+        ),
+        raise_for_status=lambda: None,
+    )
+
+    class ResponseContext:
+        async def __aenter__(self):
+            return response
+
+        async def __aexit__(self, *_args):
+            return None
+
+    session = types.SimpleNamespace(get=lambda *_args, **_kwargs: ResponseContext())
+    client = LibraryClient(session)
+
+    with pytest.raises(LibraryApiError, match="unsafe RSS redirect"):
+        await client._async_get(
+            "https://libwww.freelibrary.org/rss/eventsrss.cfm?location=CEN"
+        )
 
 
 async def test_coordinator_expands_every_current_age_source_before_supplemental_sources(

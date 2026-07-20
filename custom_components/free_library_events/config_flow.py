@@ -26,7 +26,7 @@ from .config import (
     entry_options,
     entry_profile,
     normalize_options,
-    normalize_profile,
+    profile_entry_data,
 )
 from .const import (
     CONF_BIRTH_DATE,
@@ -58,11 +58,14 @@ def _profile_schema(defaults: dict[str, Any]) -> vol.Schema:
         if CONF_BIRTH_DATE in defaults
         else vol.Required(CONF_BIRTH_DATE)
     )
+    child_name_key = (
+        vol.Required(CONF_CHILD_NAME, default=defaults[CONF_CHILD_NAME])
+        if CONF_CHILD_NAME in defaults
+        else vol.Required(CONF_CHILD_NAME)
+    )
     return vol.Schema(
         {
-            vol.Required(
-                CONF_CHILD_NAME, default=defaults[CONF_CHILD_NAME]
-            ): TextSelector(),
+            child_name_key: TextSelector(),
             birth_date_key: DateSelector(),
             vol.Required(
                 CONF_BRANCHES, default=defaults[CONF_BRANCHES]
@@ -138,7 +141,8 @@ def _webcal_schema(defaults: dict[str, Any]) -> vol.Schema:
 class FreeLibraryEventsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle setup from Home Assistant's integration UI."""
 
-    VERSION = 2
+    VERSION = 1
+    MINOR_VERSION = 2
 
     @staticmethod
     def async_get_options_flow(
@@ -156,7 +160,7 @@ class FreeLibraryEventsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
         if user_input is not None:
             try:
-                data = normalize_profile(user_input)
+                data = profile_entry_data(user_input)
             except (TypeError, ValueError) as err:
                 errors["base"] = str(err) or "invalid_config"
             else:
@@ -183,7 +187,7 @@ class FreeLibraryEventsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
         if user_input is not None:
             try:
-                profile = normalize_profile(user_input)
+                profile = profile_entry_data(user_input)
             except (TypeError, ValueError) as err:
                 errors["base"] = str(err) or "invalid_config"
             else:

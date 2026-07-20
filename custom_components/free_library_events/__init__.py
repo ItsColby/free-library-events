@@ -113,9 +113,9 @@ async def async_setup(hass: HomeAssistant, config: dict[str, object]) -> bool:
 async def async_migrate_entry(hass: HomeAssistant, entry: LibraryConfigEntry) -> bool:
     """Split legacy combined settings into profile data and behavior options."""
 
-    if entry.version > 2:
+    if entry.version != 1 or entry.minor_version > 2:
         return False
-    if entry.version == 2:
+    if entry.minor_version == 2:
         return True
     try:
         data, options = migrated_entry_config(entry.data, entry.options)
@@ -126,7 +126,8 @@ async def async_migrate_entry(hass: HomeAssistant, entry: LibraryConfigEntry) ->
         entry,
         data=data,
         options=options,
-        version=2,
+        version=1,
+        minor_version=2,
     )
     return True
 

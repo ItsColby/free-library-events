@@ -35,6 +35,15 @@ def rss(items: list[dict[str, str]]) -> str:
 
 class DigestTests(unittest.TestCase):
     def test_supported_branch_metadata_uses_official_sources(self) -> None:
+        santore = digest.BRANCHES["SWK"]
+        self.assertEqual(santore.name, "Charles Santore Library")
+        self.assertEqual(
+            santore.address,
+            "932 South 7th Street, Philadelphia, PA 19147-2932",
+        )
+        self.assertIn("location=SWK", santore.rss_url)
+        self.assertIn("location_code=SWK", santore.calendar_url)
+
         parkway = digest.BRANCHES["CEN"]
         self.assertEqual(parkway.name, "Parkway Central Library")
         self.assertEqual(

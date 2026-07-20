@@ -25,7 +25,6 @@ from .const import (
     CONF_WEBCAL_NAME,
     CONF_WEBCAL_TOKEN,
     DEFAULT_CALENDAR_DURATION,
-    DEFAULT_CHILD_NAME,
     DEFAULT_FILTER_MODE,
     DEFAULT_INCLUDE_INDEPENDENCE,
     DEFAULT_INCLUDE_PARKWAY_CENTRAL,
@@ -54,7 +53,6 @@ def default_config() -> dict[str, Any]:
     """Return the complete safe runtime defaults."""
 
     return {
-        CONF_CHILD_NAME: DEFAULT_CHILD_NAME,
         CONF_BRANCHES: list(BRANCHES),
         CONF_FILTER_MODE: DEFAULT_FILTER_MODE,
         CONF_CALENDAR_DURATION: DEFAULT_CALENDAR_DURATION,
@@ -67,7 +65,9 @@ def default_config() -> dict[str, Any]:
 def normalize_profile(values: Mapping[str, Any]) -> dict[str, Any]:
     """Normalize required profile and source-selection config-entry data."""
 
-    config = {CONF_CHILD_NAME: DEFAULT_CHILD_NAME, **dict(values)}
+    config = dict(values)
+    if CONF_CHILD_NAME not in config:
+        raise ValueError("child_name_required")
     if CONF_BIRTH_DATE not in config:
         raise ValueError("birth_date_required")
     child_name = normalize_child_name(config[CONF_CHILD_NAME])
@@ -157,6 +157,20 @@ def entry_profile(
     return normalize_profile({**dict(entry_data), **dict(entry_option_values)})
 
 
+def profile_entry_data(values: Mapping[str, Any]) -> dict[str, Any]:
+    """Return canonical profile data with version-1 branch compatibility mirrors."""
+
+    profile = normalize_profile(values)
+    selected = set(profile[CONF_BRANCHES])
+    return {
+        **profile,
+        **{
+            config_key: branch_code in selected
+            for config_key, branch_code in LEGACY_BRANCH_CONFIG_KEYS
+        },
+    }
+
+
 def entry_options(
     entry_data: Mapping[str, Any], entry_option_values: Mapping[str, Any]
 ) -> dict[str, Any]:
@@ -179,10 +193,10 @@ def entry_config(
 def migrated_entry_config(
     entry_data: Mapping[str, Any], entry_option_values: Mapping[str, Any]
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Split a version-1 combined entry into version-2 data and options."""
+    """Split a version-1.1 combined entry into version-1.2 data and options."""
 
     return (
-        entry_profile(entry_data, entry_option_values),
+        profile_entry_data({**dict(entry_data), **dict(entry_option_values)}),
         entry_options(entry_data, entry_option_values),
     )
 

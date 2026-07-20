@@ -31,7 +31,7 @@ async def async_setup_entry(
 
 
 class LibraryCalendar(CoordinatorEntity, CalendarEntity):
-    """Calendar containing only events matching the child's age."""
+    """Calendar containing only events matching the configured person's age."""
 
     _attr_has_entity_name = True
     _attr_translation_key = "events"

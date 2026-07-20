@@ -13,18 +13,24 @@
 ## Runtime Model
 
 - `config_flow.py` owns the single config entry, required profile
-  reconfiguration, and reload-on-save options. Version 2 stores the display
+  reconfiguration, and reload-on-save options. Version 1.2 stores the display
   name, birth date, and ordered branch-code selection in config-entry data while
-  optional matching, timing, and WebCal controls live in options. A migration
-  splits older combined entries without changing their effective behavior.
+  optional matching, timing, and WebCal controls live in options. Version-1
+  branch booleans remain synchronized compatibility mirrors so a downgrade to
+  v2026.7.26 retains the selected branches. A minor-version migration splits
+  older combined entries without changing their effective behavior.
 - The config-entry card and service device use the static integration name;
-  person identity remains only in private config data and rendered content.
+  person identity remains only in private config data and rendered content. The
+  internal `child_name` key remains unchanged for compatibility while every
+  user-facing label uses person terminology.
 - `api.py` reads official custom branch RSS feeds through Home Assistant's
-  shared HTTP session and records the evidence needed to evaluate the observed
-  ten-item source boundary. Because the endpoint ignores `page=2`, it can expand
-  one unresolved feed through the publisher's official event-type filters. Invalid
-  individual event rows are skipped while their published-versus-parsed mismatch
-  remains observable. All RSS requests share an eight-request concurrency
+  shared HTTP session, follows at most two HTTPS redirects that remain on the
+  publisher's trusted hosts, and records the evidence needed to evaluate the
+  observed ten-item source boundary. Because the endpoint ignores `page=2`, it
+  can expand one unresolved feed through the publisher's official event-type
+  filters. Invalid individual event rows are skipped while their
+  published-versus-parsed mismatch remains observable. All RSS requests share
+  an eight-request concurrency
   ceiling, each decoded response is stopped at 256 KiB, and any one capped-source
   expansion is stopped after 90 seconds without discarding its base events.
 - `coordinator.py` derives the configured person's current life-stage group from
@@ -142,10 +148,11 @@
   integration-owned temporary storage, and guarded cleanup. Remote-image
   rendering remains the no-storage default so generic response consumers do not
   receive unusable CID references.
-- `diagnostics.py` redacts child name and birth date and exposes only bounded
-  per-source counts, type-expansion evidence, ordering, coverage boundaries, and
-  health. High-volume shard failures remain available in on-demand diagnostics;
-  entity state and action-response metadata retain a count and three examples.
+- `diagnostics.py` redacts the person's display name and birth date and exposes
+  only bounded per-source counts, type-expansion evidence, ordering, coverage
+  boundaries, and health. High-volume shard failures remain available in
+  on-demand diagnostics; entity state and action-response metadata retain a
+  count and three examples.
 
 ## Supported Source Boundary
 

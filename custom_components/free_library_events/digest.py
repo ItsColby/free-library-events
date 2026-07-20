@@ -99,7 +99,7 @@ BRANCHES = {
     "SWK": Branch(
         code="SWK",
         name="Charles Santore Library",
-        address="932 South 7th Street, Philadelphia, PA 19147",
+        address="932 South 7th Street, Philadelphia, PA 19147-2932",
         latitude=39.937044,
         longitude=-75.155274,
     ),
@@ -457,7 +457,7 @@ def age_categories_for_window(
     start_date: date,
     end_date: date,
 ) -> tuple[str, ...]:
-    """Return official age filters that overlap the child's age in a date range."""
+    """Return official age filters that overlap the person's age in a date range."""
 
     if end_date < start_date:
         raise ValueError("Age-category window end cannot precede its start")

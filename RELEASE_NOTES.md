@@ -14,15 +14,18 @@
   own the person's display name, birth date, and a registry-generated branch
   multi-select, while Configure provides matching, advanced timing, and calendar
   subscription menus.
-- Add a version-2 config-entry migration that preserves existing profile,
-  branch, matching, timing, and WebCal values while moving them to their native
-  data or options owner.
+- Add a backward-compatible version-1.2 config-entry migration that preserves
+  existing profile, branch, matching, timing, and WebCal values while moving
+  them to their native data or options owner. Synchronized legacy branch fields
+  preserve selected branches if the integration is downgraded to v2026.7.26.
 - Show whether the subscription URL uses an external/cloud or internal-only
   Home Assistant base URL. Regenerating an active URL now requires an explicit
   confirmation and immediately invalidates the prior token after reload.
 
 ## Security
 
+- Follow at most two RSS redirects and require every source and redirect target
+  to remain HTTPS on the trusted Free Library publisher hosts.
 - Keep the WebCal capability token out of entities, diagnostics,
   integration-authored logs, and public fixtures. Disabled, invalid, and
   unloaded subscription URLs fail closed with `404`, and the feed contains only

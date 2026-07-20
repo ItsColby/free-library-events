@@ -20,7 +20,7 @@ service is used at runtime.
 - One age-filtered Home Assistant calendar
 - Optional token-protected, dynamically generated iCalendar subscription feed
 - `Strict`, `Recommended`, and `Broad` age-match modes
-- Configurable child name and birth date
+- Configurable person display name and birth date
 - Configurable branch selection, refresh interval, and placeholder duration
 - Manual refresh button and diagnostic status sensor
 - Official branch-and-age RSS queries for every category in the configured
@@ -132,7 +132,7 @@ age classifications plus any richer safe fields from either copy.
 ## Calendar
 
 The integration creates one calendar containing only events that match the
-configured child and mode. Each calendar event includes:
+configured person and mode. Each calendar event includes:
 
 - the official title and description
 - the explicit off-site venue or branch address, plus a specifically named or
@@ -164,7 +164,8 @@ The opaque token is the feed credential because calendar subscription clients
 generally cannot sign in through Home Assistant's interactive authentication.
 Treat the full URL as a password. It may appear in Home Assistant or reverse
 proxy access logs. The feed contains only filtered public event information and
-does not include the configured child name, birth date, or calculated age.
+does not include the configured person's display name, birth date, or calculated
+age.
 Invalid, disabled, and unloaded tokens return `404` without identifying which
 part failed. External subscriptions require the configured Home Assistant URL
 and proxy to route this path to Home Assistant over HTTPS; no additional public
@@ -177,7 +178,7 @@ deployment, the generated HTTPS URL uses the configured DuckDNS external URL.
 returns an email payload plus explicit source-coverage metadata. It must be
 called with `response_variable`.
 
-The digest states the child's conversational age once: weeks before 2 completed
+The digest states the person's conversational age once: weeks before 2 completed
 months, months through 23 months, half-years near the half-year mark below age
 5, and years thereafter. Each event keeps its description primary without
 repeating the matching rationale. Source paragraph boundaries are preserved so
@@ -299,11 +300,11 @@ If one selected feed fails, the calendar and digest retain the successful
 branch and disclose the unavailable source. If every selected feed fails,
 `render_digest` raises an error before returning an email payload.
 
-Diagnostics redact the child name and birth date. They include per-branch and
-age-category published/parsed counts, ordering and coverage-boundary evidence,
-adaptive type-feed request/failure counts, discovered-event counts, source
-availability, bounded errors, last refresh time, next-week match count, and
-cached event counts by branch.
+Diagnostics redact the person's display name and birth date. They include
+per-branch and age-category published/parsed counts, ordering and
+coverage-boundary evidence, adaptive type-feed request/failure counts,
+discovered-event counts, source availability, bounded errors, last refresh
+time, next-week match count, and cached event counts by branch.
 
 ## Source limitations
 
@@ -311,7 +312,7 @@ cached event counts by branch.
   for each official age category in the configured person's life-stage group,
   then consolidates duplicate copies. This retains the publisher's complete
   available age provenance and discovers clearly inclusive events even when
-  they were assigned to a narrower child category, without mixing in an
+  they were assigned to a narrower children's category, without mixing in an
   unclassified all-events feed. The RSS endpoint ignores `page=2`, so an
   unresolved capped feed is instead queried through all official event-type
   filters and deduplicated. Expansion is bounded to twelve feeds per refresh,

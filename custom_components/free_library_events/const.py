@@ -8,7 +8,7 @@ NAME = "Free Library Events"
 CONF_CHILD_NAME = "child_name"
 CONF_BIRTH_DATE = "birth_date"
 CONF_BRANCHES = "branches"
-# Retained only to migrate and normalize config entries created before version 2.
+# Retained to migrate older entries and preserve downgrade-compatible mirrors.
 CONF_INCLUDE_SANTORE = "include_charles_santore"
 CONF_INCLUDE_INDEPENDENCE = "include_independence"
 CONF_INCLUDE_PARKWAY_CENTRAL = "include_parkway_central"
@@ -20,7 +20,6 @@ CONF_PUBLISH_WEBCAL = "publish_webcal"
 CONF_WEBCAL_TOKEN = "webcal_token"
 CONF_WEBCAL_NAME = "webcal_name"
 
-DEFAULT_CHILD_NAME = "Child"
 DEFAULT_INCLUDE_SANTORE = True
 DEFAULT_INCLUDE_INDEPENDENCE = True
 DEFAULT_INCLUDE_PARKWAY_CENTRAL = True

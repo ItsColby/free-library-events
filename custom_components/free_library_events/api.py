@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, replace
 from datetime import date
+import urllib.parse
 
 import aiohttp
 
@@ -13,6 +14,8 @@ from .digest import Branch, Event, event_identity, merge_events, parse_feed
 RSS_ITEM_LIMIT = 10
 MAX_RSS_RESPONSE_BYTES = 256 * 1024
 MAX_RSS_REQUEST_CONCURRENCY = 8
+MAX_RSS_REDIRECTS = 2
+TRUSTED_RSS_HOSTS = frozenset({"libwww.freelibrary.org", "www.freelibrary.org"})
 OFFICIAL_EVENT_TYPES = (
     "Arts and Crafts Programs",
     "Author Events",
@@ -38,6 +41,23 @@ OFFICIAL_EVENT_TYPES = (
 
 class LibraryApiError(Exception):
     """Raised when a branch feed cannot be loaded or parsed."""
+
+
+def _is_trusted_rss_url(url: str) -> bool:
+    """Return whether a source URL stays on the publisher's HTTPS boundary."""
+
+    try:
+        parsed = urllib.parse.urlparse(url)
+        port = parsed.port
+    except ValueError:
+        return False
+    return (
+        parsed.scheme == "https"
+        and (parsed.hostname or "").casefold() in TRUSTED_RSS_HOSTS
+        and parsed.username is None
+        and parsed.password is None
+        and port in (None, 443)
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,19 +98,31 @@ class LibraryClient:
         self._request_semaphore = asyncio.Semaphore(MAX_RSS_REQUEST_CONCURRENCY)
 
     async def _async_get(self, url: str) -> bytes:
-        async with self._session.get(
-            url,
-            headers={"User-Agent": "HomeAssistant Free Library Events"},
-            timeout=aiohttp.ClientTimeout(total=20),
-        ) as response:
-            response.raise_for_status()
-            try:
-                await response.content.readexactly(MAX_RSS_RESPONSE_BYTES + 1)
-            except asyncio.IncompleteReadError as err:
-                return err.partial
-            raise LibraryApiError(
-                f"RSS response exceeded {MAX_RSS_RESPONSE_BYTES} bytes"
-            )
+        current_url = url
+        for redirect_count in range(MAX_RSS_REDIRECTS + 1):
+            if not _is_trusted_rss_url(current_url):
+                raise LibraryApiError("unsafe RSS redirect target")
+            async with self._session.get(
+                current_url,
+                allow_redirects=False,
+                headers={"User-Agent": "HomeAssistant Free Library Events"},
+                timeout=aiohttp.ClientTimeout(total=20),
+            ) as response:
+                if 300 <= response.status < 400:
+                    location = response.headers.get("Location", "")
+                    if not location or redirect_count == MAX_RSS_REDIRECTS:
+                        raise LibraryApiError("unsafe or excessive RSS redirect")
+                    current_url = urllib.parse.urljoin(current_url, location)
+                    continue
+                response.raise_for_status()
+                try:
+                    await response.content.readexactly(MAX_RSS_RESPONSE_BYTES + 1)
+                except asyncio.IncompleteReadError as err:
+                    return err.partial
+                raise LibraryApiError(
+                    f"RSS response exceeded {MAX_RSS_RESPONSE_BYTES} bytes"
+                )
+        raise LibraryApiError("excessive RSS redirects")
 
     async def async_fetch_feed(
         self,
