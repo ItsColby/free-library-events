@@ -1,3 +1,10 @@
+# Unreleased
+
+## Fixed
+
+- Keep the map pin as plain text while preserving the Google Maps link on the
+  location label, so Gmail cannot style the pin as part of the linked target.
+
 # Free Library Events v2026.7.26
 
 ## Fixed

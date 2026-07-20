@@ -155,10 +155,10 @@ also omitted. An end time appears beside the start time only when the RSS
 description contains an explicit range matching the published start, including
 ranges whose first meridiem is unambiguous from that start, or a conservative
 whole-event duration such as a “90-minute class”; otherwise it is omitted. The
-location name links to Google Maps, while the title and image link to the
-official event. An explicitly online event uses `Online` with no misleading map
-link. A hybrid event retains the physical destination and visibly names its
-online option.
+location pin remains plain text while the location label links to Google Maps;
+the title and image link to the official event. An explicitly online event uses
+`Online` with no misleading map link. A hybrid event retains the physical
+destination and visibly names its online option.
 
 When the RSS text explicitly names an off-site park, square, playground,
 garden, museum, community/recreation center, school, theater, studio, gallery,

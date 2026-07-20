@@ -1203,12 +1203,12 @@ def _event_location_html(event: Event) -> str:
     directions = event_directions_url(event)
     if directions:
         rendered = (
-            f'<a class="event-location-link" '
+            f'{location_pin}<a class="event-location-link" '
             f'href="{html.escape(directions, quote=True)}" '
             'style="display:inline-block;padding:5px 0;color:#202124;'
             "text-decoration:underline;"
             'text-decoration-color:#c4c7c5;text-underline-offset:3px">'
-            f"{location_pin}{html.escape(physical_label)}</a>"
+            f"{html.escape(physical_label)}</a>"
         )
     else:
         rendered = f"{location_pin}{html.escape(physical_label)}"
@@ -1907,7 +1907,7 @@ html,body {{color-scheme:only light}}
   .event-heading-cell {{width:auto!important;max-width:none!important;padding:14px 14px 12px!important}}
   .event-title {{font-size:20px!important;line-height:125%!important}}
   .event-meta {{font-size:15px!important;line-height:145%!important}}
-  .event-location-link {{display:block!important;padding:13px 0!important}}
+  .event-location-link {{display:inline-block!important;padding:13px 0!important}}
   .event-audience {{margin-top:8px!important;font-size:14px!important}}
   .event-highlights {{margin-top:6px!important}}
   .event-highlights span {{padding:5px 7px!important;font-size:13px!important}}

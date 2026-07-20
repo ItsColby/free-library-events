@@ -828,12 +828,22 @@ class DigestTests(unittest.TestCase):
                     f"{expected} {digest.MIDDLE_DOT} Hosted by Parkway Central Library",
                 )
                 card = digest._render_event_card(event, duration_minutes=60)
-                self.assertIn(f"&nbsp;{expected}</a>", card)
+                self.assertIn(
+                    '<span aria-hidden="true">&#128205;</span>&nbsp;'
+                    '<a class="event-location-link"',
+                    card,
+                )
+                self.assertIn(f">{expected}</a>", card)
                 self.assertIn("Hosted by Parkway Central Library", card)
                 compact_card = digest._render_event_card(
                     event, duration_minutes=60, compact=True
                 )
-                self.assertIn(f"&nbsp;{expected}</a>", compact_card)
+                self.assertIn(
+                    '<span aria-hidden="true">&#128205;</span>&nbsp;'
+                    '<a class="event-location-link"',
+                    compact_card,
+                )
+                self.assertIn(f">{expected}</a>", compact_card)
                 self.assertIn("Hosted by Parkway Central Library", compact_card)
                 self.assertIn(
                     digest.urllib.parse.quote_plus(expected),
@@ -1237,14 +1247,13 @@ class DigestTests(unittest.TestCase):
             payload["html"],
         )
         self.assertIn(
-            'text-underline-offset:3px"><span aria-hidden="true">'
-            "&#128205;</span>&nbsp;",
+            '<span aria-hidden="true">&#128205;</span>&nbsp;'
+            '<a class="event-location-link"',
             payload["html"],
         )
-        self.assertNotIn(
-            '<div class="event-location" style="margin:2px 0 0">'
-            '<span aria-hidden="true">&#128205;</span> <a ',
+        self.assertNotRegex(
             payload["html"],
+            r'class="event-location-link"[^>]*><span aria-hidden="true">',
         )
         self.assertIn('class="branch-calendar-table"', payload["html"])
         self.assertEqual(payload["html"].count('class="branch-calendar-cell"'), 4)
@@ -1263,7 +1272,8 @@ class DigestTests(unittest.TestCase):
             payload["html"],
         )
         self.assertIn(
-            ".event-location-link {display:block!important;padding:13px 0!important}",
+            ".event-location-link {display:inline-block!important;"
+            "padding:13px 0!important}",
             payload["html"],
         )
         self.assertIn(
@@ -1695,6 +1705,7 @@ class DigestTests(unittest.TestCase):
             online,
             description="Attend in person or online via Zoom.",
             modality="hybrid",
+            room="Storyhour Room",
         )
 
         self.assertEqual(digest.event_location_label(online), "Online")
@@ -1708,12 +1719,19 @@ class DigestTests(unittest.TestCase):
         self.assertIn("&#128205;</span>&nbsp;Online</div>", online_card)
         self.assertNotIn(">Online</a>", online_card)
         hybrid_card = digest._render_event_card(hybrid, duration_minutes=60)
-        self.assertRegex(
+        self.assertIn(
+            '<span aria-hidden="true">&#128205;</span>&nbsp;'
+            '<a class="event-location-link"',
             hybrid_card,
-            r'class="event-location-link"[^>]*><span aria-hidden="true">'
-            r"&#128205;</span>&nbsp;[^<]+</a>",
         )
-        self.assertIn(f"</a> {digest.MIDDLE_DOT} Online option", hybrid_card)
+        self.assertIn(
+            f">Parkway Central Library {digest.MIDDLE_DOT} Storyhour Room</a>"
+            f" {digest.MIDDLE_DOT} Online option",
+            hybrid_card,
+        )
+        self.assertNotIn(
+            "&#128205;</span>&nbsp;Parkway Central Library</a>", hybrid_card
+        )
         self.assertNotRegex(hybrid_card, r">[^<]*Online option</a>")
 
         plain_text = digest._render_plain_text(

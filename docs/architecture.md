@@ -41,8 +41,9 @@
   generic family wording cannot. Age classification controls inclusion and
   ordering. Publisher age categories render in one muted `Library age listing:`
   line with the title, time, and location so publisher provenance remains clear.
-  Time and map-linked location use separate mobile-friendly lines without
-  exposing home-relative distance. Presentation highlights render in
+  Time and location use separate mobile-friendly lines; only the location label,
+  not its map pin, is linked, and no home-relative distance is exposed.
+  Presentation highlights render in
   that same scan-first metadata area and are derived deterministically from the
   RSS title, description, or explicit venue; title-redundant activity labels,
   broader equivalents of specific take-home details, audience-redundant breadth
