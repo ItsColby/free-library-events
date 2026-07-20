@@ -43,7 +43,7 @@
     "step": {
       "init": {
         "title": "Configure weekly library events",
-        "description": "Changes apply automatically after saving.",
+        "description": "Changes apply automatically after saving. Calendar subscription: {webcal_status}",
         "data": {
           "child_name": "Child's first name",
           "birth_date": "Child's birth date",
@@ -53,13 +53,21 @@
           "include_philadelphia_city_institute": "Include Philadelphia City Institute",
           "filter_mode": "Age-match mode",
           "calendar_duration_minutes": "Calendar placeholder duration (minutes)",
-          "scan_interval_seconds": "Refresh interval (seconds)"
+          "scan_interval_seconds": "Refresh interval (seconds)",
+          "publish_webcal": "Publish a private calendar subscription feed",
+          "regenerate_webcal_token": "Regenerate the calendar subscription URL"
         },
         "data_description": {
           "filter_mode": "Recommended balances age fit with family-friendly options. Strict includes only explicit best matches; Broad includes more general children's events.",
           "calendar_duration_minutes": "Used only when the library does not publish an end time.",
-          "scan_interval_seconds": "Six hours (21600 seconds) is recommended. The render action refreshes again by default immediately before generating the digest."
+          "scan_interval_seconds": "Six hours (21600 seconds) is recommended. The render action refreshes again by default immediately before generating the digest.",
+          "publish_webcal": "Makes the age-filtered calendar available at an unguessable URL for calendar apps that cannot sign in to Home Assistant. Treat the URL as a password.",
+          "regenerate_webcal_token": "Invalidates the current subscription URL after the integration reloads. Existing calendar subscriptions must be updated."
         }
+      },
+      "webcal": {
+        "title": "Calendar subscription URL",
+        "description": "Copy this private URL, then select Submit to activate it. Treat it as a password.\n\n{webcal_url}"
       }
     },
     "error": {

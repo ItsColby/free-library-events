@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
-from zoneinfo import ZoneInfo
+from datetime import datetime
 
 from homeassistant.components.calendar import CalendarEntity, CalendarEvent
 from homeassistant.core import HomeAssistant
@@ -12,28 +11,13 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
 from .config import entry_config
-from .const import (
-    CONF_BIRTH_DATE,
-    CONF_CALENDAR_DURATION,
-    CONF_FILTER_MODE,
-    DOMAIN,
-)
+from .calendar_data import LIBRARY_TIME_ZONE, build_calendar_items
+from .const import DOMAIN
 from .coordinator import LibraryDataCoordinator
-from .digest import (
-    TIMEZONE,
-    classify_event,
-    event_calendar_location,
-    event_details_url,
-    event_identity,
-    event_is_active,
-    include_fit,
-    related_link_lines,
-)
 from .entity import service_device_info
 from .runtime import LibraryConfigEntry
 
 PARALLEL_UPDATES = 0
-LIBRARY_TIME_ZONE = ZoneInfo(TIMEZONE)
 
 
 async def async_setup_entry(
@@ -71,45 +55,18 @@ class LibraryCalendar(CoordinatorEntity, CalendarEntity):
         return entry_config(self._entry.data, self._entry.options)
 
     def _calendar_events(self) -> list[CalendarEvent]:
-        config = self._config
-        birth_date = date.fromisoformat(config[CONF_BIRTH_DATE])
-        filter_mode = config[CONF_FILTER_MODE]
-        duration = config[CONF_CALENDAR_DURATION]
-        events: list[CalendarEvent] = []
-        for event in self.coordinator.data.events if self.coordinator.data else ():
-            if not event_is_active(event):
-                continue
-            fit = classify_event(event, birth_date)
-            if not include_fit(fit, filter_mode):
-                continue
-            start = event.starts_at.replace(tzinfo=LIBRARY_TIME_ZONE)
-            if event.end_at:
-                end = event.end_at.replace(tzinfo=LIBRARY_TIME_ZONE)
-                end_note = None
-            else:
-                end = start + timedelta(minutes=duration)
-                end_note = (
-                    f"End time not published in the feed; using a {duration}-minute "
-                    "placeholder."
-                )
-            description_parts = [
-                event.description,
-                *related_link_lines(event),
-                f"Official details: {event_details_url(event)}",
-            ]
-            if end_note:
-                description_parts.append(end_note)
-            events.append(
-                CalendarEvent(
-                    start=start,
-                    end=end,
-                    summary=event.title,
-                    description="\n\n".join(description_parts),
-                    location=event_calendar_location(event),
-                    uid=event_identity(event),
-                )
+        source_events = self.coordinator.data.events if self.coordinator.data else ()
+        return [
+            CalendarEvent(
+                start=item.start,
+                end=item.end,
+                summary=item.summary,
+                description=item.description,
+                location=item.location,
+                uid=item.uid,
             )
-        return events
+            for item in build_calendar_items(source_events, self._config)
+        ]
 
     @property
     def event(self) -> CalendarEvent | None:

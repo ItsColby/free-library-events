@@ -3,6 +3,7 @@
   "name": "Free Library Events",
   "codeowners": ["@ItsColby"],
   "config_flow": true,
+  "dependencies": ["http"],
   "documentation": "https://github.com/ItsColby/free-library-events",
   "integration_type": "service",
   "iot_class": "cloud_polling",

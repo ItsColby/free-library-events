@@ -14,6 +14,9 @@ CONF_INCLUDE_PCI = "include_philadelphia_city_institute"
 CONF_FILTER_MODE = "filter_mode"
 CONF_CALENDAR_DURATION = "calendar_duration_minutes"
 CONF_SCAN_INTERVAL = "scan_interval_seconds"
+CONF_PUBLISH_WEBCAL = "publish_webcal"
+CONF_REGENERATE_WEBCAL_TOKEN = "regenerate_webcal_token"
+CONF_WEBCAL_TOKEN = "webcal_token"
 
 DEFAULT_CHILD_NAME = "Child"
 DEFAULT_INCLUDE_SANTORE = True

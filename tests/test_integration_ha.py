@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 import sys
@@ -25,6 +26,7 @@ try:
     from homeassistant.helpers import entity_registry as er
     from homeassistant.helpers.update_coordinator import UpdateFailed
     from pytest_homeassistant_custom_component.common import MockConfigEntry
+    from pytest_homeassistant_custom_component.typing import ClientSessionGenerator
 except ModuleNotFoundError as err:  # pragma: no cover - local non-HA test env
     raise unittest.SkipTest(f"Home Assistant test harness unavailable: {err}") from err
 
@@ -37,6 +39,9 @@ from custom_components.free_library_events.api import (  # noqa: E402
     LibraryClient,
 )
 from custom_components.free_library_events.calendar import LibraryCalendar  # noqa: E402
+from custom_components.free_library_events.calendar_data import (  # noqa: E402
+    build_calendar_items,
+)
 from custom_components.free_library_events.config import (  # noqa: E402
     normalize_config,
     selected_branches,
@@ -53,6 +58,9 @@ from custom_components.free_library_events.const import (  # noqa: E402
     CONF_INCLUDE_PCI,
     CONF_INCLUDE_SANTORE,
     CONF_SCAN_INTERVAL,
+    CONF_PUBLISH_WEBCAL,
+    CONF_REGENERATE_WEBCAL_TOKEN,
+    CONF_WEBCAL_TOKEN,
     DOMAIN,
     SERVICE_RENDER_DIGEST,
 )
@@ -80,6 +88,10 @@ from custom_components.free_library_events.email_images import (  # noqa: E402
     StoredImageBundle,
     remove_stored_image_run,
     store_downloaded_images,
+)
+from custom_components.free_library_events.webcal import (  # noqa: E402
+    WEBCAL_PATH,
+    render_icalendar,
 )
 
 
@@ -130,6 +142,105 @@ async def test_user_flow_rejects_duplicate_entry(hass: HomeAssistant) -> None:
     )
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "single_instance_allowed"
+
+
+async def test_options_flow_enables_and_rotates_webcal_feed(
+    hass: HomeAssistant,
+) -> None:
+    entry = _entry()
+    entry.add_to_hass(hass)
+    hass.config.external_url = "https://ha.example.test"
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "init"
+    assert result["description_placeholders"] == {"webcal_status": "Disabled"}
+
+    first_token = "first-synthetic-subscription-token"
+    with patch(
+        "custom_components.free_library_events.config_flow.token_urlsafe",
+        return_value=first_token,
+    ):
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            USER_INPUT
+            | {
+                CONF_PUBLISH_WEBCAL: True,
+                CONF_REGENERATE_WEBCAL_TOKEN: False,
+            },
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "webcal"
+    assert result["description_placeholders"] == {
+        "webcal_url": (
+            "webcal://ha.example.test/api/free_library_events/calendar/"
+            f"{first_token}.ics"
+        )
+    }
+
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_PUBLISH_WEBCAL] is True
+    assert entry.options[CONF_WEBCAL_TOKEN] == first_token
+    assert CONF_REGENERATE_WEBCAL_TOKEN not in entry.options
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert result["description_placeholders"] == {
+        "webcal_status": (
+            "webcal://ha.example.test/api/free_library_events/calendar/"
+            f"{first_token}.ics"
+        )
+    }
+    second_token = "second-synthetic-subscription-token"
+    with patch(
+        "custom_components.free_library_events.config_flow.token_urlsafe",
+        return_value=second_token,
+    ):
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            USER_INPUT
+            | {
+                CONF_PUBLISH_WEBCAL: True,
+                CONF_REGENERATE_WEBCAL_TOKEN: True,
+            },
+        )
+    assert second_token in result["description_placeholders"]["webcal_url"]
+    assert first_token not in result["description_placeholders"]["webcal_url"]
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_WEBCAL_TOKEN] == second_token
+
+
+async def test_options_flow_disables_webcal_and_removes_token(
+    hass: HomeAssistant,
+) -> None:
+    old_token = "disabled-synthetic-subscription-token"
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Free Library Events",
+        unique_id=DOMAIN,
+        data=USER_INPUT,
+        options={
+            CONF_PUBLISH_WEBCAL: True,
+            CONF_WEBCAL_TOKEN: old_token,
+        },
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        USER_INPUT
+        | {
+            CONF_PUBLISH_WEBCAL: False,
+            CONF_REGENERATE_WEBCAL_TOKEN: False,
+        },
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_PUBLISH_WEBCAL] is False
+    assert CONF_WEBCAL_TOKEN not in entry.options
 
 
 def test_normalize_config_enforces_non_ui_bounds() -> None:
@@ -461,6 +572,155 @@ def test_calendar_keeps_recurring_series_occurrences_distinct() -> None:
         event_identity(second),
     ]
     assert rendered[0].uid != rendered[1].uid
+
+
+def test_webcal_serializes_current_filtered_events_as_rfc5545() -> None:
+    event = Event(
+        title="Stories, Songs; and Café Fun",
+        event_date=date(2026, 7, 22),
+        start_time=time(10, 30),
+        description=("Stories, songs, and café activities. " * 8).strip(),
+        link="https://example.test/events/storytime-1001",
+        image_url="",
+        branch=BRANCHES["IND"],
+        age_categories=("Baby",),
+    )
+    items = build_calendar_items(
+        (event,),
+        USER_INPUT | {CONF_BIRTH_DATE: "2025-11-15"},
+    )
+
+    rendered = render_icalendar(
+        items,
+        fetched_at=datetime(2026, 7, 19, 16, 15, tzinfo=ZoneInfo("UTC")),
+        refresh_seconds=21600,
+    )
+    unfolded = rendered.replace("\r\n ", "")
+
+    assert rendered.startswith("BEGIN:VCALENDAR\r\n")
+    assert rendered.endswith("END:VCALENDAR\r\n")
+    assert "\n" not in rendered.replace("\r\n", "")
+    assert all(len(line.encode("utf-8")) <= 75 for line in rendered.split("\r\n"))
+    assert "METHOD:PUBLISH\r\n" in rendered
+    assert "REFRESH-INTERVAL;VALUE=DURATION:PT6H\r\n" in rendered
+    assert "X-PUBLISHED-TTL:PT6H\r\n" in rendered
+    assert "DTSTAMP:20260719T161500Z\r\n" in rendered
+    assert "DTSTART:20260722T143000Z\r\n" in rendered
+    assert "DTEND:20260722T153000Z\r\n" in rendered
+    assert "SUMMARY:Stories\\, Songs\\; and Café Fun\r\n" in unfolded
+    assert "URL:https://example.test/events/storytime-1001\r\n" in unfolded
+    assert "Official details: https://example.test/events/storytime-1001" in unfolded
+    assert USER_INPUT[CONF_CHILD_NAME] not in rendered
+
+
+async def test_webcal_view_is_token_gated_dynamic_and_unloads(
+    hass: HomeAssistant,
+    hass_client_no_auth: ClientSessionGenerator,
+) -> None:
+    token = "valid-synthetic-subscription-token"
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Free Library Events",
+        unique_id=DOMAIN,
+        data=USER_INPUT,
+        options={
+            CONF_PUBLISH_WEBCAL: True,
+            CONF_WEBCAL_TOKEN: token,
+        },
+    )
+    entry.add_to_hass(hass)
+
+    async def fetch_filtered(branch, age_category, _coverage_end=None):
+        event = Event(
+            title=f"{branch.name} Storytime",
+            event_date=date(2026, 7, 22),
+            start_time=time(10, 30),
+            description="Stories and songs for babies with caregivers.",
+            link=f"https://example.test/events/{branch.code.lower()}-1001",
+            image_url="",
+            branch=branch,
+            age_categories=(age_category,) if age_category else (),
+        )
+        return BranchFeed(
+            events=(event,),
+            age_category=age_category,
+            source_count=1,
+            parsed_count=1,
+            last_event_date=event.event_date,
+            ordered=True,
+        )
+
+    with patch(
+        "custom_components.free_library_events.api.LibraryClient.async_fetch_feed",
+        side_effect=fetch_filtered,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    client = await hass_client_no_auth()
+    response = await client.get(WEBCAL_PATH.format(token="wrong-token"))
+    assert response.status == 404
+    response = await client.get(WEBCAL_PATH.format(token="invalid-☃"))
+    assert response.status == 404
+
+    response = await client.get(WEBCAL_PATH.format(token=token))
+    assert response.status == 200
+    assert response.headers["Content-Type"] == "text/calendar; charset=utf-8"
+    assert response.headers["Content-Disposition"] == (
+        'inline; filename="free-library-events.ics"'
+    )
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+    first_body = await response.text()
+    assert "Storytime" in first_body
+    assert USER_INPUT[CONF_CHILD_NAME] not in first_body
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+    assert token not in repr(diagnostics)
+    assert CONF_WEBCAL_TOKEN not in repr(diagnostics)
+
+    added_event = Event(
+        title="Newly fetched event",
+        event_date=date(2026, 7, 23),
+        start_time=time(14, 0),
+        description="A newly cached library event.",
+        link="https://example.test/events/newly-fetched",
+        image_url="",
+        branch=BRANCHES["IND"],
+        age_categories=("Baby",),
+    )
+    coordinator = entry.runtime_data
+    assert coordinator.data is not None
+    coordinator.data = replace(
+        coordinator.data,
+        events=(*coordinator.data.events, added_event),
+        fetched_at=datetime(2026, 7, 19, 17, 0, tzinfo=ZoneInfo("UTC")),
+    )
+
+    response = await client.get(WEBCAL_PATH.format(token=token))
+    assert response.status == 200
+    assert "Newly fetched event" in await response.text()
+
+    hass.config_entries.async_update_entry(
+        entry,
+        options={
+            CONF_PUBLISH_WEBCAL: False,
+            CONF_WEBCAL_TOKEN: token,
+        },
+    )
+    response = await client.get(WEBCAL_PATH.format(token=token))
+    assert response.status == 404
+    hass.config_entries.async_update_entry(
+        entry,
+        options={
+            CONF_PUBLISH_WEBCAL: True,
+            CONF_WEBCAL_TOKEN: token,
+        },
+    )
+    response = await client.get(WEBCAL_PATH.format(token=token))
+    assert response.status == 200
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    response = await client.get(WEBCAL_PATH.format(token=token))
+    assert response.status == 404
 
 
 def test_feed_coverage_requires_evidence_past_a_capped_date() -> None:

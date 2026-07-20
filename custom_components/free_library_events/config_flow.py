@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from secrets import token_urlsafe
 from typing import Any
 
 import voluptuous as vol
@@ -25,7 +26,10 @@ from .const import (
     CONF_CALENDAR_DURATION,
     CONF_CHILD_NAME,
     CONF_FILTER_MODE,
+    CONF_PUBLISH_WEBCAL,
+    CONF_REGENERATE_WEBCAL_TOKEN,
     CONF_SCAN_INTERVAL,
+    CONF_WEBCAL_TOKEN,
     DOMAIN,
     MAX_CALENDAR_DURATION,
     MAX_SCAN_INTERVAL,
@@ -34,9 +38,10 @@ from .const import (
     NAME,
 )
 from .digest import FILTER_MODES
+from .webcal import webcal_status
 
 
-def _schema(defaults: dict[str, Any]) -> vol.Schema:
+def _schema(defaults: dict[str, Any], *, include_webcal: bool = False) -> vol.Schema:
     birth_date_key = (
         vol.Required(CONF_BIRTH_DATE, default=defaults[CONF_BIRTH_DATE])
         if CONF_BIRTH_DATE in defaults
@@ -46,40 +51,52 @@ def _schema(defaults: dict[str, Any]) -> vol.Schema:
         vol.Required(config_key, default=defaults[config_key]): BooleanSelector()
         for config_key, _ in BRANCH_CONFIG_KEYS
     }
-    return vol.Schema(
-        {
-            vol.Required(
-                CONF_CHILD_NAME, default=defaults[CONF_CHILD_NAME]
-            ): TextSelector(),
-            birth_date_key: DateSelector(),
-            **branch_fields,
-            vol.Required(
-                CONF_FILTER_MODE, default=defaults[CONF_FILTER_MODE]
-            ): SelectSelector(SelectSelectorConfig(options=list(FILTER_MODES))),
-            vol.Required(
-                CONF_CALENDAR_DURATION,
-                default=defaults[CONF_CALENDAR_DURATION],
-            ): NumberSelector(
-                NumberSelectorConfig(
-                    min=MIN_CALENDAR_DURATION,
-                    max=MAX_CALENDAR_DURATION,
-                    step=15,
-                    mode=NumberSelectorMode.BOX,
-                )
-            ),
-            vol.Required(
-                CONF_SCAN_INTERVAL,
-                default=defaults[CONF_SCAN_INTERVAL],
-            ): NumberSelector(
-                NumberSelectorConfig(
-                    min=MIN_SCAN_INTERVAL,
-                    max=MAX_SCAN_INTERVAL,
-                    step=900,
-                    mode=NumberSelectorMode.BOX,
-                )
-            ),
-        }
-    )
+    fields: dict[vol.Marker, object] = {
+        vol.Required(
+            CONF_CHILD_NAME, default=defaults[CONF_CHILD_NAME]
+        ): TextSelector(),
+        birth_date_key: DateSelector(),
+        **branch_fields,
+        vol.Required(
+            CONF_FILTER_MODE, default=defaults[CONF_FILTER_MODE]
+        ): SelectSelector(SelectSelectorConfig(options=list(FILTER_MODES))),
+        vol.Required(
+            CONF_CALENDAR_DURATION,
+            default=defaults[CONF_CALENDAR_DURATION],
+        ): NumberSelector(
+            NumberSelectorConfig(
+                min=MIN_CALENDAR_DURATION,
+                max=MAX_CALENDAR_DURATION,
+                step=15,
+                mode=NumberSelectorMode.BOX,
+            )
+        ),
+        vol.Required(
+            CONF_SCAN_INTERVAL,
+            default=defaults[CONF_SCAN_INTERVAL],
+        ): NumberSelector(
+            NumberSelectorConfig(
+                min=MIN_SCAN_INTERVAL,
+                max=MAX_SCAN_INTERVAL,
+                step=900,
+                mode=NumberSelectorMode.BOX,
+            )
+        ),
+    }
+    if include_webcal:
+        fields.update(
+            {
+                vol.Required(
+                    CONF_PUBLISH_WEBCAL,
+                    default=bool(defaults.get(CONF_PUBLISH_WEBCAL, False)),
+                ): BooleanSelector(),
+                vol.Required(
+                    CONF_REGENERATE_WEBCAL_TOKEN,
+                    default=False,
+                ): BooleanSelector(),
+            }
+        )
+    return vol.Schema(fields)
 
 
 class FreeLibraryEventsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -124,6 +141,8 @@ class FreeLibraryEventsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 class FreeLibraryEventsOptionsFlow(config_entries.OptionsFlowWithReload):
     """Edit every user-facing integration setting and reload on save."""
 
+    _pending_options: dict[str, Any] | None = None
+
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
@@ -131,16 +150,59 @@ class FreeLibraryEventsOptionsFlow(config_entries.OptionsFlowWithReload):
 
         errors: dict[str, str] = {}
         current = entry_config(self.config_entry.data, self.config_entry.options)
+        publish_webcal = self.config_entry.options.get(CONF_PUBLISH_WEBCAL) is True
+        current_token = self.config_entry.options.get(CONF_WEBCAL_TOKEN)
         if user_input is not None:
             try:
                 options = normalize_config(user_input)
             except (TypeError, ValueError) as err:
                 errors["base"] = str(err) or "invalid_config"
             else:
-                return self.async_create_entry(data=options)
+                publish_webcal = user_input.get(CONF_PUBLISH_WEBCAL) is True
+                regenerate = user_input.get(CONF_REGENERATE_WEBCAL_TOKEN) is True
+                options[CONF_PUBLISH_WEBCAL] = publish_webcal
+                if not publish_webcal:
+                    return self.async_create_entry(data=options)
+                if (
+                    regenerate
+                    or not isinstance(current_token, str)
+                    or not current_token
+                ):
+                    current_token = token_urlsafe(32)
+                options[CONF_WEBCAL_TOKEN] = current_token
+                self._pending_options = options
+                return await self.async_step_webcal()
 
         return self.async_show_form(
             step_id="init",
-            data_schema=_schema({**current, **(user_input or {})}),
+            data_schema=_schema(
+                {
+                    **current,
+                    CONF_PUBLISH_WEBCAL: publish_webcal,
+                    **(user_input or {}),
+                },
+                include_webcal=True,
+            ),
             errors=errors,
+            description_placeholders={
+                "webcal_status": webcal_status(self.hass, publish_webcal, current_token)
+            },
+        )
+
+    async def async_step_webcal(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Display the generated subscription URL before saving it."""
+
+        if self._pending_options is None:
+            return await self.async_step_init()
+        if user_input is not None:
+            return self.async_create_entry(data=self._pending_options)
+        token = self._pending_options[CONF_WEBCAL_TOKEN]
+        return self.async_show_form(
+            step_id="webcal",
+            data_schema=vol.Schema({}),
+            description_placeholders={
+                "webcal_url": webcal_status(self.hass, True, token)
+            },
         )

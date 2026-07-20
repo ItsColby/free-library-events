@@ -62,6 +62,7 @@ from .email_images import (
     store_downloaded_images,
 )
 from .runtime import LibraryConfigEntry
+from .webcal import async_register_webcal_view
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -95,6 +96,7 @@ async def async_setup(hass: HomeAssistant, config: dict[str, object]) -> bool:
     """Register the native response-returning digest action."""
 
     del config
+    async_register_webcal_view(hass)
     image_root = Path(hass.config.path("www", EMAIL_IMAGE_DIRECTORY))
     await hass.async_add_executor_job(purge_stored_image_runs, image_root)
     if not hass.services.has_service(DOMAIN, SERVICE_RENDER_DIGEST):

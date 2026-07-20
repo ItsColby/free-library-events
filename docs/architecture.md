@@ -104,9 +104,22 @@
   removes farthest compact overflow only when necessary to remain within 80,000
   UTF-8 bytes. It visibly discloses any email-only omission. It does not call an
   LLM.
+- `calendar_data.py` projects normalized source rows into the single shared,
+  deterministic age-filtered calendar model. `calendar.py` exposes those rows
+  through Home Assistant's native calendar entity. `webcal.py` serializes the
+  same current coordinator cache as RFC 5545 iCalendar and serves it through an
+  opt-in, token-protected, unauthenticated HTTP view for subscription clients
+  that cannot send Home Assistant bearer authentication. The view never forces
+  a source refresh. Disabled, invalid, and unloaded tokens fail closed as `404`.
 - `calendar.py`, `sensor.py`, and `button.py` expose the native user-facing
   calendar, diagnostic status, and manual refresh surfaces.
-- `__init__.py` registers the response-only `render_digest` action. The caller
+- `config_flow.py` generates, displays, rotates, and removes the private webcal
+  capability token. The token stays only in private config-entry options and is
+  excluded from diagnostics, entity state, integration-authored logs, and public
+  source fixtures. Home Assistant or reverse-proxy HTTP access logs may still
+  contain the requested URL and therefore require private handling.
+- `__init__.py` registers the process-lifetime webcal route and the response-only
+  `render_digest` action. The caller
   owns scheduling, recipient selection, and email delivery; no parallel sender
   or scheduler exists inside the integration. Opt-in SMTP embedding adds
   `images` plus bounded download and expiry metadata to the response, but the
@@ -158,13 +171,15 @@ Render-response metadata retains supplemental failures, cap limitations, and
 expansion evidence for native HA trace/readback without adding diagnostic
 clutter to the email body.
 
-Protected event HTML and ICS endpoints are deliberately outside the runtime
-source boundary. Home Assistant's asynchronous HTTP clients receive the
-publisher's browser challenge on those routes, so page scraping would make
-refresh health dependent on an unsupported access path. The integration
-retains safe embedded RSS links and explicit venue/room wording. It does not
-fetch official structured event-page taxonomy, registration, cost, or end-time
-fields. It may derive narrow presentation highlights such as a secondary
+The publisher's protected event HTML and ICS endpoints are deliberately outside
+the runtime source boundary. Home Assistant's asynchronous HTTP clients receive
+the publisher's browser challenge on those routes, so page scraping would make
+refresh health dependent on an unsupported access path. The integration-owned
+webcal route serializes the already normalized coordinator cache and never
+fetches either protected publisher route. The integration retains safe embedded
+RSS links and explicit venue/room wording. It does not fetch official structured
+event-page taxonomy, registration, cost, or end-time fields. It may derive narrow
+presentation highlights such as a secondary
 activity, accessibility format, outdoor setting, participation note, or
 published planning caution from reliable RSS wording; these labels do not change
 inclusion or source provenance.

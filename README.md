@@ -18,6 +18,7 @@ service is used at runtime.
 
 - Native **Settings > Devices & services** setup and options flow
 - One age-filtered Home Assistant calendar
+- Optional token-protected, dynamically generated iCalendar subscription feed
 - `Strict`, `Recommended`, and `Broad` age-match modes
 - Configurable child name and birth date
 - Configurable branch selection, refresh interval, and placeholder duration
@@ -97,6 +98,12 @@ publisher classifications without putting the birth date,
 child name, or calculated age in any request. All supported branches are
 enabled by default and can be disabled individually.
 
+The options flow can also publish the filtered calendar at a private,
+unguessable subscription URL. Publishing is disabled by default. When enabled,
+Home Assistant shows the generated `webcal://` URL before saving it and whenever
+the integration is configured again. Regenerating the URL immediately
+invalidates the old token after reload; disabling publishing removes it.
+
 ### Match modes
 
 - **Strict** includes explicit numeric or developmental-stage matches.
@@ -124,6 +131,31 @@ configured child and mode. Each calendar event includes:
 - a disclosed placeholder end time when the feed omits one
 
 The calendar entity does not send email or create Google Calendar events.
+
+### Calendar subscriptions
+
+Enable **Publish a private calendar subscription feed** under
+**Settings > Devices & services > Free Library Events > Configure** to subscribe
+from Apple Calendar, Outlook, Google Calendar, or another iCalendar client.
+The feed is generated from the same current coordinator cache as the native Home
+Assistant calendar. Calendar clients periodically fetch the URL; the endpoint
+does not force a publisher refresh or push events to clients.
+
+The subscription route is available beneath the Home Assistant URL:
+
+```text
+webcal://home-assistant.example/api/free_library_events/calendar/<token>.ics
+```
+
+The opaque token is the feed credential because calendar subscription clients
+generally cannot sign in through Home Assistant's interactive authentication.
+Treat the full URL as a password. It may appear in Home Assistant or reverse
+proxy access logs. The feed contains only filtered public event information and
+does not include the configured child name, birth date, or calculated age.
+Invalid, disabled, and unloaded tokens return `404` without identifying which
+part failed. External subscriptions require the configured Home Assistant URL
+and proxy to route this path to Home Assistant over HTTPS; no additional public
+port is required when the existing proxy forwards all paths.
 
 ## Weekly email action
 
