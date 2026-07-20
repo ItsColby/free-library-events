@@ -36,9 +36,9 @@ service is used at runtime.
 - Optional LLM-free SMTP image embedding with bounded publisher downloads,
   notifier-ready CID attachments, and automatic temporary-file cleanup
 - Each included event uses an orientation-aware responsive card: landscape
-  artwork spans the card, while square/portrait artwork sits beside the title,
-  time, location, audience, and planning highlights; the description and
-  prefilled Google Calendar link use the full width below
+  artwork spans the card, while square/portrait artwork uses a centered poster
+  row above the full-width title, time, location, audience, and planning
+  highlights; the description and prefilled Google Calendar link follow below
 - Safe contextual links embedded in official RSS descriptions remain clickable;
   non-HTTP links are discarded
 - An explicitly named off-site venue in published RSS text replaces the branch
