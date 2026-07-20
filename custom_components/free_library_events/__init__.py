@@ -24,7 +24,7 @@ from homeassistant.util import dt as dt_util
 from homeassistant.util.location import distance
 
 from .api import LibraryClient
-from .config import entry_config, selected_branches
+from .config import entry_config, migrated_entry_config, selected_branches
 from .const import (
     ATTR_FORCE_REFRESH,
     ATTR_EMBED_IMAGES,
@@ -107,6 +107,27 @@ async def async_setup(hass: HomeAssistant, config: dict[str, object]) -> bool:
             schema=RENDER_DIGEST_SCHEMA,
             supports_response=SupportsResponse.ONLY,
         )
+    return True
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: LibraryConfigEntry) -> bool:
+    """Split legacy combined settings into profile data and behavior options."""
+
+    if entry.version > 2:
+        return False
+    if entry.version == 2:
+        return True
+    try:
+        data, options = migrated_entry_config(entry.data, entry.options)
+    except (TypeError, ValueError):
+        _LOGGER.exception("Could not migrate the Free Library Events config entry")
+        return False
+    hass.config_entries.async_update_entry(
+        entry,
+        data=data,
+        options=options,
+        version=2,
+    )
     return True
 
 

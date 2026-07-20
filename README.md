@@ -79,14 +79,11 @@ redownload, and pending-restart handling.
 
 The setup flow asks for:
 
-- the child's first name
-- the child's birth date
-- one or more supported library branches
-- the age-match mode
-- the placeholder event duration
-- the feed refresh interval
+- the person's display name
+- the person's birth date
+- one or more supported library branches in one multi-select field
 
-The child name and birth date stay in the Home Assistant config entry and are
+The display name and birth date stay in the Home Assistant config entry and are
 used only for local filtering and rendering. They are redacted from
 downloadable diagnostics. Network requests download official custom RSS feeds
 for each selected branch and every published age category in the configured
@@ -95,14 +92,28 @@ Young Adult categories. At adulthood it follows only the Adult, Senior, or
 overlapping Young Adult windows that actually apply; a forward source window
 that crosses adulthood uses both sides of the transition. This recovers
 publisher classifications without putting the birth date,
-child name, or calculated age in any request. All supported branches are
-enabled by default and can be disabled individually.
+display name, or calculated age in any request. All supported branches are
+enabled by default. Use the integration's **Reconfigure** action to change the
+person or selected branches.
+
+The **Configure** menu separates optional behavior from required profile data:
+
+- **Matching and timing** changes the age-match mode. Home Assistant's
+  **Show advanced options** control reveals the placeholder event duration and
+  source refresh interval when those technical defaults actually need tuning.
+- **Calendar subscription** enables or disables the private feed and controls
+  the name shown by calendar clients.
+- **Regenerate calendar subscription URL** appears only while publishing is
+  enabled and uses a separate confirmation step because it invalidates every
+  existing subscriber.
 
 The options flow can also publish the filtered calendar at a private,
 unguessable subscription URL. Publishing is disabled by default. When enabled,
-Home Assistant shows the generated `webcal://` URL before saving it and whenever
-the integration is configured again. Regenerating the URL immediately
-invalidates the old token after reload; disabling publishing removes it.
+Home Assistant shows both the canonical HTTP(S) URL and the `webcal://`
+convenience URL before saving. It also distinguishes an external or Home
+Assistant Cloud URL from an internal-only URL without claiming that an
+unverified proxy is reachable. Regenerating the URL immediately invalidates the
+old token after reload; disabling publishing removes it.
 
 ### Match modes
 
@@ -141,9 +152,11 @@ The feed is generated from the same current coordinator cache as the native Home
 Assistant calendar. Calendar clients periodically fetch the URL; the endpoint
 does not force a publisher refresh or push events to clients.
 
-The subscription route is available beneath the Home Assistant URL:
+The subscription route is available beneath the Home Assistant URL in either
+form:
 
 ```text
+https://home-assistant.example/api/free_library_events/calendar/<token>.ics
 webcal://home-assistant.example/api/free_library_events/calendar/<token>.ics
 ```
 
@@ -155,7 +168,8 @@ does not include the configured child name, birth date, or calculated age.
 Invalid, disabled, and unloaded tokens return `404` without identifying which
 part failed. External subscriptions require the configured Home Assistant URL
 and proxy to route this path to Home Assistant over HTTPS; no additional public
-port is required when the existing proxy forwards all paths.
+port is required when the existing proxy forwards all paths. For a DuckDNS
+deployment, the generated HTTPS URL uses the configured DuckDNS external URL.
 
 ## Weekly email action
 

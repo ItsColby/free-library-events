@@ -19,7 +19,11 @@ if str(ROOT) not in sys.path:
 try:
     import pytest
 
-    from homeassistant.config_entries import SOURCE_USER, ConfigEntryState
+    from homeassistant.config_entries import (
+        SOURCE_RECONFIGURE,
+        SOURCE_USER,
+        ConfigEntryState,
+    )
     from homeassistant.components.smtp.helpers import _build_html_msg
     from homeassistant.core import HomeAssistant
     from homeassistant.data_entry_flow import FlowResultType
@@ -38,18 +42,22 @@ from custom_components.free_library_events.api import (  # noqa: E402
     LibraryApiError,
     LibraryClient,
 )
+from custom_components.free_library_events import async_migrate_entry  # noqa: E402
 from custom_components.free_library_events.calendar import LibraryCalendar  # noqa: E402
 from custom_components.free_library_events.calendar_data import (  # noqa: E402
     build_calendar_items,
 )
 from custom_components.free_library_events.config import (  # noqa: E402
     normalize_config,
+    normalize_options,
+    normalize_profile,
     selected_branches,
 )
 from custom_components.free_library_events.const import (  # noqa: E402
     ATTR_EMBED_IMAGES,
     ATTR_FORCE_REFRESH,
     CONF_BIRTH_DATE,
+    CONF_BRANCHES,
     CONF_CALENDAR_DURATION,
     CONF_CHILD_NAME,
     CONF_FILTER_MODE,
@@ -59,8 +67,8 @@ from custom_components.free_library_events.const import (  # noqa: E402
     CONF_INCLUDE_SANTORE,
     CONF_SCAN_INTERVAL,
     CONF_PUBLISH_WEBCAL,
-    CONF_REGENERATE_WEBCAL_TOKEN,
     CONF_WEBCAL_TOKEN,
+    CONF_WEBCAL_NAME,
     DOMAIN,
     SERVICE_RENDER_DIGEST,
 )
@@ -92,6 +100,7 @@ from custom_components.free_library_events.email_images import (  # noqa: E402
 from custom_components.free_library_events.webcal import (  # noqa: E402
     WEBCAL_PATH,
     render_icalendar,
+    webcal_subscription_urls,
 )
 
 
@@ -106,6 +115,18 @@ USER_INPUT = {
     CONF_INCLUDE_INDEPENDENCE: True,
     CONF_INCLUDE_PARKWAY_CENTRAL: True,
     CONF_INCLUDE_PCI: True,
+    CONF_FILTER_MODE: "Recommended",
+    CONF_CALENDAR_DURATION: 60,
+    CONF_SCAN_INTERVAL: 21600,
+}
+
+PROFILE_INPUT = {
+    CONF_CHILD_NAME: "Avery",
+    CONF_BIRTH_DATE: "2025-01-15",
+    CONF_BRANCHES: ["SWK", "CEN"],
+}
+
+BEHAVIOR_INPUT = {
     CONF_FILTER_MODE: "Recommended",
     CONF_CALENDAR_DURATION: 60,
     CONF_SCAN_INTERVAL: 21600,
@@ -126,12 +147,47 @@ async def test_user_flow_creates_single_entry(hass: HomeAssistant) -> None:
     ):
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"],
-            USER_INPUT,
+            PROFILE_INPUT,
         )
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["title"] == "Free Library Events"
-    assert result["data"] == USER_INPUT
+    assert result["data"] == PROFILE_INPUT
+
+
+async def test_reconfigure_flow_updates_profile_data_only(
+    hass: HomeAssistant,
+) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Free Library Events",
+        unique_id=DOMAIN,
+        data=PROFILE_INPUT,
+        options=BEHAVIOR_INPUT,
+        version=2,
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": SOURCE_RECONFIGURE, "entry_id": entry.entry_id},
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "reconfigure"
+
+    updated_profile = PROFILE_INPUT | {
+        CONF_CHILD_NAME: "Jordan",
+        CONF_BRANCHES: ["IND", "PCI"],
+    }
+    with patch.object(hass.config_entries, "async_reload", new_callable=AsyncMock):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], updated_profile
+        )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data == updated_profile
+    assert entry.options == BEHAVIOR_INPUT
 
 
 async def test_user_flow_rejects_duplicate_entry(hass: HomeAssistant) -> None:
@@ -147,14 +203,27 @@ async def test_user_flow_rejects_duplicate_entry(hass: HomeAssistant) -> None:
 async def test_options_flow_enables_and_rotates_webcal_feed(
     hass: HomeAssistant,
 ) -> None:
-    entry = _entry()
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Free Library Events",
+        unique_id=DOMAIN,
+        data=PROFILE_INPUT,
+        options=BEHAVIOR_INPUT,
+        version=2,
+    )
     entry.add_to_hass(hass)
     hass.config.external_url = "https://ha.example.test"
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
-    assert result["type"] is FlowResultType.FORM
+    assert result["type"] is FlowResultType.MENU
     assert result["step_id"] == "init"
-    assert result["description_placeholders"] == {"webcal_status": "Disabled"}
+    assert result["menu_options"] == ["behavior", "webcal"]
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "webcal"}
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "webcal"
 
     first_token = "first-synthetic-subscription-token"
     with patch(
@@ -163,35 +232,42 @@ async def test_options_flow_enables_and_rotates_webcal_feed(
     ):
         result = await hass.config_entries.options.async_configure(
             result["flow_id"],
-            USER_INPUT
-            | {
+            {
                 CONF_PUBLISH_WEBCAL: True,
-                CONF_REGENERATE_WEBCAL_TOKEN: False,
+                CONF_WEBCAL_NAME: "Neighborhood Library Events",
             },
         )
 
     assert result["type"] is FlowResultType.FORM
-    assert result["step_id"] == "webcal"
+    assert result["step_id"] == "webcal_url"
     assert result["description_placeholders"] == {
+        "http_url": (
+            "https://ha.example.test/api/free_library_events/calendar/"
+            f"{first_token}.ics"
+        ),
         "webcal_url": (
             "webcal://ha.example.test/api/free_library_events/calendar/"
             f"{first_token}.ics"
-        )
+        ),
+        "url_scope": "Home Assistant external or cloud URL configured",
     }
 
     result = await hass.config_entries.options.async_configure(result["flow_id"], {})
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert entry.options[CONF_PUBLISH_WEBCAL] is True
     assert entry.options[CONF_WEBCAL_TOKEN] == first_token
-    assert CONF_REGENERATE_WEBCAL_TOKEN not in entry.options
+    assert entry.options[CONF_WEBCAL_NAME] == "Neighborhood Library Events"
+    assert "regenerate_webcal_token" not in entry.options
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
-    assert result["description_placeholders"] == {
-        "webcal_status": (
-            "webcal://ha.example.test/api/free_library_events/calendar/"
-            f"{first_token}.ics"
-        )
-    }
+    assert result["type"] is FlowResultType.MENU
+    assert result["menu_options"] == ["behavior", "webcal", "regenerate_webcal"]
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "regenerate_webcal"}
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "regenerate_webcal"
+
     second_token = "second-synthetic-subscription-token"
     with patch(
         "custom_components.free_library_events.config_flow.token_urlsafe",
@@ -199,14 +275,11 @@ async def test_options_flow_enables_and_rotates_webcal_feed(
     ):
         result = await hass.config_entries.options.async_configure(
             result["flow_id"],
-            USER_INPUT
-            | {
-                CONF_PUBLISH_WEBCAL: True,
-                CONF_REGENERATE_WEBCAL_TOKEN: True,
-            },
+            {},
         )
     assert second_token in result["description_placeholders"]["webcal_url"]
     assert first_token not in result["description_placeholders"]["webcal_url"]
+    assert entry.options[CONF_WEBCAL_TOKEN] == first_token
     result = await hass.config_entries.options.async_configure(result["flow_id"], {})
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert entry.options[CONF_WEBCAL_TOKEN] == second_token
@@ -220,21 +293,26 @@ async def test_options_flow_disables_webcal_and_removes_token(
         domain=DOMAIN,
         title="Free Library Events",
         unique_id=DOMAIN,
-        data=USER_INPUT,
+        data=PROFILE_INPUT,
         options={
+            **BEHAVIOR_INPUT,
             CONF_PUBLISH_WEBCAL: True,
             CONF_WEBCAL_TOKEN: old_token,
+            CONF_WEBCAL_NAME: "Free Library Events",
         },
+        version=2,
     )
     entry.add_to_hass(hass)
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "webcal"}
+    )
+    result = await hass.config_entries.options.async_configure(
         result["flow_id"],
-        USER_INPUT
-        | {
+        {
             CONF_PUBLISH_WEBCAL: False,
-            CONF_REGENERATE_WEBCAL_TOKEN: False,
+            CONF_WEBCAL_NAME: "Free Library Events",
         },
     )
 
@@ -243,11 +321,48 @@ async def test_options_flow_disables_webcal_and_removes_token(
     assert CONF_WEBCAL_TOKEN not in entry.options
 
 
+async def test_options_flow_updates_behavior_without_profile_data(
+    hass: HomeAssistant,
+) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Free Library Events",
+        unique_id=DOMAIN,
+        data=PROFILE_INPUT,
+        options=BEHAVIOR_INPUT,
+        version=2,
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "behavior"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_FILTER_MODE: "Strict"}
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.data == PROFILE_INPUT
+    assert entry.options[CONF_FILTER_MODE] == "Strict"
+    assert entry.options[CONF_CALENDAR_DURATION] == 60
+    assert entry.options[CONF_SCAN_INTERVAL] == 21600
+
+
 def test_normalize_config_enforces_non_ui_bounds() -> None:
     with pytest.raises(ValueError, match="invalid_calendar_duration"):
         normalize_config(USER_INPUT | {CONF_CALENDAR_DURATION: 5})
     with pytest.raises(ValueError, match="invalid_scan_interval"):
         normalize_config(USER_INPUT | {CONF_SCAN_INTERVAL: 30})
+
+
+def test_profile_and_webcal_validation_reject_unknown_or_unsafe_values() -> None:
+    with pytest.raises(ValueError, match="invalid_branches"):
+        normalize_profile(PROFILE_INPUT | {CONF_BRANCHES: ["SWK", "UNKNOWN"]})
+    with pytest.raises(ValueError, match="branch_required"):
+        normalize_profile(PROFILE_INPUT | {CONF_BRANCHES: []})
+    with pytest.raises(ValueError, match="invalid_webcal_name"):
+        normalize_options(BEHAVIOR_INPUT | {CONF_WEBCAL_NAME: " \n "})
 
 
 def test_normalize_config_coerces_non_ui_boolean_strings() -> None:
@@ -277,14 +392,49 @@ def test_all_sources_default_on_for_legacy_and_new_entries() -> None:
         if key not in {CONF_INCLUDE_PARKWAY_CENTRAL, CONF_INCLUDE_PCI}
     }
     legacy_config = normalize_config(legacy_input)
-    assert legacy_config[CONF_INCLUDE_PARKWAY_CENTRAL] is True
-    assert legacy_config[CONF_INCLUDE_PCI] is True
+    assert legacy_config[CONF_BRANCHES] == ["SWK", "IND", "CEN", "PCI"]
     assert [branch.code for branch in selected_branches(legacy_config)] == [
         "SWK",
         "IND",
         "CEN",
         "PCI",
     ]
+
+
+async def test_version_one_entry_migrates_profile_and_behavior_without_token_leak(
+    hass: HomeAssistant,
+) -> None:
+    token = "synthetic-migration-subscription-token"
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Free Library Events",
+        unique_id=DOMAIN,
+        data=USER_INPUT,
+        options=USER_INPUT
+        | {
+            CONF_CHILD_NAME: "Jordan",
+            CONF_INCLUDE_PCI: False,
+            CONF_FILTER_MODE: "Strict",
+            CONF_PUBLISH_WEBCAL: True,
+            CONF_WEBCAL_TOKEN: token,
+        },
+        version=1,
+    )
+    entry.add_to_hass(hass)
+
+    assert await async_migrate_entry(hass, entry)
+
+    assert entry.version == 2
+    assert entry.data == {
+        CONF_CHILD_NAME: "Jordan",
+        CONF_BIRTH_DATE: "2025-01-15",
+        CONF_BRANCHES: ["SWK", "IND", "CEN"],
+    }
+    assert entry.options[CONF_FILTER_MODE] == "Strict"
+    assert entry.options[CONF_WEBCAL_TOKEN] == token
+    assert CONF_CHILD_NAME not in entry.options
+    assert CONF_BIRTH_DATE not in entry.options
+    assert token not in repr(entry.data)
 
 
 async def test_setup_entities_action_and_redacted_diagnostics(
@@ -574,6 +724,17 @@ def test_calendar_keeps_recurring_series_occurrences_distinct() -> None:
     assert rendered[0].uid != rendered[1].uid
 
 
+async def test_webcal_urls_disclose_internal_only_scope(hass: HomeAssistant) -> None:
+    hass.config.external_url = None
+    hass.config.internal_url = "http://ha.internal.test:8123"
+
+    urls = webcal_subscription_urls(hass, "synthetic-internal-url-token")
+
+    assert urls.http_url.startswith("http://ha.internal.test:8123/api/")
+    assert urls.webcal_url.startswith("webcal://ha.internal.test:8123/api/")
+    assert urls.external_url_configured is False
+
+
 def test_webcal_serializes_current_filtered_events_as_rfc5545() -> None:
     event = Event(
         title="Stories, Songs; and Café Fun",
@@ -594,6 +755,7 @@ def test_webcal_serializes_current_filtered_events_as_rfc5545() -> None:
         items,
         fetched_at=datetime(2026, 7, 19, 16, 15, tzinfo=ZoneInfo("UTC")),
         refresh_seconds=21600,
+        calendar_name="Neighborhood Library Events",
     )
     unfolded = rendered.replace("\r\n ", "")
 
@@ -602,6 +764,7 @@ def test_webcal_serializes_current_filtered_events_as_rfc5545() -> None:
     assert "\n" not in rendered.replace("\r\n", "")
     assert all(len(line.encode("utf-8")) <= 75 for line in rendered.split("\r\n"))
     assert "METHOD:PUBLISH\r\n" in rendered
+    assert "X-WR-CALNAME:Neighborhood Library Events\r\n" in rendered
     assert "REFRESH-INTERVAL;VALUE=DURATION:PT6H\r\n" in rendered
     assert "X-PUBLISHED-TTL:PT6H\r\n" in rendered
     assert "DTSTAMP:20260719T161500Z\r\n" in rendered
@@ -626,6 +789,7 @@ async def test_webcal_view_is_token_gated_dynamic_and_unloads(
         options={
             CONF_PUBLISH_WEBCAL: True,
             CONF_WEBCAL_TOKEN: token,
+            CONF_WEBCAL_NAME: "Neighborhood Library Events",
         },
     )
     entry.add_to_hass(hass)
@@ -672,6 +836,7 @@ async def test_webcal_view_is_token_gated_dynamic_and_unloads(
     assert response.headers["X-Content-Type-Options"] == "nosniff"
     first_body = await response.text()
     assert "Storytime" in first_body
+    assert "X-WR-CALNAME:Neighborhood Library Events" in first_body
     assert USER_INPUT[CONF_CHILD_NAME] not in first_body
     diagnostics = await async_get_config_entry_diagnostics(hass, entry)
     assert token not in repr(diagnostics)

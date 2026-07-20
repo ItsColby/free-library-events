@@ -12,9 +12,13 @@
 
 ## Runtime Model
 
-- `config_flow.py` owns the single config entry and reload-on-save options.
+- `config_flow.py` owns the single config entry, required profile
+  reconfiguration, and reload-on-save options. Version 2 stores the display
+  name, birth date, and ordered branch-code selection in config-entry data while
+  optional matching, timing, and WebCal controls live in options. A migration
+  splits older combined entries without changing their effective behavior.
 - The config-entry card and service device use the static integration name;
-  child identity remains only in private config data and rendered content.
+  person identity remains only in private config data and rendered content.
 - `api.py` reads official custom branch RSS feeds through Home Assistant's
   shared HTTP session and records the evidence needed to evaluate the observed
   ten-item source boundary. Because the endpoint ignores `page=2`, it can expand
@@ -113,8 +117,11 @@
   a source refresh. Disabled, invalid, and unloaded tokens fail closed as `404`.
 - `calendar.py`, `sensor.py`, and `button.py` expose the native user-facing
   calendar, diagnostic status, and manual refresh surfaces.
-- `config_flow.py` generates, displays, rotates, and removes the private webcal
-  capability token. The token stays only in private config-entry options and is
+- `config_flow.py` generates, displays, explicitly confirms rotation of, and
+  removes the private webcal capability token. It presents both HTTP(S) and
+  `webcal://` URL forms, identifies whether Home Assistant supplied an
+  external/cloud or internal-only base URL, and lets the user name the calendar.
+  The token stays only in private config-entry options and is
   excluded from diagnostics, entity state, integration-authored logs, and public
   source fixtures. Home Assistant or reverse-proxy HTTP access logs may still
   contain the requested URL and therefore require private handling.
@@ -145,9 +152,11 @@
 The supported source set is intentionally limited to the Charles Santore
 (`SWK`), Independence (`IND`), Parkway Central (`CEN`), and Philadelphia City
 Institute (`PCI`) Free Library of Philadelphia branch feeds. Adding a branch
-requires public source metadata, parsing/feed validation, config-flow and
-translation changes, deterministic tests, and documentation. All supported
-sources default on and can be disabled individually in the config entry.
+requires public source metadata, parsing/feed validation, deterministic tests,
+and documentation. All supported sources default on and are presented through
+one ordered multi-select generated from the supported branch registry. Adding a
+registry entry therefore does not require another persisted boolean or
+translation key.
 
 For every selected branch, the coordinator requests every official age category
 in the configured person's current life-stage group. This preserves publisher

@@ -3,15 +3,67 @@
   "config": {
     "step": {
       "user": {
-        "title": "Set up weekly library events",
-        "description": "Choose the child and branches. Home Assistant will keep the calendar and weekly digest content age appropriate automatically.",
+        "title": "Set up library event matching",
+        "description": "Choose one person and the branches to follow. Optional matching, timing, and calendar-subscription settings are available after setup.",
         "data": {
-          "child_name": "Child's first name",
-          "birth_date": "Child's birth date",
-          "include_charles_santore": "Include Charles Santore Library",
-          "include_independence": "Include Independence Library",
-          "include_parkway_central": "Include Parkway Central Library",
-          "include_philadelphia_city_institute": "Include Philadelphia City Institute",
+          "child_name": "Person's display name",
+          "birth_date": "Person's birth date",
+          "branches": "Library branches"
+        },
+        "data_description": {
+          "child_name": "Used only in locally rendered digest content.",
+          "birth_date": "Used locally to keep age matching current; it is not sent to the library.",
+          "branches": "Select one or more supported Free Library branches."
+        }
+      },
+      "reconfigure": {
+        "title": "Change person and branches",
+        "description": "These settings define whose age is matched and which official branch feeds are requested.",
+        "data": {
+          "child_name": "Person's display name",
+          "birth_date": "Person's birth date",
+          "branches": "Library branches"
+        },
+        "data_description": {
+          "child_name": "Used only in locally rendered digest content.",
+          "birth_date": "Used locally to keep age matching current; it is not sent to the library.",
+          "branches": "Select one or more supported Free Library branches."
+        }
+      }
+    },
+    "error": {
+      "child_name_required": "Enter the person's display name.",
+      "invalid_child_name": "Enter a display name of 80 characters or fewer.",
+      "birth_date_required": "Enter the person's birth date.",
+      "invalid_birth_date": "Enter a valid birth date.",
+      "birth_date_in_future": "The birth date cannot be in the future.",
+      "branch_required": "Select at least one library branch.",
+      "invalid_branches": "Select only supported library branches.",
+      "invalid_filter_mode": "Select a valid age-match mode.",
+      "invalid_calendar_duration": "Calendar duration must be between 15 and 240 minutes.",
+      "invalid_scan_interval": "Refresh interval must be between 900 and 86400 seconds.",
+      "invalid_config": "Check the settings and try again."
+    },
+    "abort": {
+      "already_configured": "Free Library Events is already configured. Use Configure to change its settings.",
+      "reconfigure_successful": "The person and branch settings were updated."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Configure weekly library events",
+        "description": "Choose the optional behavior to change. Calendar subscription: {webcal_status}",
+        "menu_options": {
+          "behavior": "Matching and timing",
+          "webcal": "Calendar subscription",
+          "regenerate_webcal": "Regenerate calendar subscription URL"
+        }
+      },
+      "behavior": {
+        "title": "Matching and timing",
+        "description": "Matching changes apply after saving. Enable Show advanced options to change placeholder duration or source polling.",
+        "data": {
           "filter_mode": "Age-match mode",
           "calendar_duration_minutes": "Calendar placeholder duration (minutes)",
           "scan_interval_seconds": "Refresh interval (seconds)"
@@ -21,65 +73,33 @@
           "calendar_duration_minutes": "Used only when the library does not publish an end time.",
           "scan_interval_seconds": "Six hours (21600 seconds) is recommended. The render action refreshes again by default immediately before generating the digest."
         }
-      }
-    },
-    "error": {
-      "child_name_required": "Enter the child's first name.",
-      "invalid_child_name": "Enter a first name of 80 characters or fewer.",
-      "birth_date_required": "Enter the child's birth date.",
-      "invalid_birth_date": "Enter a valid birth date.",
-      "birth_date_in_future": "Birth date cannot be in the future.",
-      "branch_required": "Select at least one library branch.",
-      "invalid_filter_mode": "Select a valid age-match mode.",
-      "invalid_calendar_duration": "Calendar duration must be between 15 and 240 minutes.",
-      "invalid_scan_interval": "Refresh interval must be between 900 and 86400 seconds.",
-      "invalid_config": "Check the settings and try again."
-    },
-    "abort": {
-      "already_configured": "Free Library Events is already configured. Use Configure to change its settings."
-    }
-  },
-  "options": {
-    "step": {
-      "init": {
-        "title": "Configure weekly library events",
-        "description": "Changes apply automatically after saving. Calendar subscription: {webcal_status}",
-        "data": {
-          "child_name": "Child's first name",
-          "birth_date": "Child's birth date",
-          "include_charles_santore": "Include Charles Santore Library",
-          "include_independence": "Include Independence Library",
-          "include_parkway_central": "Include Parkway Central Library",
-          "include_philadelphia_city_institute": "Include Philadelphia City Institute",
-          "filter_mode": "Age-match mode",
-          "calendar_duration_minutes": "Calendar placeholder duration (minutes)",
-          "scan_interval_seconds": "Refresh interval (seconds)",
-          "publish_webcal": "Publish a private calendar subscription feed",
-          "regenerate_webcal_token": "Regenerate the calendar subscription URL"
-        },
-        "data_description": {
-          "filter_mode": "Recommended balances age fit with family-friendly options. Strict includes only explicit best matches; Broad includes more general children's events.",
-          "calendar_duration_minutes": "Used only when the library does not publish an end time.",
-          "scan_interval_seconds": "Six hours (21600 seconds) is recommended. The render action refreshes again by default immediately before generating the digest.",
-          "publish_webcal": "Makes the age-filtered calendar available at an unguessable URL for calendar apps that cannot sign in to Home Assistant. Treat the URL as a password.",
-          "regenerate_webcal_token": "Invalidates the current subscription URL after the integration reloads. Existing calendar subscriptions must be updated."
-        }
       },
       "webcal": {
+        "title": "Calendar subscription",
+        "description": "Enable a token-protected feed for calendar apps that cannot sign in to Home Assistant. Treat either subscription URL as a password. Current status: {webcal_status}",
+        "data": {
+          "publish_webcal": "Publish a private calendar subscription feed",
+          "webcal_name": "Calendar name"
+        },
+        "data_description": {
+          "publish_webcal": "Disabling publishing immediately invalidates and removes the current private URL after reload.",
+          "webcal_name": "Displayed as the calendar name by subscription clients."
+        }
+      },
+      "regenerate_webcal": {
+        "title": "Regenerate calendar subscription URL",
+        "description": "Submitting this form creates a new private URL. Existing calendar subscriptions will stop updating until they are changed to the new URL."
+      },
+      "webcal_url": {
         "title": "Calendar subscription URL",
-        "description": "Copy this private URL, then select Submit to activate it. Treat it as a password.\n\n{webcal_url}"
+        "description": "{url_scope}. Copy either URL, then select Submit to activate it. Treat both as passwords.\n\nCanonical HTTP(S) URL:\n`{http_url}`\n\nWebCal convenience URL:\n`{webcal_url}`"
       }
     },
     "error": {
-      "child_name_required": "Enter the child's first name.",
-      "invalid_child_name": "Enter a first name of 80 characters or fewer.",
-      "birth_date_required": "Enter the child's birth date.",
-      "invalid_birth_date": "Enter a valid birth date.",
-      "birth_date_in_future": "Birth date cannot be in the future.",
-      "branch_required": "Select at least one library branch.",
       "invalid_filter_mode": "Select a valid age-match mode.",
       "invalid_calendar_duration": "Calendar duration must be between 15 and 240 minutes.",
       "invalid_scan_interval": "Refresh interval must be between 900 and 86400 seconds.",
+      "invalid_webcal_name": "Enter a calendar name of 80 characters or fewer.",
       "invalid_config": "Check the settings and try again."
     }
   },

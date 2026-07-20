@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from http import HTTPStatus
 import secrets
@@ -20,6 +21,7 @@ from .config import entry_config
 from .const import (
     CONF_PUBLISH_WEBCAL,
     CONF_SCAN_INTERVAL,
+    CONF_WEBCAL_NAME,
     CONF_WEBCAL_TOKEN,
     DOMAIN,
     NAME,
@@ -31,6 +33,15 @@ DATA_WEBCAL_VIEW_REGISTERED = f"{DOMAIN}_webcal_view_registered"
 ICALENDAR_PRODID = "-//ItsColby//Free Library Events for Home Assistant//EN"
 
 
+@dataclass(frozen=True, slots=True)
+class WebcalSubscriptionUrls:
+    """Subscription URL variants and their Home Assistant URL scope."""
+
+    http_url: str
+    webcal_url: str
+    external_url_configured: bool
+
+
 def async_register_webcal_view(hass: HomeAssistant) -> None:
     """Register the process-lifetime calendar feed route once."""
 
@@ -40,19 +51,41 @@ def async_register_webcal_view(hass: HomeAssistant) -> None:
     hass.data[DATA_WEBCAL_VIEW_REGISTERED] = True
 
 
-def webcal_subscription_url(hass: HomeAssistant, token: str) -> str:
-    """Return the preferred subscription URL for an opaque feed token."""
+def webcal_subscription_urls(hass: HomeAssistant, token: str) -> WebcalSubscriptionUrls:
+    """Return canonical and convenience URLs without overstating reachability."""
 
-    base_url = get_url(
-        hass,
-        allow_internal=True,
-        allow_external=True,
-        allow_cloud=True,
-        prefer_external=True,
-    )
+    external_url_configured = True
+    try:
+        base_url = get_url(
+            hass,
+            allow_internal=False,
+            allow_external=True,
+            allow_cloud=True,
+            prefer_external=True,
+        )
+    except NoURLAvailableError:
+        external_url_configured = False
+        base_url = get_url(
+            hass,
+            allow_internal=True,
+            allow_external=False,
+            allow_cloud=False,
+            prefer_external=False,
+        )
     http_url = f"{base_url.rstrip('/')}{WEBCAL_PATH.format(token=token)}"
     parsed = urlsplit(http_url)
-    return urlunsplit(("webcal", parsed.netloc, parsed.path, "", ""))
+    webcal_url = urlunsplit(("webcal", parsed.netloc, parsed.path, "", ""))
+    return WebcalSubscriptionUrls(
+        http_url=http_url,
+        webcal_url=webcal_url,
+        external_url_configured=external_url_configured,
+    )
+
+
+def webcal_subscription_url(hass: HomeAssistant, token: str) -> str:
+    """Return the convenience WebCal subscription URL."""
+
+    return webcal_subscription_urls(hass, token).webcal_url
 
 
 def webcal_status(hass: HomeAssistant, enabled: bool, token: object) -> str:
@@ -61,9 +94,13 @@ def webcal_status(hass: HomeAssistant, enabled: bool, token: object) -> str:
     if not enabled or not isinstance(token, str) or not token:
         return "Disabled"
     try:
-        return webcal_subscription_url(hass, token)
+        urls = webcal_subscription_urls(hass, token)
     except NoURLAvailableError:
         return "Enabled; configure a Home Assistant URL to copy the feed address"
+    scope = (
+        "external/cloud URL" if urls.external_url_configured else "internal URL only"
+    )
+    return f"Enabled ({scope}): {urls.webcal_url}"
 
 
 class FreeLibraryEventsCalendarFeedView(HomeAssistantView):
@@ -89,6 +126,7 @@ class FreeLibraryEventsCalendarFeedView(HomeAssistantView):
             build_calendar_items(coordinator.data.events, config),
             fetched_at=coordinator.data.fetched_at,
             refresh_seconds=int(config[CONF_SCAN_INTERVAL]),
+            calendar_name=str(config[CONF_WEBCAL_NAME]),
         )
         return web.Response(
             body=body.encode("utf-8"),
@@ -127,6 +165,7 @@ def render_icalendar(
     *,
     fetched_at: datetime,
     refresh_seconds: int,
+    calendar_name: str = NAME,
 ) -> str:
     """Serialize calendar items as deterministic RFC 5545 content."""
 
@@ -138,7 +177,7 @@ def render_icalendar(
         "VERSION:2.0",
         "CALSCALE:GREGORIAN",
         "METHOD:PUBLISH",
-        f"X-WR-CALNAME:{_escape_text(NAME)}",
+        f"X-WR-CALNAME:{_escape_text(calendar_name)}",
         "X-WR-TIMEZONE:America/New_York",
         f"REFRESH-INTERVAL;VALUE=DURATION:{refresh_duration}",
         f"X-PUBLISHED-TTL:{refresh_duration}",
