@@ -503,9 +503,15 @@ async def test_setup_entities_action_and_redacted_diagnostics(
             ordered=True,
         )
 
-    with patch(
-        "custom_components.free_library_events.api.LibraryClient.async_fetch_feed",
-        side_effect=fetch_filtered,
+    with (
+        patch(
+            "custom_components.free_library_events.api.LibraryClient.async_fetch_feed",
+            side_effect=fetch_filtered,
+        ),
+        patch(
+            "homeassistant.util.dt.now",
+            return_value=datetime(2026, 7, 17, 12, tzinfo=LOCAL_TIME_ZONE),
+        ),
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
