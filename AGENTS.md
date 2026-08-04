@@ -27,7 +27,17 @@ email-rendering, or release-layout changes.
 
 ## Validation
 
-Use Python 3.14 and run:
+For focused iteration, run the directly affected unittest module, compile the
+changed package/test surface, and always run the public-safety guard when the
+change touches code, tests, docs, workflows, scripts, or metadata. Example:
+
+```powershell
+python -m unittest discover -s tests -p "test_digest.py"
+python -m compileall -q custom_components/free_library_events tests
+python scripts/check_public_safety.py
+```
+
+Before integration or release, use Python 3.14 and run the full local tier:
 
 ```powershell
 python -m unittest discover -s tests -p "test_digest.py"
