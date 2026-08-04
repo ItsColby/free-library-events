@@ -27,6 +27,10 @@ email-rendering, or release-layout changes.
 
 ## Validation
 
+After changing `.github/workflows`, run `actionlint` from the repository root.
+Keep `shellcheck` available on `PATH`; actionlint uses it automatically for
+Bash and `sh` `run:` steps.
+
 For focused iteration, run the directly affected unittest module, compile the
 changed package/test surface, and always run the public-safety guard when the
 change touches code, tests, docs, workflows, scripts, or metadata. Example:
