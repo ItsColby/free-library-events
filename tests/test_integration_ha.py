@@ -584,12 +584,10 @@ async def test_setup_entities_action_and_redacted_diagnostics(
 
     image_url = "https://libwww.freelibrary.org/images/storytime.png"
     image_path = Path(
-        hass.config.path(
-            "www",
-            EMAIL_IMAGE_DIRECTORY,
-            "run-0123456789abcdef0123456789abcdef",
-            "event-01.png",
-        )
+        hass.config.media_dirs["local"],
+        EMAIL_IMAGE_DIRECTORY,
+        "run-0123456789abcdef0123456789abcdef",
+        "event-01.png",
     )
     unused_image_url = "https://libwww.freelibrary.org/images/unused.png"
     unused_image_path = image_path.with_name("event-02.png")
@@ -636,7 +634,22 @@ async def test_setup_entities_action_and_redacted_diagnostics(
             return_response=True,
         )
     assert embedded["images"] == [str(image_path)]
+    assert embedded["attachments"] == [
+        {
+            "media_source": {
+                "media_content_id": (
+                    "media-source://media_source/local/"
+                    f"{EMAIL_IMAGE_DIRECTORY}/"
+                    "run-0123456789abcdef0123456789abcdef/event-01.png"
+                ),
+                "media_content_type": "image/png",
+            },
+            "filename": "event-01.png",
+            "content_id": "event-01.png",
+        }
+    ]
     assert embedded["metadata"]["embedded_image_count"] == 1
+    assert embedded["metadata"]["smtp_attachment_count"] == 1
     assert embedded["metadata"]["image_download_count"] == 2
     assert embedded["metadata"]["image_download_failure_count"] == 0
     assert 'src="cid:event-01.png"' in embedded["html"]
@@ -668,6 +681,8 @@ async def test_setup_entities_action_and_redacted_diagnostics(
             return_response=True,
         )
     assert remote_fallback["images"] == []
+    assert remote_fallback["attachments"] == []
+    assert remote_fallback["metadata"]["smtp_attachment_count"] == 0
     assert remote_fallback["metadata"]["image_download_failure_count"] == 2
     assert f'src="{image_url}"' in remote_fallback["html"]
 

@@ -23,8 +23,7 @@ class PublicSafetyGuardTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         strings = json.loads(
             (
-                root
-                / "custom_components/free_library_events/translations/en.json"
+                root / "custom_components/free_library_events/translations/en.json"
             ).read_text(encoding="utf-8")
         )
 
@@ -35,8 +34,7 @@ class PublicSafetyGuardTests(unittest.TestCase):
             if not (
                 isinstance(node.exc, ast.Call)
                 and isinstance(node.exc.func, ast.Name)
-                and node.exc.func.id
-                in {"HomeAssistantError", "ServiceValidationError"}
+                and node.exc.func.id in {"HomeAssistantError", "ServiceValidationError"}
             ):
                 continue
             self.assertEqual([], node.exc.args)
@@ -80,7 +78,9 @@ class PublicSafetyGuardTests(unittest.TestCase):
             with self.subTest(sample=sample):
                 self.assertIn("private IPv4 address", _text_failures(sample))
 
-    def test_local_hostname_check_handles_many_labels_without_backtracking(self) -> None:
+    def test_local_hostname_check_handles_many_labels_without_backtracking(
+        self,
+    ) -> None:
         sample = (("segment" + ".") * 10_000) + "local"
         self.assertIn("local hostname", _text_failures(sample))
 

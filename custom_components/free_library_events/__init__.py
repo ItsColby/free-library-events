@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
 import logging
+import mimetypes
 from pathlib import Path
 
 import voluptuous as vol
@@ -92,13 +93,66 @@ def _referenced_embedded_image_paths(
     )
 
 
+def _email_image_storage(hass: HomeAssistant) -> tuple[Path, str | None]:
+    """Return a Local Media-backed image root and its source directory ID."""
+
+    if hass.config.media_dirs:
+        source_directory_id = (
+            "local"
+            if "local" in hass.config.media_dirs
+            else sorted(hass.config.media_dirs)[0]
+        )
+        return (
+            Path(hass.config.media_dirs[source_directory_id]) / EMAIL_IMAGE_DIRECTORY,
+            source_directory_id,
+        )
+    return Path(hass.config.path("www", EMAIL_IMAGE_DIRECTORY)), None
+
+
+def _smtp_attachments(
+    image_paths: tuple[str, ...],
+    *,
+    image_root: Path,
+    source_directory_id: str | None,
+) -> list[dict[str, object]]:
+    """Build smtp.send_message attachment objects for referenced CID images."""
+
+    if source_directory_id is None:
+        return []
+    attachments: list[dict[str, object]] = []
+    for image_path in image_paths:
+        path = Path(image_path)
+        try:
+            relative_path = Path(EMAIL_IMAGE_DIRECTORY) / path.relative_to(image_root)
+        except ValueError:
+            continue
+        attachments.append(
+            {
+                "media_source": {
+                    "media_content_id": (
+                        "media-source://media_source/"
+                        f"{source_directory_id}/{relative_path.as_posix()}"
+                    ),
+                    "media_content_type": (
+                        mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+                    ),
+                },
+                "filename": path.name,
+                "content_id": path.name,
+            }
+        )
+    return attachments
+
+
 async def async_setup(hass: HomeAssistant, config: dict[str, object]) -> bool:
     """Register the native response-returning digest action."""
 
     del config
     async_register_webcal_view(hass)
-    image_root = Path(hass.config.path("www", EMAIL_IMAGE_DIRECTORY))
-    await hass.async_add_executor_job(purge_stored_image_runs, image_root)
+    image_root, _source_directory_id = _email_image_storage(hass)
+    legacy_image_root = Path(hass.config.path("www", EMAIL_IMAGE_DIRECTORY))
+    for owned_root in {image_root, legacy_image_root}:
+        await hass.async_add_executor_job(purge_stored_image_runs, owned_root)
     if not hass.services.has_service(DOMAIN, SERVICE_RENDER_DIGEST):
         hass.services.async_register(
             DOMAIN,
@@ -230,6 +284,7 @@ async def _async_render_digest(call: ServiceCall) -> ServiceResponse:
     image_download_failure_count = 0
     image_download_failure_examples: tuple[str, ...] = ()
     image_expires_at: str | None = None
+    image_root, source_directory_id = _email_image_storage(hass)
     if call.data[ATTR_EMBED_IMAGES]:
         _weekly_events, included_events = select_digest_events(
             coordinator.data.events,
@@ -252,7 +307,6 @@ async def _async_render_digest(call: ServiceCall) -> ServiceResponse:
         image_download_count = download_batch.requested_count
         image_download_failure_count = download_batch.failure_count
         image_download_failure_examples = download_batch.failure_examples
-        image_root = Path(hass.config.path("www", EMAIL_IMAGE_DIRECTORY))
         await hass.async_add_executor_job(
             purge_stale_image_runs,
             image_root,
@@ -334,7 +388,13 @@ async def _async_render_digest(call: ServiceCall) -> ServiceResponse:
             str(response["html"]), embedded_image_paths
         )
         response["images"] = list(embedded_image_paths)
+        response["attachments"] = _smtp_attachments(
+            embedded_image_paths,
+            image_root=image_root,
+            source_directory_id=source_directory_id,
+        )
         response["metadata"]["embedded_image_count"] = len(embedded_image_paths)
+        response["metadata"]["smtp_attachment_count"] = len(response["attachments"])
         response["metadata"]["image_download_count"] = image_download_count
         response["metadata"]["image_download_failure_count"] = (
             image_download_failure_count

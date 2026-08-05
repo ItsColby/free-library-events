@@ -140,11 +140,7 @@ def _text_failures(text: str) -> set[str]:
             failures.add("non-example email address")
     for match in HOSTNAME_TOKEN_RE.finditer(text):
         labels = match.group(0).casefold().split(".")
-        if (
-            len(labels) >= 2
-            and all(labels)
-            and labels[-1] in LOCAL_HOSTNAME_SUFFIXES
-        ):
+        if len(labels) >= 2 and all(labels) and labels[-1] in LOCAL_HOSTNAME_SUFFIXES:
             failures.add("local hostname")
     return failures
 
