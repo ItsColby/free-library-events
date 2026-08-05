@@ -237,11 +237,12 @@ disclose the configured placeholder used by the calendar link.
 For SMTP, set `embed_images: true` to make image display independent of the
 recipient's remote-image setting. This deterministic mode downloads only the
 unique publisher images used by the selected events, follows at most two
-publisher-hosted HTTPS redirects, validates signatures and dimensions, stores
-them in an integration-owned random run directory under
-Home Assistant's `www` directory, rewrites the matching HTML sources to SMTP
-`cid:` references, and returns the local paths as `digest.images`. It does not
-use an LLM. Downloads are limited to 12 images, 3 MiB per image, 15 MiB in
+publisher-hosted HTTPS redirects, validates signatures and dimensions, and
+stores them in an integration-owned random run directory under Home Assistant
+Local Media. It rewrites the matching HTML sources to SMTP `cid:` references
+and returns modern `smtp.send_message` objects as `digest.attachments` plus
+rollback-compatible local paths as `digest.images`. It does not use an LLM.
+Downloads are limited to 12 images, 3 MiB per image, 15 MiB in
 total, four concurrent requests, and 15 seconds per request. A trusted original
 URL remains available as a remote-image fallback for transient transport/server,
 storage, digest count/total-size limits, and publisher challenge or rate-limit
@@ -260,13 +261,14 @@ branch calendars. Recurring events remain distinct in both the digest and the
 native Home Assistant calendar by branch, date, and start time even when
 multiple occurrences share one official series URL.
 
-The caller must pass `digest.images` to an SMTP notify service that supports the
-legacy `data.html` and `data.images` fields in the immediately following action.
-The newer SMTP notify entity currently sends plain text and is not compatible
-with this HTML/CID flow. Every run is scheduled for deletion after one hour,
+The caller should pass `digest.html` and `digest.attachments` to
+`smtp.send_message` in the immediately following action. The retained
+`digest.images` list supports rollback to the deprecated legacy SMTP notifier;
+do not pass both attachment formats in one action. Every run is scheduled for
+deletion after one hour,
 expired runs are purged before later renders, and abandoned runs from a prior
 Home Assistant process are removed during integration setup. The dedicated
-directory and ownership marker prevent cleanup from deleting other `www`
+directory and ownership marker prevent cleanup from deleting other Local Media
 content.
 
 Example automation fragment:
@@ -279,14 +281,14 @@ actions:
       embed_images: true
     response_variable: digest
 
-  # Replace notify.email with your HTML/images-capable SMTP notify service.
-  - action: notify.email
+  - action: smtp.send_message
+    target:
+      entity_id: notify.email_recipient
     data:
       title: "{{ digest.subject }}"
       message: "{{ digest.message }}"
-      data:
-        html: "{{ digest.html }}"
-        images: "{{ digest.images }}"
+      html: "{{ digest.html }}"
+      attachments: "{{ digest.attachments }}"
 ```
 
 The automation or script calling the action owns its schedule, recipient, and
@@ -389,8 +391,8 @@ python -m unittest discover -s tests -p "test_digest.py"
 python -m unittest discover -s tests -p "test_public_safety.py"
 python -m compileall -q custom_components\free_library_events tests scripts
 python scripts\check_public_safety.py
-docker run --rm -v "${PWD}:/work" -w /work python:3.14-slim bash -lc "python -m pip install --upgrade pip && python -m pip install -r requirements-ha-test.txt && pytest tests/test_integration_ha.py tests/test_email_images.py -q"
-docker run --rm -v "${PWD}:/work" -w /work python:3.14-slim bash -lc "python -m pip install --upgrade pip && python -m pip install -r requirements-ha-test-current.txt && pytest tests/test_integration_ha.py tests/test_email_images.py -q"
+docker run --rm -v "${PWD}:/work" -w /work python:3.14-slim bash -lc "python -m pip install --upgrade pip && python -m pip install pytest-homeassistant-custom-component==0.13.345 && python -m pip install --upgrade -r requirements-ha-test.txt && pytest tests/test_integration_ha.py tests/test_email_images.py -q"
+docker run --rm -v "${PWD}:/work" -w /work python:3.14-slim bash -lc "python -m pip install --upgrade pip && python -m pip install pytest-homeassistant-custom-component==0.13.353 && python -m pip install --upgrade -r requirements-ha-test-current.txt && pytest tests/test_integration_ha.py tests/test_email_images.py -q"
 ```
 
 The protected GitHub workflow pins every third-party Action to a full commit

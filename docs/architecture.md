@@ -76,12 +76,11 @@
   Home Assistant's shared HTTP session, follows at most two HTTPS redirects that
   remain on trusted publisher hosts,
   validates signatures and dimensions, and writes them to a random
-  integration-owned run under the default-allowed `www` root, substitutes
-  basename-matched `cid:` sources, and returns only paths whose CIDs remain
-  referenced by the final budgeted HTML to the caller's legacy
-  HTML/images-capable SMTP notify action. The newer plain-text SMTP notify entity
-  is outside this CID
-  contract. It never calls an LLM. Each run expires after one hour. Scheduled,
+  integration-owned run under Home Assistant Local Media. It substitutes
+  basename-matched `cid:` sources and returns only images whose CIDs remain
+  referenced by the final budgeted HTML. The response exposes native
+  `smtp.send_message` media-source attachment objects plus legacy local paths
+  for rollback compatibility. It never calls an LLM. Each run expires after one hour. Scheduled,
   pre-render stale, and startup cleanup remove owned run directories while
   marker and name checks preserve all other files. Transient transport/server
   failures, storage failures, and digest-level count/total-size limits may
@@ -144,8 +143,9 @@
   `render_digest` action. The caller
   owns scheduling, recipient selection, and email delivery; no parallel sender
   or scheduler exists inside the integration. Opt-in SMTP embedding adds
-  `images` plus bounded download and expiry metadata to the response, but the
-  immediately following caller-owned notify action remains the delivery owner.
+  `attachments`, rollback-compatible `images`, and bounded download and expiry
+  metadata to the response, but the immediately following caller-owned notify
+  action remains the delivery owner.
 - `__init__.py` also calculates ephemeral branch distances from Home Assistant's
   native configured latitude/longitude and the integration's public branch
   coordinates. Distance only selects which occurrences retain rich cards when
