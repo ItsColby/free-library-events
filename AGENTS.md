@@ -8,6 +8,19 @@ the Free Library Events Home Assistant custom integration.
 Read `docs/architecture.md` before structural, config-flow, parsing, entity,
 email-rendering, or release-layout changes.
 
+## Optimization And Quality Target
+
+Optimize for David's private Home Assistant runtime: correctness, privacy,
+recoverability, low maintenance, Home Assistant compatibility, and clear Codex
+operation. Use Home Assistant's current
+[integration quality scale rules](https://developers.home-assistant.io/docs/core/integration-quality-scale/rules/)
+as a required starting reference for holistic reviews and material design or
+behavior changes, but evaluate each applicable rule by evidence and local value.
+The scale is not a certification target or automatic backlog. Do not add a
+quality-scale artifact, pursue a coverage percentage or strict-typing campaign,
+or expand the architecture unless it closes a concrete risk or materially
+improves future work.
+
 ## Public Privacy Boundary
 
 - This repository is public. Do not commit child or household names, birth
