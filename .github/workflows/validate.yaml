@@ -6,6 +6,8 @@ on:
       - main
   pull_request:
   workflow_dispatch:
+  schedule:
+    - cron: "23 9 * * 1"
 
 permissions:
   contents: read
@@ -18,9 +20,12 @@ jobs:
   unit:
     name: Unit tests and static validation
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.14"
       - run: python -m pip install ruff==0.15.22
@@ -61,29 +66,65 @@ jobs:
               raise SystemExit("Trailing whitespace:\n" + "\n".join(failures))
           PY
 
-  home-assistant:
-    name: Home Assistant integration tests
+  home_assistant:
+    name: Home Assistant integration tests (${{ matrix.name }})
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Minimum Core 2026.7.1
+            requirements: requirements-ha-test.txt
+          - name: Current Core 2026.8.0
+            requirements: requirements-ha-test-current.txt
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.14"
-      - run: python -m pip install -r requirements-ha-test.txt
+      - run: python -m pip install -r ${{ matrix.requirements }}
       - run: pytest tests/test_integration_ha.py tests/test_email_images.py -q
 
   hassfest:
     name: Hassfest
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v6
-      - uses: home-assistant/actions/hassfest@master
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: home-assistant/actions/hassfest@a7c616ce81ccda50150bf1595786c71b1883fabb # master
 
   hacs:
     name: HACS
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v6
-      - uses: hacs/action@main
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: hacs/action@1ebf01c408f29afcb6406bd431bc98fd8cbb15aa # main
         with:
           category: integration
+
+  release_gate:
+    name: Release gate
+    if: ${{ always() }}
+    needs: [unit, home_assistant, hassfest, hacs]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every validation job
+        env:
+          UNIT: ${{ needs.unit.result }}
+          HOME_ASSISTANT: ${{ needs.home_assistant.result }}
+          HASSFEST: ${{ needs.hassfest.result }}
+          HACS: ${{ needs.hacs.result }}
+        run: |
+          test "$UNIT" = success
+          test "$HOME_ASSISTANT" = success
+          test "$HASSFEST" = success
+          test "$HACS" = success
