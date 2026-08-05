@@ -16,6 +16,35 @@ from scripts.check_public_safety import (
 
 
 class PublicSafetyGuardTests(unittest.TestCase):
+    def test_home_assistant_harness_and_core_install_in_separate_steps(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/validate.yaml").read_text(
+            encoding="utf-8"
+        )
+        harness_install = (
+            "python -m pip install "
+            "pytest-homeassistant-custom-component==${{ matrix.harness }}"
+        )
+        requirements_install = (
+            "python -m pip install --upgrade -r ${{ matrix.requirements }}"
+        )
+
+        self.assertIn("harness: 0.13.345", workflow)
+        self.assertIn("harness: 0.13.353", workflow)
+        self.assertIn(harness_install, workflow)
+        self.assertIn(requirements_install, workflow)
+        self.assertLess(
+            workflow.index(harness_install), workflow.index(requirements_install)
+        )
+        for requirements in (
+            "requirements-ha-test.txt",
+            "requirements-ha-test-current.txt",
+        ):
+            self.assertNotIn(
+                "pytest-homeassistant-custom-component",
+                (root / requirements).read_text(encoding="utf-8"),
+            )
+
     def test_user_visible_action_exceptions_are_translated(self) -> None:
         root = Path(__file__).resolve().parents[1]
         init_text = (

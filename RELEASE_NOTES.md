@@ -7,11 +7,23 @@
 - Replace the public-safety guard's potentially exponential local-hostname
   regular expression with a linear token scan and an adversarial regression
   test.
+- Install the Home Assistant test harness before upgrading to the exact Core
+  release under test, avoiding resolver failures when the newest harness still
+  declares a matching beta Core dependency.
+
+## Changed
+
+- Return Local Media-backed `digest.attachments` ready for Home Assistant's
+  native `smtp.send_message` action while retaining rollback-compatible
+  `digest.images` output for existing consumers.
 
 ## Validation and security
 
 - Test the Home Assistant harness against both minimum Core `2026.7.1` and
   current stable Core `2026.8.0`.
+- Guard the two-step harness/Core installation order with a static regression
+  test so future dependency updates cannot silently restore the resolver
+  failure.
 - Pin every third-party GitHub Action to a full commit SHA, disable persisted
   checkout credentials, bound job runtimes, add weekly validation and
   Dependabot Actions updates, and expose one stable `Release gate` check.
