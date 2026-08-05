@@ -170,7 +170,8 @@ async def _async_render_digest(call: ServiceCall) -> ServiceResponse:
     ]
     if len(loaded_entries) != 1:
         raise ServiceValidationError(
-            "Free Library Events must have exactly one loaded config entry"
+            translation_domain=DOMAIN,
+            translation_key="single_loaded_entry_required",
         )
 
     entry = loaded_entries[0]
@@ -179,10 +180,14 @@ async def _async_render_digest(call: ServiceCall) -> ServiceResponse:
         await coordinator.async_request_refresh()
         if not coordinator.last_update_success:
             raise HomeAssistantError(
-                "The library feeds could not be refreshed; no email was generated"
+                translation_domain=DOMAIN,
+                translation_key="library_refresh_failed",
             )
     if coordinator.data is None:
-        raise HomeAssistantError("No library event data is available")
+        raise HomeAssistantError(
+            translation_domain=DOMAIN,
+            translation_key="library_data_unavailable",
+        )
 
     config = entry_config(entry.data, entry.options)
     reference_date = dt_util.now().date()

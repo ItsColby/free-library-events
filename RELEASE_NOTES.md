@@ -1,3 +1,21 @@
+# Free Library Events v2026.8.5
+
+## Fixed
+
+- Translate all user-visible `render_digest` action errors through Home
+  Assistant's exception translation contract.
+- Replace the public-safety guard's potentially exponential local-hostname
+  regular expression with a linear token scan and an adversarial regression
+  test.
+
+## Validation and security
+
+- Test the Home Assistant harness against both minimum Core `2026.7.1` and
+  current stable Core `2026.8.0`.
+- Pin every third-party GitHub Action to a full commit SHA, disable persisted
+  checkout credentials, bound job runtimes, add weekly validation and
+  Dependabot Actions updates, and expose one stable `Release gate` check.
+
 # Free Library Events v2026.7.29
 
 ## Fixed

@@ -381,18 +381,22 @@ must be removed or updated separately.
 
 ## Development and validation
 
-Python 3.14 is required for the Home Assistant 2026.7 test boundary.
+Python 3.14 is required for the minimum Home Assistant 2026.7.1 and current
+Home Assistant 2026.8.0 test boundaries.
 
 ```powershell
 python -m unittest discover -s tests -p "test_digest.py"
 python -m unittest discover -s tests -p "test_public_safety.py"
 python -m compileall -q custom_components\free_library_events tests scripts
 python scripts\check_public_safety.py
-python -m pip install -r requirements-ha-test.txt
-python -m pytest tests\test_integration_ha.py tests\test_email_images.py -q
+docker run --rm -v "${PWD}:/work" -w /work python:3.14-slim bash -lc "python -m pip install --upgrade pip && python -m pip install -r requirements-ha-test.txt && pytest tests/test_integration_ha.py tests/test_email_images.py -q"
+docker run --rm -v "${PWD}:/work" -w /work python:3.14-slim bash -lc "python -m pip install --upgrade pip && python -m pip install -r requirements-ha-test-current.txt && pytest tests/test_integration_ha.py tests/test_email_images.py -q"
 ```
 
-GitHub validation also runs Hassfest and the HACS Action. See
+The protected GitHub workflow pins every third-party Action to a full commit
+SHA and runs the local tier, both Home Assistant lanes, Hassfest, and the HACS
+Action. The stable **Release gate** succeeds only when every required job
+succeeds. Dependabot proposes weekly GitHub Actions updates. See
 [`docs/architecture.md`](docs/architecture.md) for ownership and release
 boundaries.
 

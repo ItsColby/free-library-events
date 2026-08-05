@@ -40,6 +40,8 @@ ALLOWED_EMAIL_DOMAINS = {
 }
 
 EMAIL_RE = re.compile(r"\b[A-Z0-9._%+-]+@([A-Z0-9.-]+\.[A-Z]{2,})\b", re.IGNORECASE)
+HOSTNAME_TOKEN_RE = re.compile(r"[A-Z0-9_.-]+", re.IGNORECASE)
+LOCAL_HOSTNAME_SUFFIXES = {"home", "lan", "local"}
 PUBLIC_SAFETY_PATTERNS = (
     (
         "absolute Windows path",
@@ -58,10 +60,6 @@ PUBLIC_SAFETY_PATTERNS = (
             r"172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}"
             r")(?!\d)"
         ),
-    ),
-    (
-        "local hostname",
-        re.compile(r"(?i)(?:[a-z0-9_-]+\x2e)+(?:home|lan|local)(?![a-z0-9_-])"),
     ),
     (
         "private key",
@@ -140,6 +138,14 @@ def _text_failures(text: str) -> set[str]:
         domain = match.group(1).casefold()
         if address not in ALLOWED_EMAILS and domain not in ALLOWED_EMAIL_DOMAINS:
             failures.add("non-example email address")
+    for match in HOSTNAME_TOKEN_RE.finditer(text):
+        labels = match.group(0).casefold().split(".")
+        if (
+            len(labels) >= 2
+            and all(labels)
+            and labels[-1] in LOCAL_HOSTNAME_SUFFIXES
+        ):
+            failures.add("local hostname")
     return failures
 
 

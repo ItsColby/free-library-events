@@ -64,12 +64,21 @@ python scripts\check_public_safety.py
 python -c "import json, pathlib; [json.loads(pathlib.Path(path).read_text(encoding='utf-8')) for path in ['custom_components/free_library_events/manifest.json','custom_components/free_library_events/translations/en.json','hacs.json']]"
 ```
 
-Home Assistant tests require the dependencies in `requirements-ha-test.txt`:
+Home Assistant tests run against both the minimum supported Core release and
+the current deployed Core release:
 
 ```powershell
 python -m pip install -r requirements-ha-test.txt
 python -m pytest tests\test_integration_ha.py tests\test_email_images.py -q
+python -m pip install -r requirements-ha-test-current.txt
+python -m pytest tests\test_integration_ha.py tests\test_email_images.py -q
 ```
+
+Home Assistant's test harness imports Linux-only modules. On Windows, run each
+HA lane in a Linux container instead of treating a native `fcntl` import error
+as an integration failure. If neither a compatible Linux environment nor the
+container runtime is available, defer the HA-specific lane to the protected
+GitHub workflow and report that gap explicitly.
 
 Before reporting complete, read back `git status --short --branch` and list
 any validation that could not run.

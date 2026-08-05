@@ -103,6 +103,17 @@
       "invalid_config": "Check the settings and try again."
     }
   },
+  "exceptions": {
+    "library_data_unavailable": {
+      "message": "No library event data is available. Refresh the integration and try again."
+    },
+    "library_refresh_failed": {
+      "message": "The library feeds could not be refreshed, so no email was generated. Check the Free Library Events status sensor for details."
+    },
+    "single_loaded_entry_required": {
+      "message": "Free Library Events requires exactly one loaded config entry before rendering a digest."
+    }
+  },
   "entity": {
     "button": {
       "refresh_events": {
