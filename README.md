@@ -405,9 +405,11 @@ try {
   Remove-Item Env:GH_TOKEN
 }
 python -m unittest discover -s tests -p "test_digest.py"
+python -m unittest discover -s tests -p "test_metadata.py"
 python -m unittest discover -s tests -p "test_public_safety.py"
 python -m compileall -q custom_components\free_library_events tests scripts
 python scripts\check_public_safety.py
+python -c "import json, pathlib; [json.loads(pathlib.Path(path).read_text(encoding='utf-8')) for path in ['custom_components/free_library_events/icons.json','custom_components/free_library_events/manifest.json','custom_components/free_library_events/translations/en.json','hacs.json']]"
 docker run --rm -v "${PWD}:/work" -w /work python:3.14-slim bash -lc "python -m pip install --upgrade pip && python -m pip install pytest-homeassistant-custom-component==0.13.345 && python -m pip install --upgrade -r requirements-ha-test.txt && pytest tests/test_integration_ha.py tests/test_email_images.py -q"
 docker run --rm -v "${PWD}:/work" -w /work python:3.14-slim bash -lc "python -m pip install --upgrade pip && python -m pip install pytest-homeassistant-custom-component==0.13.354 && python -m pip install --upgrade -r requirements-ha-test-current.txt && pytest tests/test_integration_ha.py tests/test_email_images.py -q"
 ```

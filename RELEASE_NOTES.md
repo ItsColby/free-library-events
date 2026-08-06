@@ -31,6 +31,10 @@
 - Return Local Media-backed `digest.attachments` ready for Home Assistant's
   native `smtp.send_message` action while retaining rollback-compatible
   `digest.images` output for existing consumers.
+- Move service-action and entity icons into Home Assistant's current metadata
+  owner, translate the `render_digest` action and its fields, and expose the
+  diagnostic status as a translated enum without changing its raw automation
+  values.
 
 ## Validation and security
 
@@ -39,6 +43,9 @@
 - Guard the two-step harness/Core installation order with a static regression
   test so future dependency updates cannot silently restore the resolver
   failure.
+- Reconcile services and entity translation keys with current icon metadata,
+  validate every integration JSON file, and prove ordinary and embedded-image
+  action responses remain JSON-serializable.
 - Align HA-lane assertions with the safe source-category contract and cover
   concurrent snapshot replacement, refresh-button failure, missing URL setup,
   and exception-cause redaction.

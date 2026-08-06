@@ -36,7 +36,6 @@ class LibraryCalendar(CoordinatorEntity[LibraryDataCoordinator], CalendarEntity)
 
     _attr_has_entity_name = True
     _attr_translation_key = "events"
-    _attr_icon = "mdi:library"
 
     def __init__(
         self, entry: LibraryConfigEntry, coordinator: LibraryDataCoordinator

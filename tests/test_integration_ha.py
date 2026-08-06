@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 import types
 import unittest
@@ -628,6 +629,8 @@ async def test_setup_entities_action_and_redacted_diagnostics(
     status_state = hass.states.get("sensor.free_library_events_status")
     assert status_state is not None
     assert status_state.state == "ok"
+    assert status_state.attributes["device_class"] == "enum"
+    assert status_state.attributes["options"] == ["ok", "limited", "partial", "error"]
     assert status_state.attributes["next_week_events"] == 4
     assert status_state.attributes["current_age_coverage_complete"] is True
     assert status_state.attributes["supplemental_age_coverage_complete"] is True
@@ -658,6 +661,7 @@ async def test_setup_entities_action_and_redacted_diagnostics(
     assert response["metadata"]["expanded_capped_sources"] == {}
     assert response["metadata"]["fetched_at"] == status_state.attributes["last_refresh"]
     assert "Avery" in response["subject"]
+    json.dumps(response)
 
     image_url = "https://libwww.freelibrary.org/images/storytime.png"
     image_path = Path(
@@ -728,6 +732,7 @@ async def test_setup_entities_action_and_redacted_diagnostics(
     assert stable_snapshot["metadata"]["fetched_at"] == (
         original_data.fetched_at.isoformat()
     )
+    json.dumps(stable_snapshot)
     with (
         patch(
             "custom_components.free_library_events.async_download_event_images",
@@ -773,6 +778,7 @@ async def test_setup_entities_action_and_redacted_diagnostics(
     assert embedded["metadata"]["image_download_failure_count"] == 0
     assert 'src="cid:event-01.png"' in embedded["html"]
     assert "cid:event-02.png" not in embedded["html"]
+    json.dumps(embedded)
     assert 'class="event-hero-image-cell"' in embedded["html"]
     schedule.assert_called_once()
 

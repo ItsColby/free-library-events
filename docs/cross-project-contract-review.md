@@ -39,9 +39,10 @@ were used as evaluation prompts, not as a certification or coverage target.
   coordinator result and raises a translated failure when its request fails.
 - Applicable baseline rules are evidenced by native config/reconfigure/options
   flows, one unique config entry, typed runtime data, stable entity IDs and
-  translated names, coordinator polling, service registration during
-  `async_setup`, unloading, translated action failures, diagnostics, entity
-  categories, explicit parallel-update ownership, documentation, and tests.
+  translated names and finite status states, current action and icon metadata,
+  coordinator polling, service registration during `async_setup`, unloading,
+  translated action failures, diagnostics, entity categories, explicit
+  parallel-update ownership, documentation, and tests.
 - Reauthentication, discovery, dynamic-device, stale-device, and repair-flow
   rules are not applicable because there are no credentials, discovered
   devices, or persistent user-fixable mapping faults.

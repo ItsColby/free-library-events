@@ -50,6 +50,7 @@ change touches code, tests, docs, workflows, scripts, or metadata. Example:
 
 ```powershell
 python -m unittest discover -s tests -p "test_digest.py"
+python -m unittest discover -s tests -p "test_metadata.py"
 python -m compileall -q custom_components/free_library_events tests
 python scripts/check_public_safety.py
 ```
@@ -71,10 +72,11 @@ try {
   Remove-Item Env:GH_TOKEN
 }
 python -m unittest discover -s tests -p "test_digest.py"
+python -m unittest discover -s tests -p "test_metadata.py"
 python -m unittest discover -s tests -p "test_public_safety.py"
 python -m compileall -q custom_components\free_library_events tests scripts
 python scripts\check_public_safety.py
-python -c "import json, pathlib; [json.loads(pathlib.Path(path).read_text(encoding='utf-8')) for path in ['custom_components/free_library_events/manifest.json','custom_components/free_library_events/translations/en.json','hacs.json']]"
+python -c "import json, pathlib; [json.loads(pathlib.Path(path).read_text(encoding='utf-8')) for path in ['custom_components/free_library_events/icons.json','custom_components/free_library_events/manifest.json','custom_components/free_library_events/translations/en.json','hacs.json']]"
 ```
 
 Before creating an immutable release, wait for CodeQL analysis of the exact
