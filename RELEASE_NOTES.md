@@ -7,6 +7,16 @@
   diagnostics, status evidence, and action-response metadata.
 - Translate all user-visible `render_digest` action errors through Home
   Assistant's exception translation contract.
+- Keep one coordinator snapshot stable across every digest projection and image
+  download await so a concurrent refresh cannot mix event generations in one
+  response.
+- Make the manual refresh button raise a translated Home Assistant error when
+  the requested source refresh fails.
+- Refuse to save a WebCal token when Home Assistant cannot provide either an
+  internal or external base URL.
+- Remove lower-level transport and private config values from safe wrapper
+  exception chains, and keep every source-health value on the allow-listed
+  category contract.
 - Replace the public-safety guard's potentially exponential local-hostname
   regular expression with a linear token scan and an adversarial regression
   test.
@@ -29,6 +39,9 @@
 - Guard the two-step harness/Core installation order with a static regression
   test so future dependency updates cannot silently restore the resolver
   failure.
+- Align HA-lane assertions with the safe source-category contract and cover
+  concurrent snapshot replacement, refresh-button failure, missing URL setup,
+  and exception-cause redaction.
 - Run the latest Ruff, ShellCheck, actionlint, and zizmor releases in validation;
   enable Ruff's stable native, blind-exception, and Pylint convention checks;
   retain ambiguous-Unicode detection; add focused network, cryptography, and

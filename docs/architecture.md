@@ -145,7 +145,10 @@
   or scheduler exists inside the integration. Opt-in SMTP embedding adds
   `attachments`, rollback-compatible `images`, and bounded download and expiry
   metadata to the response, but the immediately following caller-owned notify
-  action remains the delivery owner.
+  action remains the delivery owner. Each render captures exactly one
+  coordinator snapshot before its first image-download await, so an overlapping
+  refresh cannot mix events, coverage evidence, or timestamps from two
+  generations in one response.
 - `__init__.py` also calculates ephemeral branch distances from Home Assistant's
   native configured latitude/longitude and the integration's public branch
   coordinates. Distance only selects which occurrences retain rich cards when
@@ -164,6 +167,9 @@
   summaries rather than arbitrary exception text. Finite shard failures remain
   available in on-demand diagnostics; entity state and action-response metadata
   retain a count and three examples.
+- The manual refresh button checks the coordinator result and raises a
+  translated Home Assistant error on failure. A platform action therefore
+  cannot report success when every requested source failed.
 
 The reusable Home Assistant engineering contracts and their evidence-backed
 non-applicability decisions are recorded in

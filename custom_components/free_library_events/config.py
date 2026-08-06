@@ -77,8 +77,8 @@ def normalize_profile(values: Mapping[str, Any]) -> dict[str, Any]:
             if isinstance(birth_value, date)
             else date.fromisoformat(str(birth_value))
         )
-    except (TypeError, ValueError) as err:
-        raise ValueError("invalid_birth_date") from err
+    except TypeError, ValueError:
+        raise ValueError("invalid_birth_date") from None
     branch_codes = _normalize_branch_codes(config)
     if birth_date > dt_util.now().date():
         raise ValueError("birth_date_in_future")
@@ -106,16 +106,16 @@ def normalize_options(values: Mapping[str, Any]) -> dict[str, Any]:
     filter_mode = str(config[CONF_FILTER_MODE])
     try:
         calendar_duration = int(config[CONF_CALENDAR_DURATION])
-    except (TypeError, ValueError) as err:
-        raise ValueError("invalid_calendar_duration") from err
+    except TypeError, ValueError:
+        raise ValueError("invalid_calendar_duration") from None
     try:
         scan_interval = int(config[CONF_SCAN_INTERVAL])
-    except (TypeError, ValueError) as err:
-        raise ValueError("invalid_scan_interval") from err
+    except TypeError, ValueError:
+        raise ValueError("invalid_scan_interval") from None
     try:
         publish_webcal = cv.boolean(config[CONF_PUBLISH_WEBCAL])
-    except (TypeError, ValueError, vol.Invalid) as err:
-        raise ValueError("invalid_config") from err
+    except TypeError, ValueError, vol.Invalid:
+        raise ValueError("invalid_config") from None
     webcal_name = config[CONF_WEBCAL_NAME]
     if not isinstance(webcal_name, str):
         raise TypeError("invalid_webcal_name")
@@ -230,5 +230,5 @@ def _normalize_branch_codes(config: Mapping[str, Any]) -> tuple[str, ...]:
             for config_key, branch_code in LEGACY_BRANCH_CONFIG_KEYS
             if cv.boolean(config.get(config_key, legacy_defaults[config_key]))
         )
-    except (TypeError, ValueError, vol.Invalid) as err:
-        raise ValueError("invalid_config") from err
+    except TypeError, ValueError, vol.Invalid:
+        raise ValueError("invalid_config") from None

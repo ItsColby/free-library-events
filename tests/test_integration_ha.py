@@ -26,7 +26,9 @@ try:
     )
     from homeassistant.core import HomeAssistant
     from homeassistant.data_entry_flow import FlowResultType
+    from homeassistant.exceptions import HomeAssistantError
     from homeassistant.helpers import entity_registry as er
+    from homeassistant.helpers.network import NoURLAvailableError
     from homeassistant.helpers.update_coordinator import UpdateFailed
     from pytest_homeassistant_custom_component.common import MockConfigEntry
     from pytest_homeassistant_custom_component.typing import ClientSessionGenerator
@@ -38,11 +40,16 @@ from custom_components.free_library_events.api import (
     MAX_RSS_REQUEST_CONCURRENCY,
     MAX_RSS_RESPONSE_BYTES,
     OFFICIAL_EVENT_TYPES,
+    SOURCE_ERROR_EXPANSION_TIMEOUT,
     SOURCE_ERROR_REQUEST_FAILED,
+    SOURCE_ERROR_RESPONSE_TOO_LARGE,
+    SOURCE_ERROR_UNEXPECTED,
+    SOURCE_ERROR_UNSAFE_REDIRECT,
     BranchFeed,
     LibraryApiError,
     LibraryClient,
 )
+from custom_components.free_library_events.button import LibraryRefreshButton
 from custom_components.free_library_events.calendar import LibraryCalendar
 from custom_components.free_library_events.calendar_data import (
     build_calendar_items,
@@ -336,6 +343,42 @@ async def test_options_flow_disables_webcal_and_removes_token(
     assert CONF_WEBCAL_TOKEN not in entry.options
 
 
+async def test_options_flow_does_not_save_webcal_without_a_home_assistant_url(
+    hass: HomeAssistant,
+) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Free Library Events",
+        unique_id=DOMAIN,
+        data=PROFILE_DATA,
+        options=BEHAVIOR_INPUT,
+        version=1,
+        minor_version=2,
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "webcal"}
+    )
+    with patch(
+        "custom_components.free_library_events.webcal.get_url",
+        side_effect=NoURLAvailableError,
+    ):
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            {
+                CONF_PUBLISH_WEBCAL: True,
+                CONF_WEBCAL_NAME: "Neighborhood Library Events",
+            },
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "webcal"
+    assert result["errors"] == {"base": "webcal_url_unavailable"}
+    assert CONF_WEBCAL_TOKEN not in entry.options
+
+
 async def test_options_flow_updates_behavior_without_profile_data(
     hass: HomeAssistant,
 ) -> None:
@@ -365,6 +408,33 @@ async def test_options_flow_updates_behavior_without_profile_data(
     assert entry.options[CONF_SCAN_INTERVAL] == 21600
 
 
+async def test_manual_refresh_button_raises_a_translated_failure(
+    hass: HomeAssistant,
+) -> None:
+    entry = _entry()
+    coordinator = LibraryDataCoordinator(
+        hass,
+        entry,
+        types.SimpleNamespace(),
+        (BRANCHES["SWK"],),
+        date(2025, 1, 15),
+        timedelta(hours=6),
+    )
+    coordinator.async_request_refresh = AsyncMock()
+    coordinator.last_update_success = False
+    button = LibraryRefreshButton(coordinator)
+
+    with pytest.raises(HomeAssistantError) as failure:
+        await button.async_press()
+
+    assert failure.value.translation_domain == DOMAIN
+    assert failure.value.translation_key == "manual_refresh_failed"
+
+    coordinator.last_update_success = True
+    await button.async_press()
+    assert coordinator.async_request_refresh.await_count == 2
+
+
 def test_normalize_config_enforces_non_ui_bounds() -> None:
     with pytest.raises(ValueError, match="invalid_calendar_duration"):
         normalize_config(USER_INPUT | {CONF_CALENDAR_DURATION: 5})
@@ -389,6 +459,12 @@ def test_profile_and_webcal_validation_reject_unknown_or_unsafe_values() -> None
         normalize_options(BEHAVIOR_INPUT | {CONF_WEBCAL_NAME: " \n "})
     with pytest.raises(TypeError, match="invalid_webcal_name"):
         normalize_options(BEHAVIOR_INPUT | {CONF_WEBCAL_NAME: None})
+
+    private_detail = "synthetic-private-birth-date"
+    with pytest.raises(ValueError, match="invalid_birth_date") as invalid_birth_date:
+        normalize_profile(PROFILE_INPUT | {CONF_BIRTH_DATE: private_detail})
+    assert invalid_birth_date.value.__cause__ is None
+    assert private_detail not in repr(invalid_birth_date.value)
 
 
 def test_normalize_config_coerces_non_ui_boolean_strings() -> None:
@@ -609,6 +685,48 @@ async def test_setup_entities_action_and_redacted_diagnostics(
         (str(image_path), str(unused_image_path)),
         image_path.parent,
         {image_url: "hero", unused_image_url: "side"},
+    )
+    original_data = entry.runtime_data.data
+    assert original_data is not None
+    replacement_data = replace(
+        original_data,
+        events=(),
+        fetched_at=original_data.fetched_at + timedelta(minutes=1),
+    )
+
+    async def download_while_snapshot_changes(*_args):
+        entry.runtime_data.async_set_updated_data(replacement_data)
+        return download_batch
+
+    try:
+        with (
+            patch(
+                "custom_components.free_library_events.async_download_event_images",
+                side_effect=download_while_snapshot_changes,
+            ),
+            patch(
+                "custom_components.free_library_events.store_downloaded_images",
+                return_value=stored_bundle,
+            ),
+            patch("custom_components.free_library_events.purge_stale_image_runs"),
+            patch("custom_components.free_library_events.async_call_later"),
+            patch(
+                "custom_components.free_library_events.dt_util.now",
+                return_value=datetime(2026, 7, 17, tzinfo=LOCAL_TIME_ZONE),
+            ),
+        ):
+            stable_snapshot = await hass.services.async_call(
+                DOMAIN,
+                SERVICE_RENDER_DIGEST,
+                {ATTR_FORCE_REFRESH: False, ATTR_EMBED_IMAGES: True},
+                blocking=True,
+                return_response=True,
+            )
+    finally:
+        entry.runtime_data.async_set_updated_data(original_data)
+    assert stable_snapshot["metadata"]["included_count"] == 4
+    assert stable_snapshot["metadata"]["fetched_at"] == (
+        original_data.fetched_at.isoformat()
     )
     with (
         patch(
@@ -1120,7 +1238,7 @@ async def test_client_expands_only_an_unresolved_capped_feed() -> None:
     assert client._async_fetch_single.await_count == len(OFFICIAL_EVENT_TYPES)
 
 
-async def test_client_keeps_recovered_rows_but_discloses_a_shard_failure() -> None:
+async def test_client_keeps_recovered_rows_but_discloses_safe_shard_failures() -> None:
     branch = BRANCHES["CEN"]
     event = Event(
         title="Base event",
@@ -1146,6 +1264,8 @@ async def test_client_keeps_recovered_rows_but_discloses_a_shard_failure() -> No
             return base_feed
         if event_type == OFFICIAL_EVENT_TYPES[0]:
             raise LibraryApiError(SOURCE_ERROR_REQUEST_FAILED)
+        if event_type == OFFICIAL_EVENT_TYPES[1]:
+            return object()
         return BranchFeed(
             events=(event,),
             age_category=age_category,
@@ -1163,7 +1283,10 @@ async def test_client_keeps_recovered_rows_but_discloses_a_shard_failure() -> No
     )
 
     assert expanded.events == (event,)
-    assert len(expanded.type_shard_failures) == 1
+    assert expanded.type_shard_failures == (
+        f"{OFFICIAL_EVENT_TYPES[0]}: {SOURCE_ERROR_REQUEST_FAILED}",
+        f"{OFFICIAL_EVENT_TYPES[1]}: {SOURCE_ERROR_UNEXPECTED}",
+    )
     assert expanded.expanded_through is None
     assert not expanded.covers_through(date(2026, 7, 26))
 
@@ -1244,6 +1367,18 @@ async def test_client_base_fetch_does_not_expand() -> None:
     client._async_fetch_single.assert_awaited_once()
 
 
+async def test_client_does_not_chain_private_transport_details() -> None:
+    private_detail = "synthetic private transport detail"
+    client = LibraryClient(None)  # type: ignore[arg-type]
+    client._async_get = AsyncMock(side_effect=TimeoutError(private_detail))
+
+    with pytest.raises(LibraryApiError, match=SOURCE_ERROR_REQUEST_FAILED) as failure:
+        await client.async_fetch_feed(BRANCHES["CEN"], "Baby")
+
+    assert failure.value.__cause__ is None
+    assert private_detail not in repr(failure.value)
+
+
 async def test_client_rejects_an_oversized_rss_response() -> None:
     response = types.SimpleNamespace(
         status=200,
@@ -1264,7 +1399,7 @@ async def test_client_rejects_an_oversized_rss_response() -> None:
     session = types.SimpleNamespace(get=lambda *_args, **_kwargs: ResponseContext())
     client = LibraryClient(session)
 
-    with pytest.raises(LibraryApiError, match="exceeded"):
+    with pytest.raises(LibraryApiError, match=SOURCE_ERROR_RESPONSE_TOO_LARGE):
         await client._async_get(
             "https://libwww.freelibrary.org/rss/eventsrss.cfm?location=CEN"
         )
@@ -1381,7 +1516,7 @@ async def test_client_rejects_untrusted_rss_redirects(location: str) -> None:
     session = types.SimpleNamespace(get=lambda *_args, **_kwargs: ResponseContext())
     client = LibraryClient(session)
 
-    with pytest.raises(LibraryApiError, match="unsafe RSS redirect"):
+    with pytest.raises(LibraryApiError, match=SOURCE_ERROR_UNSAFE_REDIRECT):
         await client._async_get(
             "https://libwww.freelibrary.org/rss/eventsrss.cfm?location=CEN"
         )
@@ -1500,9 +1635,7 @@ async def test_coordinator_bounds_a_stalled_type_expansion(
     status = data.source_statuses["CEN:Adult"]
     assert status.events == ()
     assert status.type_shards_queried == len(OFFICIAL_EVENT_TYPES)
-    assert status.type_shard_failures == (
-        "Event-type expansion timed out after 0.001 seconds",
-    )
+    assert status.type_shard_failures == (SOURCE_ERROR_EXPANSION_TIMEOUT,)
 
 
 async def test_client_propagates_type_shard_cancellation() -> None:
@@ -1814,6 +1947,8 @@ async def test_coordinator_does_not_retain_unexpected_exception_text(
     async def fetch_feed(_branch, age_category, _coverage_end=None):
         if age_category == "Baby":
             return success
+        if age_category == "Toddler":
+            return object()
         raise RuntimeError(private_detail)
 
     coordinator = LibraryDataCoordinator(
@@ -1827,7 +1962,7 @@ async def test_coordinator_does_not_retain_unexpected_exception_text(
 
     data = await coordinator._async_update_data()
 
-    assert set(data.source_errors.values()) == {"unexpected source failure"}
+    assert set(data.source_errors.values()) == {SOURCE_ERROR_UNEXPECTED}
     assert private_detail not in repr(data)
 
 

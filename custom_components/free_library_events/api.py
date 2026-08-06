@@ -210,7 +210,7 @@ class LibraryClient:
                 failures.append(f"{event_type}: {source_error_category(result)}")
                 continue
             if not isinstance(result, BranchFeed):
-                failures.append(f"{event_type}: unexpected response")
+                failures.append(f"{event_type}: {SOURCE_ERROR_UNEXPECTED}")
                 continue
             successful_shards.append(result)
             events.extend(result.events)
@@ -260,8 +260,8 @@ class LibraryClient:
         try:
             async with self._request_semaphore:
                 payload = await self._async_get(url)
-        except (TimeoutError, aiohttp.ClientError) as err:
-            raise LibraryApiError(SOURCE_ERROR_REQUEST_FAILED) from err
+        except TimeoutError, aiohttp.ClientError:
+            raise LibraryApiError(SOURCE_ERROR_REQUEST_FAILED) from None
 
         try:
             events, source_count = await asyncio.to_thread(
@@ -270,10 +270,10 @@ class LibraryClient:
                 branch,
                 age_category,
             )
-        except (ValueError, TypeError) as err:
-            raise LibraryApiError(SOURCE_ERROR_INVALID_FEED) from err
-        except Exception as err:
-            raise LibraryApiError(SOURCE_ERROR_PARSE_FAILED) from err
+        except ValueError, TypeError:
+            raise LibraryApiError(SOURCE_ERROR_INVALID_FEED) from None
+        except Exception:  # noqa: BLE001 - convert parser failures to a safe category
+            raise LibraryApiError(SOURCE_ERROR_PARSE_FAILED) from None
 
         event_dates = [event.event_date for event in events]
         return BranchFeed(

@@ -100,6 +100,7 @@
       "invalid_calendar_duration": "Calendar duration must be between 15 and 240 minutes.",
       "invalid_scan_interval": "Refresh interval must be between 900 and 86400 seconds.",
       "invalid_webcal_name": "Enter a calendar name of 80 characters or fewer.",
+      "webcal_url_unavailable": "Configure an internal or external Home Assistant URL before enabling calendar subscription.",
       "invalid_config": "Check the settings and try again."
     }
   },
@@ -109,6 +110,9 @@
     },
     "library_refresh_failed": {
       "message": "The library feeds could not be refreshed, so no email was generated. Check the Free Library Events status sensor for details."
+    },
+    "manual_refresh_failed": {
+      "message": "The library feeds could not be refreshed. Check the Free Library Events status sensor for details."
     },
     "single_loaded_entry_required": {
       "message": "Free Library Events requires exactly one loaded config entry before rendering a digest."

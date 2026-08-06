@@ -5,6 +5,7 @@ from __future__ import annotations
 from homeassistant.components.button import ButtonEntity
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -49,3 +50,8 @@ class LibraryRefreshButton(CoordinatorEntity[LibraryDataCoordinator], ButtonEnti
         """Refresh the selected official feeds now."""
 
         await self.coordinator.async_request_refresh()
+        if not self.coordinator.last_update_success:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="manual_refresh_failed",
+            )

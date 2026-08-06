@@ -173,8 +173,10 @@ async def async_migrate_entry(hass: HomeAssistant, entry: LibraryConfigEntry) ->
         return True
     try:
         data, options = migrated_entry_config(entry.data, entry.options)
-    except TypeError, ValueError:
-        _LOGGER.exception("Could not migrate the Free Library Events config entry")
+    except (TypeError, ValueError) as err:
+        _LOGGER.error(
+            "Could not migrate the Free Library Events config entry (%s)", err
+        )
         return False
     hass.config_entries.async_update_entry(
         entry,
@@ -237,7 +239,8 @@ async def _async_render_digest(call: ServiceCall) -> ServiceResponse:
                 translation_domain=DOMAIN,
                 translation_key="library_refresh_failed",
             )
-    if coordinator.data is None:
+    data = coordinator.data
+    if data is None:
         raise HomeAssistantError(
             translation_domain=DOMAIN,
             translation_key="library_data_unavailable",
@@ -247,21 +250,18 @@ async def _async_render_digest(call: ServiceCall) -> ServiceResponse:
     reference_date = dt_util.now().date()
     branches = selected_branches(config)
     source_counts = {
-        BRANCHES[code].name: count
-        for code, count in coordinator.data.source_counts.items()
+        BRANCHES[code].name: count for code, count in data.source_counts.items()
     }
     week_start = next_week_start(reference_date)
     week_end = week_start + timedelta(days=6)
     birth_date = date.fromisoformat(config[CONF_BIRTH_DATE])
     relevant_error_keys = source_keys_for_window(
-        tuple(coordinator.data.source_errors), birth_date, week_start, week_end
+        tuple(data.source_errors), birth_date, week_start, week_end
     )
     source_errors = [source_label(key) for key in relevant_error_keys]
-    source_warnings = coverage_warnings(
-        coordinator.data, birth_date, week_start, week_end
-    )
+    source_warnings = coverage_warnings(data, birth_date, week_start, week_end)
     supplemental_failures, supplemental_limitations = supplemental_coverage(
-        coordinator.data, birth_date, week_start, week_end
+        data, birth_date, week_start, week_end
     )
     source_warnings.extend(supplemental_failures)
     distance_by_branch_code: dict[str, float] = {}
@@ -287,7 +287,7 @@ async def _async_render_digest(call: ServiceCall) -> ServiceResponse:
     image_root, source_directory_id = _email_image_storage(hass)
     if call.data[ATTR_EMBED_IMAGES]:
         _weekly_events, included_events = select_digest_events(
-            coordinator.data.events,
+            data.events,
             birth_date=birth_date,
             filter_mode=config[CONF_FILTER_MODE],
             week_start=week_start,
@@ -372,7 +372,7 @@ async def _async_render_digest(call: ServiceCall) -> ServiceResponse:
         duration_minutes=config[CONF_CALENDAR_DURATION],
         selected_branches=branches,
         reference_date=reference_date,
-        events=coordinator.data.events,
+        events=data.events,
         source_counts=source_counts,
         source_errors=source_errors,
         source_warnings=source_warnings,
@@ -383,8 +383,8 @@ async def _async_render_digest(call: ServiceCall) -> ServiceResponse:
         distance_by_branch_code=distance_by_branch_code,
     )
     metadata = cast(dict[str, Any], response["metadata"])
-    metadata["expanded_capped_sources"] = source_expansion_details(coordinator.data)
-    metadata["fetched_at"] = coordinator.data.fetched_at.isoformat()
+    metadata["expanded_capped_sources"] = source_expansion_details(data)
+    metadata["fetched_at"] = data.fetched_at.isoformat()
     if call.data[ATTR_EMBED_IMAGES]:
         embedded_image_paths = _referenced_embedded_image_paths(
             cast(str, response["html"]), embedded_image_paths
