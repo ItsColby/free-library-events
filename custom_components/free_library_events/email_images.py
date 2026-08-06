@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import re
+import shutil
+import urllib.parse
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from email.mime.image import MIMEImage
 from pathlib import Path
-import re
-import shutil
-import urllib.parse
 from uuid import uuid4
 
 import aiohttp

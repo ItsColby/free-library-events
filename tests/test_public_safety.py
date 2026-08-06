@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import ast
 import json
-from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from pathlib import Path
 
 from scripts.check_public_safety import (
     _text_failures,
@@ -16,6 +16,25 @@ from scripts.check_public_safety import (
 
 
 class PublicSafetyGuardTests(unittest.TestCase):
+    def test_ruff_validation_is_pinned_and_documented(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/validate.yaml").read_text(
+            encoding="utf-8"
+        )
+        readme = (root / "README.md").read_text(encoding="utf-8")
+        agents = (root / "AGENTS.md").read_text(encoding="utf-8")
+        commands = (
+            "python -m pip install ruff==0.16.1",
+            "python -m ruff format --check custom_components tests scripts",
+            "python -m ruff check custom_components tests scripts",
+        )
+
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertIn(command, workflow)
+                self.assertIn(command, readme)
+                self.assertIn(command, agents)
+
     def test_home_assistant_harness_and_core_install_in_separate_steps(self) -> None:
         root = Path(__file__).resolve().parents[1]
         workflow = (root / ".github/workflows/validate.yaml").read_text(
@@ -114,13 +133,9 @@ class PublicSafetyGuardTests(unittest.TestCase):
         self.assertIn("local hostname", _text_failures(sample))
 
     def test_public_examples_and_github_noreply_are_allowed(self) -> None:
-        text = " ".join(
-            (
-                "person@example.com",
-                "person@example.test",
-                "1361774+ItsColby@users.noreply.github.com",
-                "noreply@github.com",
-            )
+        text = (
+            "person@example.com person@example.test "
+            "1361774+ItsColby@users.noreply.github.com noreply@github.com"
         )
         self.assertEqual(set(), _text_failures(text))
 

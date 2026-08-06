@@ -387,6 +387,9 @@ Python 3.14 is required for the minimum Home Assistant 2026.7.1 and current
 Home Assistant 2026.8.0 test boundaries.
 
 ```powershell
+python -m pip install ruff==0.16.1
+python -m ruff format --check custom_components tests scripts
+python -m ruff check custom_components tests scripts
 python -m unittest discover -s tests -p "test_digest.py"
 python -m unittest discover -s tests -p "test_public_safety.py"
 python -m compileall -q custom_components\free_library_events tests scripts

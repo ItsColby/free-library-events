@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import replace
-from datetime import date, datetime, time, timedelta
-from pathlib import Path
 import sys
 import types
 import unittest
+from dataclasses import replace
+from datetime import date, datetime, time, timedelta
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 from zoneinfo import ZoneInfo
 
@@ -18,13 +18,12 @@ if str(ROOT) not in sys.path:
 
 try:
     import pytest
-
+    from homeassistant.components.smtp.helpers import _build_html_msg
     from homeassistant.config_entries import (
         SOURCE_RECONFIGURE,
         SOURCE_USER,
         ConfigEntryState,
     )
-    from homeassistant.components.smtp.helpers import _build_html_msg
     from homeassistant.core import HomeAssistant
     from homeassistant.data_entry_flow import FlowResultType
     from homeassistant.helpers import entity_registry as er
@@ -34,27 +33,27 @@ try:
 except ModuleNotFoundError as err:  # pragma: no cover - local non-HA test env
     raise unittest.SkipTest(f"Home Assistant test harness unavailable: {err}") from err
 
-from custom_components.free_library_events.api import (  # noqa: E402
-    MAX_RSS_RESPONSE_BYTES,
+from custom_components.free_library_events import async_migrate_entry
+from custom_components.free_library_events.api import (
     MAX_RSS_REQUEST_CONCURRENCY,
+    MAX_RSS_RESPONSE_BYTES,
     OFFICIAL_EVENT_TYPES,
     BranchFeed,
     LibraryApiError,
     LibraryClient,
 )
-from custom_components.free_library_events import async_migrate_entry  # noqa: E402
-from custom_components.free_library_events.calendar import LibraryCalendar  # noqa: E402
-from custom_components.free_library_events.calendar_data import (  # noqa: E402
+from custom_components.free_library_events.calendar import LibraryCalendar
+from custom_components.free_library_events.calendar_data import (
     build_calendar_items,
 )
-from custom_components.free_library_events.config import (  # noqa: E402
+from custom_components.free_library_events.config import (
     LEGACY_BRANCH_CONFIG_KEYS,
     normalize_config,
     normalize_options,
     normalize_profile,
     selected_branches,
 )
-from custom_components.free_library_events.const import (  # noqa: E402
+from custom_components.free_library_events.const import (
     ATTR_EMBED_IMAGES,
     ATTR_FORCE_REFRESH,
     CONF_BIRTH_DATE,
@@ -66,14 +65,14 @@ from custom_components.free_library_events.const import (  # noqa: E402
     CONF_INCLUDE_PARKWAY_CENTRAL,
     CONF_INCLUDE_PCI,
     CONF_INCLUDE_SANTORE,
-    CONF_SCAN_INTERVAL,
     CONF_PUBLISH_WEBCAL,
-    CONF_WEBCAL_TOKEN,
+    CONF_SCAN_INTERVAL,
     CONF_WEBCAL_NAME,
+    CONF_WEBCAL_TOKEN,
     DOMAIN,
     SERVICE_RENDER_DIGEST,
 )
-from custom_components.free_library_events.coordinator import (  # noqa: E402
+from custom_components.free_library_events.coordinator import (
     MAX_TYPE_EXPANSIONS_PER_REFRESH,
     LibraryDataCoordinator,
     source_expansion_details,
@@ -81,29 +80,28 @@ from custom_components.free_library_events.coordinator import (  # noqa: E402
     supplemental_coverage,
     type_expansion_source_keys,
 )
-from custom_components.free_library_events.diagnostics import (  # noqa: E402
+from custom_components.free_library_events.diagnostics import (
     async_get_config_entry_diagnostics,
 )
-from custom_components.free_library_events.digest import (  # noqa: E402
+from custom_components.free_library_events.digest import (
     BRANCHES,
     DescriptionLink,
     Event,
     event_identity,
 )
-from custom_components.free_library_events.email_images import (  # noqa: E402
-    DownloadedImage,
+from custom_components.free_library_events.email_images import (
     EMAIL_IMAGE_DIRECTORY,
+    DownloadedImage,
     ImageDownloadBatch,
     StoredImageBundle,
     remove_stored_image_run,
     store_downloaded_images,
 )
-from custom_components.free_library_events.webcal import (  # noqa: E402
+from custom_components.free_library_events.webcal import (
     WEBCAL_PATH,
     render_icalendar,
     webcal_subscription_urls,
 )
-
 
 pytestmark = pytest.mark.usefixtures("enable_custom_integrations")
 
@@ -388,6 +386,8 @@ def test_profile_and_webcal_validation_reject_unknown_or_unsafe_values() -> None
         normalize_profile(PROFILE_INPUT | {CONF_BRANCHES: []})
     with pytest.raises(ValueError, match="invalid_webcal_name"):
         normalize_options(BEHAVIOR_INPUT | {CONF_WEBCAL_NAME: " \n "})
+    with pytest.raises(TypeError, match="invalid_webcal_name"):
+        normalize_options(BEHAVIOR_INPUT | {CONF_WEBCAL_NAME: None})
 
 
 def test_normalize_config_coerces_non_ui_boolean_strings() -> None:
@@ -406,7 +406,7 @@ def test_normalize_config_coerces_non_ui_boolean_strings() -> None:
 
 
 def test_normalize_config_rejects_non_string_child_name() -> None:
-    with pytest.raises(ValueError, match="invalid_child_name"):
+    with pytest.raises(TypeError, match="invalid_child_name"):
         normalize_config(USER_INPUT | {CONF_CHILD_NAME: None})
 
 
@@ -488,7 +488,7 @@ async def test_setup_entities_action_and_redacted_diagnostics(
             image_url="https://libwww.freelibrary.org/images/storytime.png",
             branch=branch,
             age_categories=(age_category,) if age_category else (),
-            end_at=datetime(2026, 7, 22, 12, 0),
+            end_at=datetime(2026, 7, 22, 12, 0, tzinfo=LOCAL_TIME_ZONE),
             description_links=(
                 DescriptionLink("Early literacy", "https://example.test/literacy"),
             ),
@@ -568,7 +568,7 @@ async def test_setup_entities_action_and_redacted_diagnostics(
 
     with patch(
         "custom_components.free_library_events.dt_util.now",
-        return_value=datetime(2026, 7, 17),
+        return_value=datetime(2026, 7, 17, tzinfo=LOCAL_TIME_ZONE),
     ):
         response = await hass.services.async_call(
             DOMAIN,
@@ -623,7 +623,7 @@ async def test_setup_entities_action_and_redacted_diagnostics(
         patch("custom_components.free_library_events.async_call_later") as schedule,
         patch(
             "custom_components.free_library_events.dt_util.now",
-            return_value=datetime(2026, 7, 17),
+            return_value=datetime(2026, 7, 17, tzinfo=LOCAL_TIME_ZONE),
         ),
     ):
         embedded = await hass.services.async_call(
@@ -670,7 +670,7 @@ async def test_setup_entities_action_and_redacted_diagnostics(
         patch("custom_components.free_library_events.purge_stale_image_runs"),
         patch(
             "custom_components.free_library_events.dt_util.now",
-            return_value=datetime(2026, 7, 17),
+            return_value=datetime(2026, 7, 17, tzinfo=LOCAL_TIME_ZONE),
         ),
     ):
         remote_fallback = await hass.services.async_call(
@@ -1432,7 +1432,7 @@ async def test_coordinator_expands_every_current_age_source_before_supplemental_
 
     with patch(
         "custom_components.free_library_events.coordinator.dt_util.now",
-        return_value=datetime(2026, 7, 18),
+        return_value=datetime(2026, 7, 18, tzinfo=LOCAL_TIME_ZONE),
     ):
         data = await coordinator._async_update_data()
 
@@ -1482,7 +1482,7 @@ async def test_coordinator_bounds_a_stalled_type_expansion(
     with (
         patch(
             "custom_components.free_library_events.coordinator.dt_util.now",
-            return_value=datetime(2026, 7, 18),
+            return_value=datetime(2026, 7, 18, tzinfo=LOCAL_TIME_ZONE),
         ),
         patch(
             "custom_components.free_library_events.coordinator."
@@ -1613,7 +1613,7 @@ async def test_coordinator_recomputes_age_feeds_as_time_advances(
 
     with patch(
         "custom_components.free_library_events.coordinator.dt_util.now",
-        return_value=datetime(2026, 4, 1),
+        return_value=datetime(2026, 4, 1, tzinfo=LOCAL_TIME_ZONE),
     ):
         await coordinator._async_update_data()
     assert [call.args[1] for call in client.async_fetch_feed.await_args_list] == [
@@ -1627,7 +1627,7 @@ async def test_coordinator_recomputes_age_feeds_as_time_advances(
     client.async_fetch_feed.reset_mock()
     with patch(
         "custom_components.free_library_events.coordinator.dt_util.now",
-        return_value=datetime(2026, 10, 1),
+        return_value=datetime(2026, 10, 1, tzinfo=LOCAL_TIME_ZONE),
     ):
         await coordinator._async_update_data()
     assert [call.args[1] for call in client.async_fetch_feed.await_args_list] == [
@@ -1661,7 +1661,7 @@ async def test_status_separates_a_healthy_supplemental_limit_from_partial_failur
         ),
         patch(
             "custom_components.free_library_events.sensor.dt_util.now",
-            return_value=datetime(2026, 7, 18),
+            return_value=datetime(2026, 7, 18, tzinfo=LOCAL_TIME_ZONE),
         ),
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
@@ -1678,7 +1678,7 @@ async def test_status_separates_a_healthy_supplemental_limit_from_partial_failur
 
     with patch(
         "custom_components.free_library_events.dt_util.now",
-        return_value=datetime(2026, 7, 18),
+        return_value=datetime(2026, 7, 18, tzinfo=LOCAL_TIME_ZONE),
     ):
         response = await hass.services.async_call(
             DOMAIN,

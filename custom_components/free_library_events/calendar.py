@@ -10,8 +10,8 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
-from .config import entry_config
 from .calendar_data import LIBRARY_TIME_ZONE, build_calendar_items
+from .config import entry_config
 from .const import DOMAIN
 from .coordinator import LibraryDataCoordinator
 from .entity import service_device_info

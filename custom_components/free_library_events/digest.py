@@ -7,12 +7,12 @@ import html
 import re
 import urllib.parse
 import xml.etree.ElementTree as ET
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timedelta
 from html.parser import HTMLParser
 from itertools import groupby
-from typing import Literal, Mapping, Sequence
-
+from typing import Literal
 
 TIMEZONE = "America/New_York"
 FILTER_MODES = ("Strict", "Recommended", "Broad")
@@ -414,7 +414,7 @@ def normalize_child_name(value: object) -> str:
     """Return a bounded single-line display name safe for email subjects."""
 
     if not isinstance(value, str):
-        raise ValueError("invalid_child_name")
+        raise TypeError("invalid_child_name")
     child_name = " ".join(value.split())
     if not child_name:
         raise ValueError("child_name_required")
@@ -701,13 +701,15 @@ _ROOM_RES = (
 def explicit_venue(title: str, description: str) -> str:
     """Return a confidently named off-site venue from published event text."""
 
-    if match := _TITLE_VENUE_RE.search(title):
-        if venue := _named_venue(match.group("venue")):
-            return venue
+    if (match := _TITLE_VENUE_RE.search(title)) and (
+        venue := _named_venue(match.group("venue"))
+    ):
+        return venue
     for pattern in _DESCRIPTION_VENUE_RES:
-        if match := pattern.search(description):
-            if venue := _named_venue(match.group("venue")):
-                return venue
+        if (match := pattern.search(description)) and (
+            venue := _named_venue(match.group("venue"))
+        ):
+            return venue
     return ""
 
 
@@ -735,8 +737,7 @@ def explicit_room(description: str) -> str:
 def clean_title(raw_title: str, branch: Branch) -> str:
     value = re.sub(r"^\d{2}/\d{2}/\d{2}:\s*", "", raw_title.strip())
     suffix = f" - {branch.name}"
-    if value.endswith(suffix):
-        value = value[: -len(suffix)]
+    value = value.removesuffix(suffix)
     value = re.sub(r"\bBaby\s{2,}Toddler\b", "Baby & Toddler", value)
     value = value.replace("Storytime  Playgroup", "Storytime & Playgroup").strip()
     return value or "Library event"
@@ -798,9 +799,9 @@ def parse_feed(
         if not start_date_text or not start_time_text:
             continue
         try:
-            event_date = datetime.strptime(start_date_text, "%m/%d/%y").date()
+            event_date = date.strptime(start_date_text, "%m/%d/%y")
             normalized_time = start_time_text.replace(".", "").strip()
-            start_time = datetime.strptime(normalized_time, "%I:%M %p").time()
+            start_time = time.strptime(normalized_time, "%I:%M %p")
         except (TypeError, ValueError):
             continue
         link = _safe_http_url(item.findtext("link") or "") or _safe_http_url(
@@ -1498,36 +1499,38 @@ def _event_chip_specs(event: Event) -> tuple[tuple[str, str], ...]:
     ):
         action_chips.append(("action", "Registration required"))
 
-    if re.search(r"\b(?:drop[ -]?in|walk[ -]?ins? welcome)\b", searchable, re.I):
+    if re.search(
+        r"\b(?:drop[ -]?in|walk[ -]?ins? welcome)\b", searchable, re.IGNORECASE
+    ):
         logistics_chips.append(("logistics", "Drop-in"))
     if re.search(
         r"\b(?:materials?|supplies) (?:are |will be )?provided\b",
         searchable,
-        re.I,
+        re.IGNORECASE,
     ) and not re.search(
         r"\b(?:materials?|supplies) (?:are |will be )?not provided\b|"
         r"\bno (?:materials?|supplies) (?:are |will be )?provided\b",
         searchable,
-        re.I,
+        re.IGNORECASE,
     ):
         logistics_chips.append(("logistics", "Materials provided"))
     if re.search(
         r"\b(?:caregiver|parent|adult) (?:participation|participates?|joins?)\b|"
         r"\bwith (?:a |their )?(?:caregiver|parent|adult)\b",
         searchable,
-        re.I,
+        re.IGNORECASE,
     ):
         logistics_chips.append(("logistics", "Caregiver participation"))
-    if re.search(r"\bsensory[ -]friendly\b", searchable, re.I):
+    if re.search(r"\bsensory[ -]friendly\b", searchable, re.IGNORECASE):
         logistics_chips.append(("logistics", "Sensory-friendly"))
     if re.search(
-        r"\bASL (?:interpretation|interpreter|interpreted)\b", searchable, re.I
+        r"\bASL (?:interpretation|interpreter|interpreted)\b", searchable, re.IGNORECASE
     ):
         logistics_chips.append(("logistics", "ASL interpreted"))
     if re.search(
         r"\bbilingual\b|\b(?:English|Spanish)\s*(?:and|/)\s*(?:English|Spanish)\b",
         searchable,
-        re.I,
+        re.IGNORECASE,
     ):
         logistics_chips.append(("logistics", "Bilingual"))
 
@@ -1657,8 +1660,10 @@ def _source_notes(
     if source_warnings or source_errors:
         return [
             (
-                "Some library listings may be missing. "
-                "Check the full branch calendars below.",
+                (
+                    "Some library listings may be missing. "
+                    "Check the full branch calendars below."
+                ),
                 True,
             )
         ]
@@ -1983,8 +1988,10 @@ def _render_plain_text(
                     location_line,
                     *(
                         [
-                            f"Library age listing: "
-                            f"{f' {MIDDLE_DOT} '.join(age_categories)}"
+                            (
+                                f"Library age listing: "
+                                f"{(' ' + MIDDLE_DOT + ' ').join(age_categories)}"
+                            )
                         ]
                         if age_categories
                         else []

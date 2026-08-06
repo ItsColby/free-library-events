@@ -16,10 +16,10 @@ from .const import CONF_BIRTH_DATE, CONF_FILTER_MODE, DOMAIN
 from .coordinator import (
     LibraryDataCoordinator,
     coverage_warnings,
-    supplemental_coverage,
     source_expansion_details,
     source_keys_for_window,
     source_label,
+    supplemental_coverage,
 )
 from .digest import (
     BRANCHES,
