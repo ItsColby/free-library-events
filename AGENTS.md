@@ -85,15 +85,12 @@ alerts. A successful CodeQL workflow proves analysis completed, not that the
 result has no findings. Resolve or explicitly disposition candidate-introduced
 alerts before tagging.
 
-Home Assistant tests run against both the minimum supported Core release and
-the current deployed Core release:
+Home Assistant tests target the current deployed Core release, which is also
+the HACS minimum supported version:
 
 ```powershell
-python -m pip install pytest-homeassistant-custom-component==0.13.345
-python -m pip install --upgrade -r requirements-ha-test.txt
-python -m pytest tests\test_integration_ha.py tests\test_email_images.py -q
 python -m pip install pytest-homeassistant-custom-component==0.13.354
-python -m pip install --upgrade -r requirements-ha-test-current.txt
+python -m pip install --upgrade -r requirements-ha-test.txt
 python -m pytest tests\test_integration_ha.py tests\test_email_images.py -q
 ```
 
@@ -102,7 +99,7 @@ harness matches stable Core directly, but the daily upstream harness can
 temporarily declare a beta while the matching final Core is already released;
 do not encode that transient pair in one requirements transaction.
 
-Home Assistant's test harness imports Linux-only modules. On Windows, run each
+Home Assistant's test harness imports Linux-only modules. On Windows, run the
 HA lane in a Linux container instead of treating a native `fcntl` import error
 as an integration failure. If neither a compatible Linux environment nor the
 container runtime is available, defer the HA-specific lane to the protected
