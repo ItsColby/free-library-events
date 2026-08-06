@@ -31,6 +31,8 @@
   retain ambiguous-Unicode detection; add focused network, cryptography, and
   comprehension checks; and ratchet complexity to the current demonstrated
   ceiling.
+- Enforce Ruff's exception-name suffix rule and align the private image-download
+  exception name without changing its fallback behavior.
 - Pin every third-party GitHub Action to a full commit SHA, disable persisted
   checkout credentials, bound job runtimes, add weekly validation and
   Dependabot Actions updates, and expose one stable `Release gate` check.
