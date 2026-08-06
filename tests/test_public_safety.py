@@ -139,6 +139,8 @@ class PublicSafetyGuardTests(unittest.TestCase):
 
     def test_home_assistant_support_contract_is_single_current_lane(self) -> None:
         root = Path(__file__).resolve().parents[1]
+        readme = (root / "README.md").read_text(encoding="utf-8")
+        agents = (root / "AGENTS.md").read_text(encoding="utf-8")
         workflow = (root / ".github/workflows/validate.yaml").read_text(
             encoding="utf-8"
         )
@@ -148,12 +150,23 @@ class PublicSafetyGuardTests(unittest.TestCase):
         requirements_install = (
             "python -m pip install --upgrade -r requirements-ha-test.txt"
         )
+        dependency_check = "python -m pip check"
 
         self.assertIn("Home Assistant integration tests (Core 2026.8.0)", workflow)
         self.assertIn(harness_install, workflow)
         self.assertIn(requirements_install, workflow)
         self.assertLess(
             workflow.index(harness_install), workflow.index(requirements_install)
+        )
+        self.assertIn(dependency_check, workflow)
+        self.assertLess(
+            workflow.index(requirements_install), workflow.index(dependency_check)
+        )
+        self.assertLess(
+            workflow.index(dependency_check),
+            workflow.index(
+                "python -m mypy --strict custom_components/free_library_events"
+            ),
         )
         self.assertNotIn("matrix.", workflow)
         self.assertEqual(
@@ -167,7 +180,11 @@ class PublicSafetyGuardTests(unittest.TestCase):
 
         requirements = (root / "requirements-ha-test.txt").read_text(encoding="utf-8")
         self.assertIn("homeassistant==2026.8.0", requirements)
+        self.assertNotIn("pytest==", requirements)
         self.assertNotIn("pytest-homeassistant-custom-component", requirements)
+        for document in (readme, agents):
+            with self.subTest(document="dependency closure instructions"):
+                self.assertIn(dependency_check, document)
         self.assertEqual(
             "2026.8.0",
             json.loads((root / "hacs.json").read_text(encoding="utf-8"))[

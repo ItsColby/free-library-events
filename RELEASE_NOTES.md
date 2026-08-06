@@ -60,6 +60,9 @@
   retaining the existing debugger-statement rule.
 - Validate Core `2026.8.0` with test harness `0.13.354`, whose
   dependency metadata now targets that final release directly.
+- Let the latest Home Assistant test harness own its compatible pytest version
+  instead of overriding it with a redundant direct pin, and fail validation
+  when `pip check` finds an inconsistent dependency environment.
 - Pin every third-party GitHub Action to a full commit SHA, disable persisted
   checkout credentials, bound job runtimes, add weekly validation and
   Dependabot Actions and Python dependency updates, and expose one stable
