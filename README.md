@@ -392,7 +392,14 @@ python -m pip install --upgrade -r requirements-ha-test.txt
 python -m ruff format --check custom_components tests scripts
 python -m ruff check custom_components tests scripts
 python -m mypy --strict custom_components/free_library_events
-zizmor --persona auditor .
+$env:GH_TOKEN = gh auth token
+if (-not $env:GH_TOKEN) { throw "GitHub CLI authentication required" }
+try {
+  zizmor --strict-collection --persona auditor .
+  if ($LASTEXITCODE -ne 0) { throw "zizmor audit failed" }
+} finally {
+  Remove-Item Env:GH_TOKEN
+}
 python -m unittest discover -s tests -p "test_digest.py"
 python -m unittest discover -s tests -p "test_public_safety.py"
 python -m compileall -q custom_components\free_library_events tests scripts
