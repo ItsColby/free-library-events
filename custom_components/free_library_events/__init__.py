@@ -316,10 +316,10 @@ async def _async_render_digest(call: ServiceCall) -> ServiceResponse:
             stored_images = await hass.async_add_executor_job(
                 store_downloaded_images, image_root, download_batch
             )
-        except OSError as err:
+        except OSError:
             image_download_failure_count = image_download_count
             image_download_failure_examples = (
-                f"Home Assistant could not store digest images: {err}",
+                "Home Assistant could not store digest images",
             )
             stored_images = None
         fallback_urls = set(download_batch.fallback_urls)

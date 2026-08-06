@@ -16,9 +16,13 @@ from homeassistant.util import dt as dt_util
 from .api import (
     OFFICIAL_EVENT_TYPES,
     RSS_ITEM_LIMIT,
+    SOURCE_ERROR_EXPANSION_TIMEOUT,
+    SOURCE_ERROR_UNEXPECTED,
     BranchFeed,
     LibraryApiError,
     LibraryClient,
+    source_error_category,
+    source_error_description,
 )
 from .const import DOMAIN
 from .digest import (
@@ -166,10 +170,7 @@ async def async_expand_source(
             timeout=TYPE_EXPANSION_TIMEOUT_SECONDS,
         )
     except TimeoutError as err:
-        raise LibraryApiError(
-            "Event-type expansion timed out after "
-            f"{TYPE_EXPANSION_TIMEOUT_SECONDS} seconds"
-        ) from err
+        raise LibraryApiError(SOURCE_ERROR_EXPANSION_TIMEOUT) from err
 
 
 @dataclass(frozen=True, slots=True)
@@ -239,7 +240,8 @@ def supplemental_coverage(
     """Return supplemental-age failures separately from feed-cap limitations."""
 
     failures = [
-        f"{source_label(key)} could not be loaded: {data.source_errors[key]}"
+        f"{source_label(key)} could not be loaded: "
+        f"{source_error_description(data.source_errors[key])}"
         for key in supplemental_source_keys(
             tuple(data.source_errors), birth_date, start_date, end_date
         )
@@ -333,7 +335,7 @@ class LibraryDataCoordinator(DataUpdateCoordinator[LibraryData]):
             if isinstance(result, asyncio.CancelledError):
                 raise result
             if isinstance(result, BaseException):
-                errors[key] = str(result) or f"Unable to load {source_label(key)}"
+                errors[key] = source_error_category(result)
                 continue
             feed = result
             if not isinstance(feed, BranchFeed):
@@ -343,7 +345,9 @@ class LibraryDataCoordinator(DataUpdateCoordinator[LibraryData]):
 
         if not statuses:
             raise UpdateFailed(
-                "; ".join(errors.values()) or "No selected library feed could be loaded"
+                SOURCE_ERROR_UNEXPECTED
+                if not errors
+                else ",".join(sorted(set(errors.values())))
             )
 
         request_by_key = {
@@ -369,11 +373,12 @@ class LibraryDataCoordinator(DataUpdateCoordinator[LibraryData]):
             if isinstance(result, asyncio.CancelledError):
                 raise result
             if isinstance(result, BaseException):
-                _LOGGER.warning("Unable to expand %s: %s", source_label(key), result)
+                category = source_error_category(result)
+                _LOGGER.warning("Unable to expand %s (%s)", source_label(key), category)
                 statuses[key] = replace(
                     statuses[key],
                     type_shards_queried=len(OFFICIAL_EVENT_TYPES),
-                    type_shard_failures=(str(result) or "unexpected failure",),
+                    type_shard_failures=(category,),
                 )
                 continue
             if isinstance(result, BranchFeed):
@@ -406,3 +411,17 @@ class LibraryDataCoordinator(DataUpdateCoordinator[LibraryData]):
             source_errors=errors,
             fetched_at=dt_util.utcnow(),
         )
+
+
+def coordinator_error_category(error: BaseException | None) -> str | None:
+    """Return a compact category for the coordinator's last exception."""
+
+    if error is None:
+        return None
+    if isinstance(error, UpdateFailed):
+        return "source_update_failed"
+    if isinstance(error, LibraryApiError):
+        return "source_request_failed"
+    if isinstance(error, TimeoutError):
+        return "timeout"
+    return "unexpected"

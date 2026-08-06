@@ -95,6 +95,8 @@ class PublicSafetyGuardTests(unittest.TestCase):
 
         dependabot = (root / ".github/dependabot.yml").read_text(encoding="utf-8")
         self.assertIn("default-days: 7", dependabot)
+        self.assertEqual(1, dependabot.count("package-ecosystem: github-actions"))
+        self.assertEqual(1, dependabot.count("package-ecosystem: pip"))
 
     def test_ruff_policy_is_repository_owned_and_high_signal(self) -> None:
         root = Path(__file__).resolve().parents[1]

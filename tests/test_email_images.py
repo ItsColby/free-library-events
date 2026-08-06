@@ -9,7 +9,7 @@ import unittest
 from datetime import date, time
 from pathlib import Path
 from typing import Self
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from custom_components.free_library_events import email_images
 from custom_components.free_library_events.digest import BRANCHES, Event
@@ -98,6 +98,31 @@ class EmailImageTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(
             all(request[1]["allow_redirects"] is False for request in session.requests)
         )
+
+    async def test_unexpected_download_exception_is_reported_without_raw_text(
+        self,
+    ) -> None:
+        source_url = "https://libwww.freelibrary.org/images/first.png"
+        private_detail = "synthetic private transport detail"
+
+        with patch.object(
+            email_images,
+            "_async_download_one",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError(private_detail),
+        ):
+            batch = await email_images.async_download_event_images(
+                object(),  # type: ignore[arg-type]
+                [_event("First event", source_url)],
+            )
+
+        self.assertEqual(batch.failure_count, 1)
+        self.assertEqual(
+            batch.failure_examples,
+            ("First event: unexpected image failure",),
+        )
+        self.assertNotIn(private_detail, repr(batch))
+        self.assertEqual(batch.fallback_urls, ())
 
     async def test_image_count_limit_is_deterministic_and_observable(self) -> None:
         first_url = "https://libwww.freelibrary.org/images/first.png"

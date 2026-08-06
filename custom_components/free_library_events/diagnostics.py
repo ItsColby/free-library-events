@@ -10,7 +10,11 @@ from homeassistant.core import HomeAssistant
 
 from .config import entry_config
 from .const import CONF_BIRTH_DATE, CONF_CHILD_NAME
-from .coordinator import LibraryDataCoordinator, source_label
+from .coordinator import (
+    LibraryDataCoordinator,
+    coordinator_error_category,
+    source_label,
+)
 from .runtime import LibraryConfigEntry
 
 TO_REDACT = {CONF_CHILD_NAME, CONF_BIRTH_DATE}
@@ -39,9 +43,9 @@ async def async_get_config_entry_diagnostics(
             "last_update_success": coordinator.last_update_success
             if coordinator
             else None,
-            "last_exception": str(coordinator.last_exception)
-            if coordinator and coordinator.last_exception
-            else None,
+            "last_error_category": coordinator_error_category(
+                coordinator.last_exception if coordinator else None
+            ),
             "fetched_at": data.fetched_at.isoformat() if data else None,
         },
         "sources": {
@@ -75,7 +79,7 @@ async def async_get_config_entry_diagnostics(
                 if key in source_statuses
                 else None,
                 "available": key not in source_errors,
-                "error": source_errors.get(key),
+                "error_category": source_errors.get(key),
             }
             for key in dict.fromkeys((*source_statuses, *source_errors))
         },
