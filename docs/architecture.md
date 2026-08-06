@@ -217,7 +217,8 @@ page available outside the integration for schedule changes.
 ## Release Contract
 
 1. Use Python 3.14 and run unit, HA integration, compile, JSON, privacy,
-   Ruff, strict mypy, zizmor auditor, Hassfest, and HACS validation.
+   Ruff, strict mypy, actionlint with ShellCheck, zizmor auditor, Hassfest, and
+   HACS validation.
 2. Compare the official RSS builder's age and event-type options with the local
    source taxonomy; the runtime builder route is browser-protected, so this is a
    release-time drift check rather than an unreliable polling dependency.

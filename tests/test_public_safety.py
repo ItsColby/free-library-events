@@ -38,6 +38,13 @@ class PublicSafetyGuardTests(unittest.TestCase):
 
         self.assertIn("python -m pip install --upgrade ruff", workflow)
         self.assertIn("python -m pip install --upgrade mypy", workflow)
+        self.assertIn(
+            "go install github.com/rhysd/actionlint/cmd/actionlint@latest",
+            workflow,
+        )
+        self.assertIn("actionlint -version", workflow)
+        self.assertIn("shellcheck --version", workflow)
+        self.assertIn("run: actionlint", workflow)
         self.assertIn("zizmor --persona auditor .", workflow)
         self.assertIn("zizmor --persona auditor .", readme)
         self.assertIn("python -m mypy --version", workflow)
