@@ -1218,7 +1218,7 @@ class DigestTests(unittest.TestCase):
 
         self.assertEqual(
             payload["subject"],
-            "4 library activities for Avery 📚 · Jul 20–26",
+            "4 library activities for Avery 📚 · Jul 20–26",  # noqa: RUF001
         )
         self.assertEqual(payload["metadata"]["included_count"], 4)
         self.assertEqual(payload["metadata"]["omitted_count"], 1)
@@ -1248,12 +1248,12 @@ class DigestTests(unittest.TestCase):
             payload["html"],
         )
         self.assertIn(
-            "Wednesday–Friday from 4 libraries, with directions and calendar links.",
+            "Wednesday–Friday from 4 libraries, with directions and calendar links.",  # noqa: RUF001
             payload["html"],
         )
         self.assertNotIn("4 age-matched library activities for Avery", payload["html"])
         self.assertIn(
-            "4 activities selected for Avery’s age across 4 libraries.",
+            "4 activities selected for Avery’s age across 4 libraries.",  # noqa: RUF001
             payload["html"],
         )
         self.assertNotIn("Listed for:", payload["html"])
@@ -1500,7 +1500,7 @@ class DigestTests(unittest.TestCase):
 
         card = payload["html"]
         self.assertIn(
-            "1 activity selected for Avery’s age at 1 library.",
+            "1 activity selected for Avery’s age at 1 library.",  # noqa: RUF001
             card,
         )
         self.assertNotIn("event was checked", card)

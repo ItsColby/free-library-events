@@ -70,19 +70,23 @@ class PublicSafetyGuardTests(unittest.TestCase):
 
         self.assertEqual("py314", ruff["target-version"])
         self.assertNotIn("required-version", ruff)
-        self.assertEqual(20, lint["mccabe"]["max-complexity"])
+        self.assertEqual(17, lint["mccabe"]["max-complexity"])
         self.assertTrue(
             {
                 "ASYNC",
+                "BLE",
                 "C901",
                 "PERF",
+                "PLC",
                 "PLE",
                 "PLW",
+                "RUF",
                 "S314",
                 "TID",
             }
             <= set(lint["extend-select"])
         )
+        self.assertTrue({"RUF001", "RUF002", "RUF003"}.isdisjoint(lint["ignore"]))
         self.assertEqual(["T20"], lint["per-file-ignores"]["scripts/**"])
 
     def test_home_assistant_harness_and_core_install_in_separate_steps(self) -> None:

@@ -1873,7 +1873,7 @@ def _render_html(
         library_noun = "library" if event_branch_count == 1 else "libraries"
         branch_preposition = "at" if event_branch_count == 1 else "across"
         intro = (
-            f"{len(events)} {activity_noun} selected for {child_name}’s age "
+            f"{len(events)} {activity_noun} selected for {child_name}’s age "  # noqa: RUF001
             f"{branch_preposition} {event_branch_count} {library_noun}."
         )
         if len(full_event_ids) < len(events):
