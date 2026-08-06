@@ -82,15 +82,15 @@ the current deployed Core release:
 python -m pip install pytest-homeassistant-custom-component==0.13.345
 python -m pip install --upgrade -r requirements-ha-test.txt
 python -m pytest tests\test_integration_ha.py tests\test_email_images.py -q
-python -m pip install pytest-homeassistant-custom-component==0.13.353
+python -m pip install pytest-homeassistant-custom-component==0.13.354
 python -m pip install --upgrade -r requirements-ha-test-current.txt
 python -m pytest tests\test_integration_ha.py tests\test_email_images.py -q
 ```
 
-The current harness may still declare the latest beta Core while final Core is
-already released. Install the harness first so its support dependencies are
-present, then upgrade to the exact Core under test; do not encode an
-unresolvable final-Core-plus-beta-harness pair in one requirements transaction.
+Keep the harness and exact Core installation as separate steps. The current
+harness matches stable Core directly, but the daily upstream harness can
+temporarily declare a beta while the matching final Core is already released;
+do not encode that transient pair in one requirements transaction.
 
 Home Assistant's test harness imports Linux-only modules. On Windows, run each
 HA lane in a Linux container instead of treating a native `fcntl` import error
