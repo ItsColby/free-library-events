@@ -124,7 +124,11 @@
   validators; matching conditional requests return `304`. Disabled, invalid,
   and unloaded tokens fail closed as `404`.
 - `calendar.py`, `sensor.py`, and `button.py` expose the native user-facing
-  calendar, diagnostic status, and manual refresh surfaces.
+  calendar, diagnostic status, and manual refresh surfaces. The status sensor
+  is a finite Home Assistant enum whose raw automation values remain `ok`,
+  `limited`, `partial`, and `error`; translations provide user-facing state
+  labels. `translations/en.json` and `icons.json` own action/entity metadata and
+  icons instead of adding hard-coded presentation state to the entities.
 - `config_flow.py` generates, displays, explicitly confirms rotation of, and
   removes the private webcal capability token. It presents both HTTP(S) and
   `webcal://` URL forms, identifies whether Home Assistant supplied an

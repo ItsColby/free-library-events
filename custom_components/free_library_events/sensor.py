@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Any
 
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -51,7 +51,7 @@ class LibraryStatusSensor(CoordinatorEntity[LibraryDataCoordinator], SensorEntit
 
     _attr_has_entity_name = True
     _attr_translation_key = "status"
-    _attr_icon = "mdi:book-check-outline"
+    _attr_device_class = SensorDeviceClass.ENUM
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(
@@ -60,6 +60,7 @@ class LibraryStatusSensor(CoordinatorEntity[LibraryDataCoordinator], SensorEntit
         super().__init__(coordinator)
         self._entry = entry
         self._attr_unique_id = f"{DOMAIN}_status"
+        self._attr_options = ["ok", "limited", "partial", "error"]
 
     @property
     def available(self) -> bool:
@@ -78,7 +79,7 @@ class LibraryStatusSensor(CoordinatorEntity[LibraryDataCoordinator], SensorEntit
         return service_device_info()
 
     @property
-    def native_value(self) -> str:
+    def native_value(self) -> str | None:
         if not self.coordinator.last_update_success:
             return "error"
         if self.coordinator.data:
@@ -105,7 +106,7 @@ class LibraryStatusSensor(CoordinatorEntity[LibraryDataCoordinator], SensorEntit
                 return "partial"
             if supplemental_limitations:
                 return "limited"
-        return "ok" if self.coordinator.data else "unknown"
+        return "ok" if self.coordinator.data else None
 
     @property
     def extra_state_attributes(self) -> dict[str, object]:

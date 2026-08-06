@@ -33,7 +33,6 @@ class LibraryRefreshButton(CoordinatorEntity[LibraryDataCoordinator], ButtonEnti
 
     _attr_has_entity_name = True
     _attr_translation_key = "refresh_events"
-    _attr_icon = "mdi:refresh"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(self, coordinator: LibraryDataCoordinator) -> None:

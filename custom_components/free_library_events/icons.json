@@ -1,0 +1,30 @@
+{
+  "services": {
+    "render_digest": {
+      "service": "mdi:email-edit-outline"
+    }
+  },
+  "entity": {
+    "button": {
+      "refresh_events": {
+        "default": "mdi:refresh"
+      }
+    },
+    "calendar": {
+      "events": {
+        "default": "mdi:library"
+      }
+    },
+    "sensor": {
+      "status": {
+        "default": "mdi:book-check-outline",
+        "state": {
+          "ok": "mdi:book-check-outline",
+          "limited": "mdi:book-clock-outline",
+          "partial": "mdi:book-alert-outline",
+          "error": "mdi:book-remove-outline"
+        }
+      }
+    }
+  }
+}

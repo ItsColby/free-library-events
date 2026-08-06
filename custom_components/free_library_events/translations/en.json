@@ -104,6 +104,22 @@
       "invalid_config": "Check the settings and try again."
     }
   },
+  "services": {
+    "render_digest": {
+      "name": "Render weekly digest",
+      "description": "Refresh the selected library feeds and return an age-aware email payload with source-coverage metadata.",
+      "fields": {
+        "force_refresh": {
+          "name": "Refresh first",
+          "description": "Load the current official branch feeds before generating the email."
+        },
+        "embed_images": {
+          "name": "Embed event images",
+          "description": "Download selected event images for inline SMTP display and return notifier-ready temporary attachments."
+        }
+      }
+    }
+  },
   "exceptions": {
     "library_data_unavailable": {
       "message": "No library event data is available. Refresh the integration and try again."
@@ -131,7 +147,13 @@
     },
     "sensor": {
       "status": {
-        "name": "Status"
+        "name": "Status",
+        "state": {
+          "ok": "OK",
+          "limited": "Limited",
+          "partial": "Partial",
+          "error": "Error"
+        }
       }
     }
   }
