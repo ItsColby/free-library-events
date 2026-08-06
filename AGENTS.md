@@ -60,6 +60,7 @@ Before integration or release, use Python 3.14 and run the full local tier:
 ```powershell
 python -m pip install --upgrade ruff mypy shellcheck-py zizmor
 python -m pip install --upgrade -r requirements-ha-test.txt
+python -m pip check
 python -m ruff format --check custom_components tests scripts
 python -m ruff check custom_components tests scripts
 python -m mypy --strict custom_components/free_library_events
@@ -91,6 +92,7 @@ the HACS minimum supported version:
 ```powershell
 python -m pip install pytest-homeassistant-custom-component==0.13.354
 python -m pip install --upgrade -r requirements-ha-test.txt
+python -m pip check
 python -m pytest tests\test_integration_ha.py tests\test_email_images.py -q
 ```
 
