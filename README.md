@@ -388,6 +388,7 @@ Home Assistant 2026.8.0 test boundaries.
 
 ```powershell
 python -m pip install --upgrade ruff mypy shellcheck-py zizmor
+python -m pip install --upgrade -r requirements-ha-test.txt
 python -m ruff format --check custom_components tests scripts
 python -m ruff check custom_components tests scripts
 python -m mypy --strict custom_components/free_library_events

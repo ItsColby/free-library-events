@@ -56,6 +56,18 @@ class PublicSafetyGuardTests(unittest.TestCase):
         self.assertIn(
             "python -m pip install --upgrade ruff mypy shellcheck-py zizmor", agents
         )
+        local_ha_requirements = (
+            "python -m pip install --upgrade -r requirements-ha-test.txt"
+        )
+        for document in (readme, agents):
+            with self.subTest(document="local validation instructions"):
+                self.assertIn(local_ha_requirements, document)
+                self.assertLess(
+                    document.index(local_ha_requirements),
+                    document.index(
+                        "python -m mypy --strict custom_components/free_library_events"
+                    ),
+                )
         self.assertNotIn("ruff==", workflow)
         self.assertNotIn("shellcheck-py==", workflow)
 
