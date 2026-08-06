@@ -28,7 +28,8 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.14"
-      - run: python -m pip install --upgrade ruff zizmor
+      - name: Install latest Python static-analysis tools
+        run: python -m pip install --upgrade ruff shellcheck-py zizmor
       - name: Install latest workflow linter
         env:
           GOBIN: ${{ runner.temp }}/actionlint-bin

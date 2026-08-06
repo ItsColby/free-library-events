@@ -347,6 +347,47 @@ class DigestTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "forbidden XML declaration"):
             digest.parse_feed(payload, digest.BRANCHES["SWK"], "Baby")
 
+    def test_parser_rejects_multibyte_xml_entity_declarations(self) -> None:
+        encodings = (
+            ("utf-16", "UTF-16"),
+            ("utf-32", "UTF-32"),
+            ("utf-16-le", "UTF-16LE"),
+            ("utf-16-be", "UTF-16BE"),
+        )
+        for encoding, declaration in encodings:
+            with self.subTest(encoding=encoding):
+                payload = (
+                    f"<?xml version='1.0' encoding='{declaration}'?>"
+                    "<!DOCTYPE rss [<!ENTITY expanded 'EXPANDED'>]>"
+                    "<rss><channel><item><title>&expanded;</title></item></channel></rss>"
+                ).encode(encoding)
+
+                with self.assertRaisesRegex(ValueError, "forbidden XML declaration"):
+                    digest.parse_feed(payload, digest.BRANCHES["SWK"], "Baby")
+
+    def test_parser_accepts_benign_utf16_feed(self) -> None:
+        payload = rss(
+            [
+                {
+                    "title": "07/22/26: Baby Music - Charles Santore Library",
+                    "description": "A music program for babies and caregivers.",
+                    "date": "07/22/26",
+                    "time": "10:30 A.M.",
+                    "branch": "Charles Santore Library",
+                    "link": "https://example.test/utf16",
+                }
+            ]
+        ).encode("utf-16")
+
+        events, source_count = digest.parse_feed(
+            payload, digest.BRANCHES["SWK"], "Baby"
+        )
+
+        self.assertEqual(source_count, 1)
+        self.assertEqual(
+            [event.link for event in events], ["https://example.test/utf16"]
+        )
+
     def test_parser_bounds_remote_item_fields_and_item_count(self) -> None:
         valid = {
             "title": "07/22/26: Baby Music - Charles Santore Library",

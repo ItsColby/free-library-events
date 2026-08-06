@@ -852,18 +852,41 @@ def parse_feed(
 def _safe_feed_root(xml_content: bytes | str) -> ET.Element:
     """Parse a bounded RSS payload after rejecting DTD and entity declarations."""
 
-    if isinstance(xml_content, bytes):
-        forbidden_declaration = any(
-            marker in xml_content.lower() for marker in (b"<!doctype", b"<!entity")
-        )
-    else:
-        forbidden_declaration = any(
-            marker in xml_content.lower() for marker in ("<!doctype", "<!entity")
-        )
-    if forbidden_declaration:
+    security_scan_text = _xml_security_scan_text(xml_content)
+    if any(marker in security_scan_text for marker in ("<!doctype", "<!entity")):
         raise ValueError("RSS payload contains a forbidden XML declaration")
-    # The fetcher bounds payload size and source hosts; declarations are rejected above.
+    # The fetcher bounds payload size and source hosts. Parse the original content so
+    # ElementTree retains its normal XML encoding detection after the normalized scan.
     return ET.fromstring(xml_content)  # noqa: S314
+
+
+def _xml_security_scan_text(xml_content: bytes | str) -> str:
+    """Return an encoding-normalized view for declaration screening."""
+
+    if isinstance(xml_content, str):
+        return xml_content.casefold()
+
+    prefix = xml_content[:4]
+    if prefix in {b"\x00\x00\xfe\xff", b"\xff\xfe\x00\x00"}:
+        encoding = "utf-32"
+    elif prefix == b"\x00\x00\x00<":
+        encoding = "utf-32-be"
+    elif prefix == b"<\x00\x00\x00":
+        encoding = "utf-32-le"
+    elif prefix[:2] in {b"\xfe\xff", b"\xff\xfe"}:
+        encoding = "utf-16"
+    elif prefix.startswith(b"\x00<\x00"):
+        encoding = "utf-16-be"
+    elif prefix.startswith(b"<\x00"):
+        encoding = "utf-16-le"
+    else:
+        # ASCII-compatible encodings preserve the declaration tokens byte-for-byte.
+        encoding = "latin-1"
+
+    try:
+        return xml_content.decode(encoding).casefold()
+    except UnicodeDecodeError:
+        raise ValueError("RSS payload encoding is invalid") from None
 
 
 def merge_events(events: Sequence[Event]) -> list[Event]:
