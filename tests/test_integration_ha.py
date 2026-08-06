@@ -391,15 +391,15 @@ def test_profile_and_webcal_validation_reject_unknown_or_unsafe_values() -> None
 
 
 def test_normalize_config_coerces_non_ui_boolean_strings() -> None:
-    disabled = {
-        key: "false"
-        for key in (
+    disabled = dict.fromkeys(
+        (
             CONF_INCLUDE_SANTORE,
             CONF_INCLUDE_INDEPENDENCE,
             CONF_INCLUDE_PARKWAY_CENTRAL,
             CONF_INCLUDE_PCI,
-        )
-    }
+        ),
+        "false",
+    )
 
     with pytest.raises(ValueError, match="branch_required"):
         normalize_config(USER_INPUT | disabled)

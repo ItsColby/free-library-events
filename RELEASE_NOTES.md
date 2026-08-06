@@ -28,8 +28,9 @@
   failure.
 - Run the latest Ruff, ShellCheck, actionlint, and zizmor releases in validation;
   enable Ruff's stable native, blind-exception, and Pylint convention checks;
-  retain ambiguous-Unicode detection; and ratchet complexity to the current
-  demonstrated ceiling.
+  retain ambiguous-Unicode detection; add focused network, cryptography, and
+  comprehension checks; and ratchet complexity to the current demonstrated
+  ceiling.
 - Pin every third-party GitHub Action to a full commit SHA, disable persisted
   checkout credentials, bound job runtimes, add weekly validation and
   Dependabot Actions updates, and expose one stable `Release gate` check.
