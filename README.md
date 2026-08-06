@@ -401,12 +401,13 @@ docker run --rm -v "${PWD}:/work" -w /work python:3.14-slim bash -lc "python -m 
 ```
 
 The protected GitHub workflow pins every third-party Action to a full commit
-SHA and runs the local tier, latest Ruff and mypy, zizmor auditor, both Home
-Assistant lanes, Hassfest, and the HACS Action. It reports the resolved static
-analysis tool versions. The stable **Release gate** succeeds only when every
-required job succeeds. Dependabot proposes weekly GitHub Actions updates after
-a seven-day stability and supply-chain cooldown. A release additionally waits
-for CodeQL analysis of the exact commit and inspects open alerts because a
+SHA and runs the local tier, latest Ruff, mypy, actionlint with ShellCheck,
+zizmor auditor, both Home Assistant lanes, Hassfest, and the HACS Action. It
+reports the resolved static-analysis tool versions. The stable **Release gate**
+succeeds only when every required job succeeds. Dependabot proposes weekly
+GitHub Actions updates after a seven-day stability and supply-chain cooldown. A
+release additionally waits for CodeQL analysis of the exact commit and inspects
+open alerts because a
 successful analysis workflow does not imply zero findings. See
 [`docs/architecture.md`](docs/architecture.md) for ownership and release
 boundaries.
