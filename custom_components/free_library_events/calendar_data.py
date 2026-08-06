@@ -47,7 +47,7 @@ def build_calendar_items(
 
     birth_date = date.fromisoformat(str(config[CONF_BIRTH_DATE]))
     filter_mode = str(config[CONF_FILTER_MODE])
-    duration = int(config[CONF_CALENDAR_DURATION])
+    duration = int(str(config[CONF_CALENDAR_DURATION]))
     items: list[LibraryCalendarItem] = []
     for event in events:
         if not event_is_active(event):

@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from homeassistant.components.button import ButtonEntity
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import EntityCategory
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -26,7 +27,7 @@ async def async_setup_entry(
     async_add_entities([LibraryRefreshButton(entry.runtime_data)])
 
 
-class LibraryRefreshButton(CoordinatorEntity, ButtonEntity):
+class LibraryRefreshButton(CoordinatorEntity[LibraryDataCoordinator], ButtonEntity):
     """Request an immediate refresh of the selected branch feeds."""
 
     _attr_has_entity_name = True
@@ -39,7 +40,9 @@ class LibraryRefreshButton(CoordinatorEntity, ButtonEntity):
         self._attr_unique_id = f"{DOMAIN}_refresh"
 
     @property
-    def device_info(self):
+    def device_info(self) -> DeviceInfo:
+        """Return the integration's user-facing device."""
+
         return service_device_info()
 
     async def async_press(self) -> None:

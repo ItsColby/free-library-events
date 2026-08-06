@@ -6,6 +6,7 @@ import logging
 import mimetypes
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+from typing import Any, Literal, cast
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntryState
@@ -172,7 +173,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: LibraryConfigEntry) ->
         return True
     try:
         data, options = migrated_entry_config(entry.data, entry.options)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         _LOGGER.exception("Could not migrate the Free Library Events config entry")
         return False
     hass.config_entries.async_update_entry(
@@ -276,8 +277,8 @@ async def _async_render_digest(call: ServiceCall) -> ServiceResponse:
             )
             if branch_distance is not None:
                 distance_by_branch_code[branch.code] = branch_distance
-    image_url_overrides = None
-    image_layout_overrides = None
+    image_url_overrides: dict[str, str] | None = None
+    image_layout_overrides: dict[str, Literal["side", "hero"]] | None = None
     embedded_image_paths: tuple[str, ...] = ()
     image_download_count = 0
     image_download_failure_count = 0
@@ -332,17 +333,20 @@ async def _async_render_digest(call: ServiceCall) -> ServiceResponse:
                 for event in included_events
             }
             image_layout_overrides = {
-                event_identity(event): stored_images.source_url_to_layout.get(
-                    event.image_url, "side"
+                event_identity(event): (
+                    "hero"
+                    if stored_images.source_url_to_layout.get(event.image_url) == "hero"
+                    else "side"
                 )
                 for event in included_events
             }
             embedded_image_paths = stored_images.paths
-            if stored_images.run_directory is not None:
+            run_directory = stored_images.run_directory
+            if run_directory is not None:
 
                 async def _async_remove_images(_now: datetime) -> None:
                     await hass.async_add_executor_job(
-                        remove_stored_image_run, stored_images.run_directory
+                        remove_stored_image_run, run_directory
                     )
 
                 async_call_later(hass, IMAGE_CACHE_TTL_SECONDS, _async_remove_images)
@@ -378,28 +382,26 @@ async def _async_render_digest(call: ServiceCall) -> ServiceResponse:
         image_layout_overrides=image_layout_overrides,
         distance_by_branch_code=distance_by_branch_code,
     )
-    response["metadata"]["expanded_capped_sources"] = source_expansion_details(
-        coordinator.data
-    )
-    response["metadata"]["fetched_at"] = coordinator.data.fetched_at.isoformat()
+    metadata = cast(dict[str, Any], response["metadata"])
+    metadata["expanded_capped_sources"] = source_expansion_details(coordinator.data)
+    metadata["fetched_at"] = coordinator.data.fetched_at.isoformat()
     if call.data[ATTR_EMBED_IMAGES]:
         embedded_image_paths = _referenced_embedded_image_paths(
-            str(response["html"]), embedded_image_paths
+            cast(str, response["html"]), embedded_image_paths
         )
         response["images"] = list(embedded_image_paths)
-        response["attachments"] = _smtp_attachments(
+        attachments = _smtp_attachments(
             embedded_image_paths,
             image_root=image_root,
             source_directory_id=source_directory_id,
         )
-        response["metadata"]["embedded_image_count"] = len(embedded_image_paths)
-        response["metadata"]["smtp_attachment_count"] = len(response["attachments"])
-        response["metadata"]["image_download_count"] = image_download_count
-        response["metadata"]["image_download_failure_count"] = (
-            image_download_failure_count
-        )
-        response["metadata"]["image_download_failure_examples"] = list(
+        response["attachments"] = attachments
+        metadata["embedded_image_count"] = len(embedded_image_paths)
+        metadata["smtp_attachment_count"] = len(attachments)
+        metadata["image_download_count"] = image_download_count
+        metadata["image_download_failure_count"] = image_download_failure_count
+        metadata["image_download_failure_examples"] = list(
             image_download_failure_examples
         )
-        response["metadata"]["image_expires_at"] = image_expires_at
-    return response
+        metadata["image_expires_at"] = image_expires_at
+    return cast(ServiceResponse, response)

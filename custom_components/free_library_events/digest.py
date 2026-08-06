@@ -598,8 +598,8 @@ def explicit_end_at(
             return end_at
     start_at = datetime.combine(event_date, start_time)
     for pattern in DURATION_RES:
-        if match := pattern.search(description):
-            duration = timedelta(minutes=int(match.group("minutes")))
+        if duration_match := pattern.search(description):
+            duration = timedelta(minutes=int(duration_match.group("minutes")))
             if timedelta(minutes=15) <= duration <= timedelta(hours=8):
                 return start_at + duration
     return None
@@ -790,7 +790,7 @@ def parse_feed(
 ) -> tuple[list[Event], int]:
     """Parse one official branch RSS feed."""
 
-    root = ET.fromstring(xml_content)
+    root = _safe_feed_root(xml_content)
     items = root.findall("./channel/item")
     events: list[Event] = []
     for item in items[:MAX_PARSED_RSS_ITEMS]:
@@ -802,7 +802,7 @@ def parse_feed(
             event_date = date.strptime(start_date_text, "%m/%d/%y")
             normalized_time = start_time_text.replace(".", "").strip()
             start_time = time.strptime(normalized_time, "%I:%M %p")
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         link = _safe_http_url(item.findtext("link") or "") or _safe_http_url(
             item.findtext("guid") or ""
@@ -847,6 +847,23 @@ def parse_feed(
             )
         )
     return events, len(items)
+
+
+def _safe_feed_root(xml_content: bytes | str) -> ET.Element:
+    """Parse a bounded RSS payload after rejecting DTD and entity declarations."""
+
+    if isinstance(xml_content, bytes):
+        forbidden_declaration = any(
+            marker in xml_content.lower() for marker in (b"<!doctype", b"<!entity")
+        )
+    else:
+        forbidden_declaration = any(
+            marker in xml_content.lower() for marker in ("<!doctype", "<!entity")
+        )
+    if forbidden_declaration:
+        raise ValueError("RSS payload contains a forbidden XML declaration")
+    # The fetcher bounds payload size and source hosts; declarations are rejected above.
+    return ET.fromstring(xml_content)  # noqa: S314
 
 
 def merge_events(events: Sequence[Event]) -> list[Event]:
@@ -1368,34 +1385,12 @@ def _description_paragraphs_html(event: Event) -> str:
     return "".join(rendered)
 
 
-def _event_chip_specs(event: Event) -> tuple[tuple[str, str], ...]:
-    """Return bounded, prioritized highlights provable from publisher wording."""
+def _logistics_chip_specs(
+    event: Event, searchable: str
+) -> tuple[list[tuple[str, str]], bool]:
+    """Return logistics chips and whether the event is a take-home craft."""
 
-    topic_chips: list[tuple[str, str]] = []
     logistics_chips: list[tuple[str, str]] = []
-    action_chips: list[tuple[str, str]] = []
-    searchable = f"{event.title}\n{event.description}"
-    activity_rules = (
-        (r"\bstorytimes?\b", r"\bstorytimes?\b", "Storytime"),
-        (
-            r"\bmusic program\b|\blive music\b|\bsing[ -]?along\b",
-            r"\bmusic\b|\bsing[ -]?along\b",
-            "Music",
-        ),
-        (r"\bplaygroups?\b", r"\bplaygroups?\b", "Playgroup"),
-        (r"\bplaytimes?\b", r"\bplaytimes?\b", "Playtime"),
-        (
-            r"\b(?:crafts?|crafting|crafternoon)\b",
-            r"\b(?:crafts?|crafting|crafternoon)\b",
-            "Crafts",
-        ),
-        (r"\bAAC\b", r"\bAAC\b", "AAC"),
-    )
-    for source_pattern, title_pattern, label in activity_rules:
-        if re.search(source_pattern, searchable, re.IGNORECASE) and not re.search(
-            title_pattern, event.title, re.IGNORECASE
-        ):
-            topic_chips.append(("topic", label))
     if re.search(r"\b(?:outdoor|outdoors|outside)\b", searchable, re.IGNORECASE) or (
         event.venue
         and re.search(
@@ -1411,7 +1406,6 @@ def _event_chip_specs(event: Event) -> tuple[tuple[str, str], ...]:
         re.IGNORECASE,
     )
     if take_home_craft:
-        topic_chips = [chip for chip in topic_chips if chip != ("topic", "Crafts")]
         logistics_chips.append(("logistics", "Take-home craft"))
     if re.search(r"\bsiblings? (?:are )?welcome\b", searchable, re.IGNORECASE):
         logistics_chips.append(("logistics", "Siblings welcome"))
@@ -1440,6 +1434,39 @@ def _event_chip_specs(event: Event) -> tuple[tuple[str, str], ...]:
     )
     if aac_board_provided and not aac_board_negated:
         logistics_chips.append(("logistics", "AAC board provided"))
+    return logistics_chips, take_home_craft is not None
+
+
+def _event_chip_specs(event: Event) -> tuple[tuple[str, str], ...]:
+    """Return bounded, prioritized highlights provable from publisher wording."""
+
+    topic_chips: list[tuple[str, str]] = []
+    action_chips: list[tuple[str, str]] = []
+    searchable = f"{event.title}\n{event.description}"
+    activity_rules = (
+        (r"\bstorytimes?\b", r"\bstorytimes?\b", "Storytime"),
+        (
+            r"\bmusic program\b|\blive music\b|\bsing[ -]?along\b",
+            r"\bmusic\b|\bsing[ -]?along\b",
+            "Music",
+        ),
+        (r"\bplaygroups?\b", r"\bplaygroups?\b", "Playgroup"),
+        (r"\bplaytimes?\b", r"\bplaytimes?\b", "Playtime"),
+        (
+            r"\b(?:crafts?|crafting|crafternoon)\b",
+            r"\b(?:crafts?|crafting|crafternoon)\b",
+            "Crafts",
+        ),
+        (r"\bAAC\b", r"\bAAC\b", "AAC"),
+    )
+    for source_pattern, title_pattern, label in activity_rules:
+        if re.search(source_pattern, searchable, re.IGNORECASE) and not re.search(
+            title_pattern, event.title, re.IGNORECASE
+        ):
+            topic_chips.append(("topic", label))
+    logistics_chips, take_home_craft = _logistics_chip_specs(event, searchable)
+    if take_home_craft:
+        topic_chips = [chip for chip in topic_chips if chip != ("topic", "Crafts")]
     weather_location_change = re.search(
         r"\b(?:cooler|warmer) weather\b|"
         r"\bweather\b[^.]{0,80}\b(?:indoors?|inside|move|moves|moved|"
