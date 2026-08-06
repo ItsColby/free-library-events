@@ -6,7 +6,6 @@ import unittest
 from datetime import date
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "custom_components" / "free_library_events" / "digest.py"
 SPEC = importlib.util.spec_from_file_location("free_library_events_digest", SCRIPT)
@@ -905,7 +904,7 @@ class DigestTests(unittest.TestCase):
         self.assertEqual(
             digest.normalize_child_name("  Avery\r\n Quinn  "), "Avery Quinn"
         )
-        with self.assertRaisesRegex(ValueError, "invalid_child_name"):
+        with self.assertRaisesRegex(TypeError, "invalid_child_name"):
             digest.normalize_child_name(None)
         with self.assertRaisesRegex(ValueError, "invalid_child_name"):
             digest.normalize_child_name("A" * (digest.MAX_CHILD_NAME_LENGTH + 1))

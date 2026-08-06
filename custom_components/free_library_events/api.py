@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import urllib.parse
 from dataclasses import dataclass, replace
 from datetime import date
-import urllib.parse
 
 import aiohttp
 

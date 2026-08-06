@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, timedelta
 import logging
 import mimetypes
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import voluptuous as vol
-
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import Platform
 from homeassistant.core import (
@@ -27,8 +26,8 @@ from homeassistant.util.location import distance
 from .api import LibraryClient
 from .config import entry_config, migrated_entry_config, selected_branches
 from .const import (
-    ATTR_FORCE_REFRESH,
     ATTR_EMBED_IMAGES,
+    ATTR_FORCE_REFRESH,
     CONF_BIRTH_DATE,
     CONF_CALENDAR_DURATION,
     CONF_CHILD_NAME,
@@ -41,10 +40,10 @@ from .const import (
 from .coordinator import (
     LibraryDataCoordinator,
     coverage_warnings,
-    supplemental_coverage,
     source_expansion_details,
     source_keys_for_window,
     source_label,
+    supplemental_coverage,
 )
 from .digest import (
     BRANCHES,
@@ -100,7 +99,7 @@ def _email_image_storage(hass: HomeAssistant) -> tuple[Path, str | None]:
         source_directory_id = (
             "local"
             if "local" in hass.config.media_dirs
-            else sorted(hass.config.media_dirs)[0]
+            else min(hass.config.media_dirs)
         )
         return (
             Path(hass.config.media_dirs[source_directory_id]) / EMAIL_IMAGE_DIRECTORY,

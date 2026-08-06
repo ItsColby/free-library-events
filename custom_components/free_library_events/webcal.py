@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
+import secrets
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import format_datetime
 from hashlib import sha256
 from http import HTTPStatus
-import secrets
 from urllib.parse import urlsplit, urlunsplit
 
 from aiohttp import web
-
 from homeassistant.components.http import KEY_HASS, HomeAssistantView
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant

@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
-import logging
-from typing import Sequence
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -27,8 +27,8 @@ from .digest import (
     BRANCHES,
     Branch,
     Event,
-    age_in_months,
     age_categories_for_window,
+    age_in_months,
     merge_events,
     next_week_start,
     source_age_categories_for_window,

@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import date
-from typing import Any, Mapping
+from typing import Any
 
 import voluptuous as vol
-
 from homeassistant.helpers import config_validation as cv
 from homeassistant.util import dt as dt_util
 
@@ -39,7 +39,6 @@ from .const import (
     MIN_SCAN_INTERVAL,
 )
 from .digest import BRANCHES, FILTER_MODES, Branch, normalize_child_name
-
 
 LEGACY_BRANCH_CONFIG_KEYS = (
     (CONF_INCLUDE_SANTORE, "SWK"),
@@ -119,7 +118,7 @@ def normalize_options(values: Mapping[str, Any]) -> dict[str, Any]:
         raise ValueError("invalid_config") from err
     webcal_name = config[CONF_WEBCAL_NAME]
     if not isinstance(webcal_name, str):
-        raise ValueError("invalid_webcal_name")
+        raise TypeError("invalid_webcal_name")
     webcal_name = " ".join(webcal_name.split())
     if not webcal_name or len(webcal_name) > MAX_WEBCAL_NAME_LENGTH:
         raise ValueError("invalid_webcal_name")

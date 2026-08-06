@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import date, time
 import os
-from pathlib import Path
 import tempfile
 import unittest
+from datetime import date, time
+from pathlib import Path
+from typing import Self
 from unittest.mock import patch
 
 from custom_components.free_library_events import email_images
@@ -38,7 +39,7 @@ class _Response:
         self.content = _Content(content)
         self.headers = headers or {}
 
-    async def __aenter__(self) -> _Response:
+    async def __aenter__(self) -> Self:
         return self
 
     async def __aexit__(self, *_args: object) -> None:
