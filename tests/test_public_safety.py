@@ -75,13 +75,21 @@ class PublicSafetyGuardTests(unittest.TestCase):
             {
                 "ASYNC",
                 "BLE",
+                "C4",
                 "C901",
                 "PERF",
                 "PLC",
                 "PLE",
                 "PLW",
                 "RUF",
+                "S104",
+                "S113",
+                "S310",
                 "S314",
+                "S324",
+                "S501",
+                "S506",
+                "S507",
                 "TID",
             }
             <= set(lint["extend-select"])
