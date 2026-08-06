@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
+from typing import Any
 
 from homeassistant.components.sensor import SensorEntity
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import EntityCategory
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
@@ -44,7 +46,7 @@ async def async_setup_entry(
     async_add_entities([LibraryStatusSensor(entry, entry.runtime_data)])
 
 
-class LibraryStatusSensor(CoordinatorEntity, SensorEntity):
+class LibraryStatusSensor(CoordinatorEntity[LibraryDataCoordinator], SensorEntity):
     """Compact operator status with useful nontechnical attributes."""
 
     _attr_has_entity_name = True
@@ -66,11 +68,13 @@ class LibraryStatusSensor(CoordinatorEntity, SensorEntity):
         return True
 
     @property
-    def _config(self) -> dict[str, object]:
+    def _config(self) -> dict[str, Any]:
         return entry_config(self._entry.data, self._entry.options)
 
     @property
-    def device_info(self):
+    def device_info(self) -> DeviceInfo:
+        """Return the integration's user-facing device."""
+
         return service_device_info()
 
     @property

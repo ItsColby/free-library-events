@@ -16,9 +16,8 @@ SPEC.loader.exec_module(digest)
 
 
 def rss(items: list[dict[str, str]]) -> str:
-    rows = []
-    for item in items:
-        rows.append(
+    rows = [
+        (
             "<item>"
             f"<title>{item['title']}</title>"
             f"<description><![CDATA[<p>{item['description']}</p> {item['date']}, {item['time']} - {item['branch']}]]></description>"
@@ -29,6 +28,8 @@ def rss(items: list[dict[str, str]]) -> str:
             f"<eventimage>{item.get('image_url', '')}</eventimage>"
             "</item>"
         )
+        for item in items
+    ]
     return "<?xml version='1.0'?><rss><channel>" + "".join(rows) + "</channel></rss>"
 
 
@@ -333,6 +334,18 @@ class DigestTests(unittest.TestCase):
             [event.link for event in events], ["https://example.test/good"]
         )
         self.assertEqual(events[0].age_categories, ("Baby",))
+
+    def test_parser_rejects_xml_declarations_that_enable_external_entities(
+        self,
+    ) -> None:
+        payload = (
+            "<?xml version='1.0'?>"
+            "<!DOCTYPE rss [<!ENTITY secret SYSTEM 'file:///private'>]>"
+            "<rss><channel><item><title>&secret;</title></item></channel></rss>"
+        )
+
+        with self.assertRaisesRegex(ValueError, "forbidden XML declaration"):
+            digest.parse_feed(payload, digest.BRANCHES["SWK"], "Baby")
 
     def test_parser_bounds_remote_item_fields_and_item_count(self) -> None:
         valid = {

@@ -12,9 +12,9 @@ from http import HTTPStatus
 from urllib.parse import urlsplit, urlunsplit
 
 from aiohttp import web
-from homeassistant.components.http import KEY_HASS, HomeAssistantView
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.http import KEY_HASS, HomeAssistantView
 from homeassistant.helpers.network import NoURLAvailableError, get_url
 
 from .calendar_data import LibraryCalendarItem, build_calendar_items

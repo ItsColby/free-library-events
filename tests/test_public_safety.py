@@ -6,6 +6,7 @@ import ast
 import json
 import subprocess
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -16,7 +17,7 @@ from scripts.check_public_safety import (
 
 
 class PublicSafetyGuardTests(unittest.TestCase):
-    def test_ruff_validation_is_pinned_and_documented(self) -> None:
+    def test_latest_ruff_and_strict_mypy_are_documented(self) -> None:
         root = Path(__file__).resolve().parents[1]
         workflow = (root / ".github/workflows/validate.yaml").read_text(
             encoding="utf-8"
@@ -24,9 +25,9 @@ class PublicSafetyGuardTests(unittest.TestCase):
         readme = (root / "README.md").read_text(encoding="utf-8")
         agents = (root / "AGENTS.md").read_text(encoding="utf-8")
         commands = (
-            "python -m pip install ruff==0.16.1",
             "python -m ruff format --check custom_components tests scripts",
             "python -m ruff check custom_components tests scripts",
+            "python -m mypy --strict custom_components/free_library_events",
         )
 
         for command in commands:
@@ -34,6 +35,35 @@ class PublicSafetyGuardTests(unittest.TestCase):
                 self.assertIn(command, workflow)
                 self.assertIn(command, readme)
                 self.assertIn(command, agents)
+
+        self.assertIn("python -m pip install --upgrade ruff", workflow)
+        self.assertIn("python -m pip install --upgrade mypy", workflow)
+        self.assertIn("python -m pip install --upgrade ruff mypy", readme)
+        self.assertIn("python -m pip install --upgrade ruff mypy", agents)
+        self.assertNotIn("ruff==", workflow)
+
+    def test_ruff_policy_is_repository_owned_and_high_signal(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        config = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+        ruff = config["tool"]["ruff"]
+        lint = ruff["lint"]
+
+        self.assertEqual("py314", ruff["target-version"])
+        self.assertNotIn("required-version", ruff)
+        self.assertEqual(20, lint["mccabe"]["max-complexity"])
+        self.assertTrue(
+            {
+                "ASYNC",
+                "C901",
+                "PERF",
+                "PLE",
+                "PLW",
+                "S314",
+                "TID",
+            }
+            <= set(lint["extend-select"])
+        )
+        self.assertEqual(["T20"], lint["per-file-ignores"]["scripts/**"])
 
     def test_home_assistant_harness_and_core_install_in_separate_steps(self) -> None:
         root = Path(__file__).resolve().parents[1]

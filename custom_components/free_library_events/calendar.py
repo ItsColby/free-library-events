@@ -6,6 +6,7 @@ from datetime import datetime
 
 from homeassistant.components.calendar import CalendarEntity, CalendarEvent
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
@@ -30,7 +31,7 @@ async def async_setup_entry(
     async_add_entities([LibraryCalendar(entry, entry.runtime_data)])
 
 
-class LibraryCalendar(CoordinatorEntity, CalendarEntity):
+class LibraryCalendar(CoordinatorEntity[LibraryDataCoordinator], CalendarEntity):
     """Calendar containing only events matching the configured person's age."""
 
     _attr_has_entity_name = True
@@ -45,7 +46,7 @@ class LibraryCalendar(CoordinatorEntity, CalendarEntity):
         self._attr_unique_id = f"{DOMAIN}_calendar"
 
     @property
-    def device_info(self):
+    def device_info(self) -> DeviceInfo:
         """Return the integration's user-facing device."""
 
         return service_device_info()

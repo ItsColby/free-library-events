@@ -14,6 +14,7 @@ from homeassistant.helpers.selector import (
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
+    SelectOptionDict,
     SelectSelector,
     SelectSelectorConfig,
     SelectSelectorMode,
@@ -71,7 +72,7 @@ def _profile_schema(defaults: dict[str, Any]) -> vol.Schema:
             ): SelectSelector(
                 SelectSelectorConfig(
                     options=[
-                        {"value": code, "label": branch.name}
+                        SelectOptionDict(value=code, label=branch.name)
                         for code, branch in BRANCHES.items()
                     ],
                     multiple=True,
