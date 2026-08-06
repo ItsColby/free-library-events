@@ -47,8 +47,41 @@ class PublicSafetyGuardTests(unittest.TestCase):
         self.assertIn("actionlint -version", workflow)
         self.assertIn("shellcheck --version", workflow)
         self.assertIn("run: actionlint", workflow)
-        self.assertIn("zizmor --persona auditor .", workflow)
-        self.assertIn("zizmor --persona auditor .", readme)
+        zizmor_command = "zizmor --strict-collection --persona auditor ."
+        self.assertIn("GH_TOKEN: ${{ github.token }}", workflow)
+        self.assertIn(zizmor_command, workflow)
+        self.assertLess(
+            workflow.index("GH_TOKEN: ${{ github.token }}"),
+            workflow.index(zizmor_command),
+        )
+        for document in (readme, agents):
+            with self.subTest(document="online local zizmor instructions"):
+                self.assertIn("$env:GH_TOKEN = gh auth token", document)
+                auth_guard = (
+                    'if (-not $env:GH_TOKEN) { throw "GitHub CLI '
+                    'authentication required" }'
+                )
+                self.assertIn(auth_guard, document)
+                audit_guard = 'if ($LASTEXITCODE -ne 0) { throw "zizmor audit failed" }'
+                self.assertIn(zizmor_command, document)
+                self.assertIn(audit_guard, document)
+                self.assertIn("Remove-Item Env:GH_TOKEN", document)
+                self.assertLess(
+                    document.index("$env:GH_TOKEN = gh auth token"),
+                    document.index(auth_guard),
+                )
+                self.assertLess(
+                    document.index(auth_guard),
+                    document.index(zizmor_command),
+                )
+                self.assertLess(
+                    document.index(zizmor_command),
+                    document.index(audit_guard),
+                )
+                self.assertLess(
+                    document.index(audit_guard),
+                    document.index("Remove-Item Env:GH_TOKEN"),
+                )
         self.assertIn("python -m mypy --version", workflow)
         self.assertIn(
             "python -m pip install --upgrade ruff mypy shellcheck-py zizmor", readme
