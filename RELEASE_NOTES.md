@@ -38,8 +38,8 @@
 
 ## Validation and security
 
-- Test the Home Assistant harness against both minimum Core `2026.7.1` and
-  current stable Core `2026.8.0`.
+- Align the HACS minimum and the single Home Assistant compatibility lane with
+  the maintained runtime, Core `2026.8.0`.
 - Guard the two-step harness/Core installation order with a static regression
   test so future dependency updates cannot silently restore the resolver
   failure.
@@ -58,7 +58,7 @@
   exception name without changing its fallback behavior.
 - Add zero-baseline Ruff Bugbear, timezone-awareness, and logging checks while
   retaining the existing debugger-statement rule.
-- Validate current stable Core `2026.8.0` with test harness `0.13.354`, whose
+- Validate Core `2026.8.0` with test harness `0.13.354`, whose
   dependency metadata now targets that final release directly.
 - Pin every third-party GitHub Action to a full commit SHA, disable persisted
   checkout credentials, bound job runtimes, add weekly validation and

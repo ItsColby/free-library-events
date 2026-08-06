@@ -137,34 +137,43 @@ class PublicSafetyGuardTests(unittest.TestCase):
         self.assertTrue({"RUF001", "RUF002", "RUF003"}.isdisjoint(lint["ignore"]))
         self.assertEqual(["T20"], lint["per-file-ignores"]["scripts/**"])
 
-    def test_home_assistant_harness_and_core_install_in_separate_steps(self) -> None:
+    def test_home_assistant_support_contract_is_single_current_lane(self) -> None:
         root = Path(__file__).resolve().parents[1]
         workflow = (root / ".github/workflows/validate.yaml").read_text(
             encoding="utf-8"
         )
         harness_install = (
-            'python -m pip install "pytest-homeassistant-custom-component=='
-            '$HARNESS_VERSION"'
+            'python -m pip install "pytest-homeassistant-custom-component==0.13.354"'
         )
-        requirements_install = 'python -m pip install --upgrade -r "$REQUIREMENTS_FILE"'
+        requirements_install = (
+            "python -m pip install --upgrade -r requirements-ha-test.txt"
+        )
 
-        self.assertIn("harness: 0.13.345", workflow)
-        self.assertIn("harness: 0.13.354", workflow)
-        self.assertIn("HARNESS_VERSION: ${{ matrix.harness }}", workflow)
-        self.assertIn("REQUIREMENTS_FILE: ${{ matrix.requirements }}", workflow)
+        self.assertIn("Home Assistant integration tests (Core 2026.8.0)", workflow)
         self.assertIn(harness_install, workflow)
         self.assertIn(requirements_install, workflow)
         self.assertLess(
             workflow.index(harness_install), workflow.index(requirements_install)
         )
-        for requirements in (
-            "requirements-ha-test.txt",
-            "requirements-ha-test-current.txt",
-        ):
-            self.assertNotIn(
-                "pytest-homeassistant-custom-component",
-                (root / requirements).read_text(encoding="utf-8"),
-            )
+        self.assertNotIn("matrix.", workflow)
+        self.assertEqual(
+            1,
+            workflow.count("pytest-homeassistant-custom-component=="),
+        )
+        self.assertEqual(
+            [root / "requirements-ha-test.txt"],
+            list(root.glob("requirements-ha-test*.txt")),
+        )
+
+        requirements = (root / "requirements-ha-test.txt").read_text(encoding="utf-8")
+        self.assertIn("homeassistant==2026.8.0", requirements)
+        self.assertNotIn("pytest-homeassistant-custom-component", requirements)
+        self.assertEqual(
+            "2026.8.0",
+            json.loads((root / "hacs.json").read_text(encoding="utf-8"))[
+                "homeassistant"
+            ],
+        )
 
     def test_user_visible_action_exceptions_are_translated(self) -> None:
         root = Path(__file__).resolve().parents[1]
