@@ -68,7 +68,7 @@ class StoredImageBundle:
     source_url_to_layout: dict[str, str] = field(default_factory=dict)
 
 
-class _ImageDownloadFailure(ValueError):
+class _ImageDownloadError(ValueError):
     """A classified image failure with an explicit remote-fallback policy."""
 
     def __init__(self, message: str, *, allow_remote_fallback: bool) -> None:
@@ -202,7 +202,7 @@ async def _async_download_one(
                             urllib.parse.urljoin(current_url, location)
                         )
                         if not redirected_url or redirect_count == 2:
-                            raise _ImageDownloadFailure(
+                            raise _ImageDownloadError(
                                 "unsafe or excessive image redirect",
                                 allow_remote_fallback=False,
                             )
@@ -212,18 +212,18 @@ async def _async_download_one(
                         response.status >= 500
                         or response.status in REMOTE_FALLBACK_HTTP_STATUSES
                     ):
-                        raise _ImageDownloadFailure(
+                        raise _ImageDownloadError(
                             f"HTTP {response.status}", allow_remote_fallback=True
                         )
                     if response.status != 200:
-                        raise _ImageDownloadFailure(
+                        raise _ImageDownloadError(
                             f"HTTP {response.status}", allow_remote_fallback=False
                         )
                     if (
                         response.content_length is not None
                         and response.content_length > MAX_IMAGE_BYTES
                     ):
-                        raise _ImageDownloadFailure(
+                        raise _ImageDownloadError(
                             "image exceeds the per-file size limit",
                             allow_remote_fallback=False,
                         )
@@ -234,24 +234,24 @@ async def _async_download_one(
                     except asyncio.IncompleteReadError as err:
                         content = err.partial
                     else:
-                        raise _ImageDownloadFailure(
+                        raise _ImageDownloadError(
                             "image exceeds the per-file size limit",
                             allow_remote_fallback=False,
                         )
                     break
             else:
-                raise _ImageDownloadFailure(
+                raise _ImageDownloadError(
                     "excessive image redirects", allow_remote_fallback=False
                 )
-    except _ImageDownloadFailure:
+    except _ImageDownloadError:
         raise
     except (TimeoutError, aiohttp.ClientError) as err:
-        raise _ImageDownloadFailure(
+        raise _ImageDownloadError(
             str(err) or type(err).__name__, allow_remote_fallback=True
         ) from err
     extension = _image_extension(content)
     if not extension:
-        raise _ImageDownloadFailure(
+        raise _ImageDownloadError(
             "response is not a supported email image",
             allow_remote_fallback=False,
         )
@@ -284,10 +284,7 @@ async def async_download_event_images(
             raise result
         if isinstance(result, BaseException):
             failures.append(f"{title}: {result}")
-            if (
-                isinstance(result, _ImageDownloadFailure)
-                and result.allow_remote_fallback
-            ):
+            if isinstance(result, _ImageDownloadError) and result.allow_remote_fallback:
                 fallback_urls.append(source_url)
             continue
         content, extension = result
