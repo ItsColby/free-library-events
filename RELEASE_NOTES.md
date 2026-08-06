@@ -10,6 +10,8 @@
 - Install the Home Assistant test harness before upgrading to the exact Core
   release under test, avoiding resolver failures when the newest harness still
   declares a matching beta Core dependency.
+- Reject DTD and entity declarations before parsing RSS, including multibyte
+  UTF-16 and UTF-32 payloads, while continuing to accept benign UTF-16 feeds.
 
 ## Changed
 
@@ -24,6 +26,9 @@
 - Guard the two-step harness/Core installation order with a static regression
   test so future dependency updates cannot silently restore the resolver
   failure.
+- Run the latest Ruff, ShellCheck, actionlint, and zizmor releases in validation,
+  and enable Ruff's stable native correctness rules while
+  retaining intentional user-facing Unicode typography.
 - Pin every third-party GitHub Action to a full commit SHA, disable persisted
   checkout credentials, bound job runtimes, add weekly validation and
   Dependabot Actions updates, and expose one stable `Release gate` check.
