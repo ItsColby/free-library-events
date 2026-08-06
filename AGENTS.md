@@ -57,16 +57,23 @@ python scripts/check_public_safety.py
 Before integration or release, use Python 3.14 and run the full local tier:
 
 ```powershell
-python -m pip install --upgrade ruff mypy
+python -m pip install --upgrade ruff mypy zizmor
 python -m ruff format --check custom_components tests scripts
 python -m ruff check custom_components tests scripts
 python -m mypy --strict custom_components/free_library_events
+zizmor --persona auditor .
 python -m unittest discover -s tests -p "test_digest.py"
 python -m unittest discover -s tests -p "test_public_safety.py"
 python -m compileall -q custom_components\free_library_events tests scripts
 python scripts\check_public_safety.py
 python -c "import json, pathlib; [json.loads(pathlib.Path(path).read_text(encoding='utf-8')) for path in ['custom_components/free_library_events/manifest.json','custom_components/free_library_events/translations/en.json','hacs.json']]"
 ```
+
+Before creating an immutable release, wait for CodeQL analysis of the exact
+candidate/default-branch commit and inspect the repository's open code-scanning
+alerts. A successful CodeQL workflow proves analysis completed, not that the
+result has no findings. Resolve or explicitly disposition candidate-introduced
+alerts before tagging.
 
 Home Assistant tests run against both the minimum supported Core release and
 the current deployed Core release:

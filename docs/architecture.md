@@ -217,14 +217,18 @@ page available outside the integration for schedule changes.
 ## Release Contract
 
 1. Use Python 3.14 and run unit, HA integration, compile, JSON, privacy,
-   Hassfest, and HACS validation.
+   Ruff, strict mypy, zizmor auditor, Hassfest, and HACS validation.
 2. Compare the official RSS builder's age and event-type options with the local
    source taxonomy; the runtime builder route is browser-protected, so this is a
    release-time drift check rather than an unreliable polling dependency.
 3. Keep `manifest.json` version, Git tag, and release title aligned.
-4. Publish an immutable `vYYYY.M.D` release from the validated commit.
-5. Install or update only through HACS using an exact release.
-6. Restart Home Assistant after installation or update and verify the config
+4. Wait for CodeQL analysis of the exact candidate/default-branch commit,
+   inspect open code-scanning alerts, and resolve or explicitly disposition
+   candidate-introduced findings. CodeQL workflow success proves completion of
+   analysis, not a clean result.
+5. Publish an immutable `vYYYY.M.D` release from the validated commit.
+6. Install or update only through HACS using an exact release.
+7. Restart Home Assistant after installation or update and verify the config
    entry, entities, action, diagnostics, logs, Repairs, and update entity.
 
 Maintainer-specific backup, deployment readback, rollback, and household

@@ -38,9 +38,15 @@ class PublicSafetyGuardTests(unittest.TestCase):
 
         self.assertIn("python -m pip install --upgrade ruff", workflow)
         self.assertIn("python -m pip install --upgrade mypy", workflow)
-        self.assertIn("python -m pip install --upgrade ruff mypy", readme)
-        self.assertIn("python -m pip install --upgrade ruff mypy", agents)
+        self.assertIn("zizmor --persona auditor .", workflow)
+        self.assertIn("zizmor --persona auditor .", readme)
+        self.assertIn("python -m mypy --version", workflow)
+        self.assertIn("python -m pip install --upgrade ruff mypy zizmor", readme)
+        self.assertIn("python -m pip install --upgrade ruff mypy zizmor", agents)
         self.assertNotIn("ruff==", workflow)
+
+        dependabot = (root / ".github/dependabot.yml").read_text(encoding="utf-8")
+        self.assertIn("default-days: 7", dependabot)
 
     def test_ruff_policy_is_repository_owned_and_high_signal(self) -> None:
         root = Path(__file__).resolve().parents[1]
@@ -71,15 +77,15 @@ class PublicSafetyGuardTests(unittest.TestCase):
             encoding="utf-8"
         )
         harness_install = (
-            "python -m pip install "
-            "pytest-homeassistant-custom-component==${{ matrix.harness }}"
+            'python -m pip install "pytest-homeassistant-custom-component=='
+            '$HARNESS_VERSION"'
         )
-        requirements_install = (
-            "python -m pip install --upgrade -r ${{ matrix.requirements }}"
-        )
+        requirements_install = 'python -m pip install --upgrade -r "$REQUIREMENTS_FILE"'
 
         self.assertIn("harness: 0.13.345", workflow)
         self.assertIn("harness: 0.13.353", workflow)
+        self.assertIn("HARNESS_VERSION: ${{ matrix.harness }}", workflow)
+        self.assertIn("REQUIREMENTS_FILE: ${{ matrix.requirements }}", workflow)
         self.assertIn(harness_install, workflow)
         self.assertIn(requirements_install, workflow)
         self.assertLess(
@@ -162,6 +168,20 @@ class PublicSafetyGuardTests(unittest.TestCase):
         sample = (("segment" + ".") * 10_000) + "local"
         self.assertIn("local hostname", _text_failures(sample))
 
+    def test_local_hostname_detection_preserves_embedded_suffix_semantics(self) -> None:
+        self.assertIn(
+            "local hostname",
+            _text_failures("router" + ".local.example"),
+        )
+        self.assertIn(
+            "local hostname",
+            _text_failures("router" + ".local..example"),
+        )
+        self.assertNotIn(
+            "local hostname",
+            _text_failures("local" + ".example"),
+        )
+
     def test_public_examples_and_github_noreply_are_allowed(self) -> None:
         text = (
             "person@example.com person@example.test "
@@ -169,10 +189,55 @@ class PublicSafetyGuardTests(unittest.TestCase):
         )
         self.assertEqual(set(), _text_failures(text))
 
+    def test_email_detection_preserves_sentence_punctuation(self) -> None:
+        self.assertIn(
+            "non-example email address",
+            _text_failures("Contact person" + "@real-domain.dev."),
+        )
+        self.assertIn(
+            "non-example email address",
+            _text_failures("Contact person" + "@real-domain.dev-suffix"),
+        )
+        self.assertEqual(set(), _text_failures("Contact person@example.com."))
+        self.assertEqual(set(), _text_failures("Contact .noreply@github.com"))
+
+    def test_email_detection_rejects_malformed_domain_prefix(self) -> None:
+        self.assertNotIn(
+            "non-example email address",
+            _text_failures("Malformed @" + ".cX"),
+        )
+
     def test_guard_scans_tracked_and_untracked_text(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "README.md").write_text("Safe public text.\n", encoding="utf-8")
+            file_count, failures = run_guard(root)
+        self.assertEqual(1, file_count)
+        self.assertEqual([], failures)
+
+    def test_guard_scans_text_without_a_file_extension(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".gitignore").write_text("Safe public text.\n", encoding="utf-8")
+            file_count, failures = run_guard(root)
+        self.assertEqual(1, file_count)
+        self.assertEqual([], failures)
+
+    def test_guard_rejects_unreviewed_binary_content(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "image.png").write_bytes(b"\x89PNG\r\n\x1a\n\x00private")
+            file_count, failures = run_guard(root)
+        self.assertEqual(1, file_count)
+        self.assertEqual(["image.png: unreviewed binary content"], failures)
+
+    def test_guard_ignores_generated_cache_directories_without_git(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "README.md").write_text("Safe public text.\n", encoding="utf-8")
+            cache = root / ".ruff_cache"
+            cache.mkdir()
+            (cache / "cache.bin").write_bytes(b"\x00generated")
             file_count, failures = run_guard(root)
         self.assertEqual(1, file_count)
         self.assertEqual([], failures)
