@@ -387,7 +387,7 @@ Python 3.14 is required for the minimum Home Assistant 2026.7.1 and current
 Home Assistant 2026.8.0 test boundaries.
 
 ```powershell
-python -m pip install --upgrade ruff mypy zizmor
+python -m pip install --upgrade ruff mypy shellcheck-py zizmor
 python -m ruff format --check custom_components tests scripts
 python -m ruff check custom_components tests scripts
 python -m mypy --strict custom_components/free_library_events
@@ -401,7 +401,7 @@ docker run --rm -v "${PWD}:/work" -w /work python:3.14-slim bash -lc "python -m 
 ```
 
 The protected GitHub workflow pins every third-party Action to a full commit
-SHA and runs the local tier, latest Ruff, mypy, actionlint with ShellCheck,
+SHA and runs the local tier, latest Ruff, mypy, actionlint with latest ShellCheck,
 zizmor auditor, both Home Assistant lanes, Hassfest, and the HACS Action. It
 reports the resolved static-analysis tool versions. The stable **Release gate**
 succeeds only when every required job succeeds. Dependabot proposes weekly

@@ -41,8 +41,8 @@ improves future work.
 ## Validation
 
 After changing `.github/workflows`, run `actionlint` from the repository root.
-Keep `shellcheck` available on `PATH`; actionlint uses it automatically for
-Bash and `sh` `run:` steps.
+Keep the latest `shellcheck` available on `PATH`; the `shellcheck-py` package
+provides it and actionlint uses it automatically for Bash and `sh` `run:` steps.
 
 For focused iteration, run the directly affected unittest module, compile the
 changed package/test surface, and always run the public-safety guard when the
@@ -57,7 +57,7 @@ python scripts/check_public_safety.py
 Before integration or release, use Python 3.14 and run the full local tier:
 
 ```powershell
-python -m pip install --upgrade ruff mypy zizmor
+python -m pip install --upgrade ruff mypy shellcheck-py zizmor
 python -m ruff format --check custom_components tests scripts
 python -m ruff check custom_components tests scripts
 python -m mypy --strict custom_components/free_library_events

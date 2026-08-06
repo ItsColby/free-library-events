@@ -36,7 +36,9 @@ class PublicSafetyGuardTests(unittest.TestCase):
                 self.assertIn(command, readme)
                 self.assertIn(command, agents)
 
-        self.assertIn("python -m pip install --upgrade ruff", workflow)
+        self.assertIn(
+            "python -m pip install --upgrade ruff shellcheck-py zizmor", workflow
+        )
         self.assertIn("python -m pip install --upgrade mypy", workflow)
         self.assertIn(
             "go install github.com/rhysd/actionlint/cmd/actionlint@latest",
@@ -48,9 +50,14 @@ class PublicSafetyGuardTests(unittest.TestCase):
         self.assertIn("zizmor --persona auditor .", workflow)
         self.assertIn("zizmor --persona auditor .", readme)
         self.assertIn("python -m mypy --version", workflow)
-        self.assertIn("python -m pip install --upgrade ruff mypy zizmor", readme)
-        self.assertIn("python -m pip install --upgrade ruff mypy zizmor", agents)
+        self.assertIn(
+            "python -m pip install --upgrade ruff mypy shellcheck-py zizmor", readme
+        )
+        self.assertIn(
+            "python -m pip install --upgrade ruff mypy shellcheck-py zizmor", agents
+        )
         self.assertNotIn("ruff==", workflow)
+        self.assertNotIn("shellcheck-py==", workflow)
 
         dependabot = (root / ".github/dependabot.yml").read_text(encoding="utf-8")
         self.assertIn("default-days: 7", dependabot)
