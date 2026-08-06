@@ -247,7 +247,7 @@ async def _async_download_one(
         raise
     except (TimeoutError, aiohttp.ClientError) as err:
         raise _ImageDownloadError(
-            str(err) or type(err).__name__, allow_remote_fallback=True
+            "publisher image request failed", allow_remote_fallback=True
         ) from err
     extension = _image_extension(content)
     if not extension:
@@ -283,9 +283,12 @@ async def async_download_event_images(
         if isinstance(result, asyncio.CancelledError):
             raise result
         if isinstance(result, BaseException):
-            failures.append(f"{title}: {result}")
-            if isinstance(result, _ImageDownloadError) and result.allow_remote_fallback:
-                fallback_urls.append(source_url)
+            if isinstance(result, _ImageDownloadError):
+                failures.append(f"{title}: {result}")
+                if result.allow_remote_fallback:
+                    fallback_urls.append(source_url)
+            else:
+                failures.append(f"{title}: unexpected image failure")
             continue
         content, extension = result
         if total_bytes + len(content) > MAX_TOTAL_IMAGE_BYTES:

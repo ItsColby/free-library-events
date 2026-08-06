@@ -159,9 +159,15 @@
   receive unusable CID references.
 - `diagnostics.py` redacts the person's display name and birth date and exposes
   only bounded per-source counts, type-expansion evidence, ordering, coverage
-  boundaries, and health. High-volume shard failures remain available in
-  on-demand diagnostics; entity state and action-response metadata retain a
-  count and three examples.
+  boundaries, and health. Source and coordinator failures use allow-listed
+  categories, while unexpected image and storage failures use fixed bounded
+  summaries rather than arbitrary exception text. Finite shard failures remain
+  available in on-demand diagnostics; entity state and action-response metadata
+  retain a count and three examples.
+
+The reusable Home Assistant engineering contracts and their evidence-backed
+non-applicability decisions are recorded in
+[`cross-project-contract-review.md`](cross-project-contract-review.md).
 
 ## Supported Source Boundary
 

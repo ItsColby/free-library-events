@@ -2,6 +2,9 @@
 
 ## Fixed
 
+- Replace raw source, image-transport, storage, and coordinator exception text
+  with bounded allow-listed categories or fixed safe summaries in logs,
+  diagnostics, status evidence, and action-response metadata.
 - Translate all user-visible `render_digest` action errors through Home
   Assistant's exception translation contract.
 - Replace the public-safety guard's potentially exponential local-hostname
@@ -39,7 +42,8 @@
   dependency metadata now targets that final release directly.
 - Pin every third-party GitHub Action to a full commit SHA, disable persisted
   checkout credentials, bound job runtimes, add weekly validation and
-  Dependabot Actions updates, and expose one stable `Release gate` check.
+  Dependabot Actions and Python dependency updates, and expose one stable
+  `Release gate` check.
 
 # Free Library Events v2026.7.29
 

@@ -38,6 +38,7 @@ from custom_components.free_library_events.api import (
     MAX_RSS_REQUEST_CONCURRENCY,
     MAX_RSS_RESPONSE_BYTES,
     OFFICIAL_EVENT_TYPES,
+    SOURCE_ERROR_REQUEST_FAILED,
     BranchFeed,
     LibraryApiError,
     LibraryClient,
@@ -684,6 +685,10 @@ async def test_setup_entities_action_and_redacted_diagnostics(
     assert remote_fallback["attachments"] == []
     assert remote_fallback["metadata"]["smtp_attachment_count"] == 0
     assert remote_fallback["metadata"]["image_download_failure_count"] == 2
+    assert remote_fallback["metadata"]["image_download_failure_examples"] == [
+        "Home Assistant could not store digest images"
+    ]
+    assert "storage unavailable" not in repr(remote_fallback)
     assert f'src="{image_url}"' in remote_fallback["html"]
 
     diagnostics = await async_get_config_entry_diagnostics(hass, entry)
@@ -1140,7 +1145,7 @@ async def test_client_keeps_recovered_rows_but_discloses_a_shard_failure() -> No
         if event_type is None:
             return base_feed
         if event_type == OFFICIAL_EVENT_TYPES[0]:
-            raise LibraryApiError("offline")
+            raise LibraryApiError(SOURCE_ERROR_REQUEST_FAILED)
         return BranchFeed(
             events=(event,),
             age_category=age_category,
@@ -1562,7 +1567,7 @@ def test_supplemental_coverage_separates_failures_from_feed_limits() -> None:
     )
     data = types.SimpleNamespace(
         source_statuses={"SWK:School Age": limited, "CEN:Preschool": malformed},
-        source_errors={"PCI:Young Adult": "offline"},
+        source_errors={"PCI:Young Adult": SOURCE_ERROR_REQUEST_FAILED},
     )
 
     failures, limitations = supplemental_coverage(
@@ -1577,7 +1582,9 @@ def test_supplemental_coverage_separates_failures_from_feed_limits() -> None:
         "Parkway Central Library" in item and "only 3" in item for item in failures
     )
     assert any(
-        "Philadelphia City Institute" in item and "offline" in item for item in failures
+        "Philadelphia City Institute" in item
+        and "library source request failed" in item
+        for item in failures
     )
     assert len(limitations) == 1
     assert "Charles Santore Library" in limitations[0]
@@ -1701,7 +1708,7 @@ async def test_digest_discloses_an_operational_supplemental_failure(
 
     async def fetch_feed(branch, age_category, _coverage_end=None):
         if branch.code == "SWK" and age_category == "Young Adult":
-            raise LibraryApiError("offline")
+            raise LibraryApiError(SOURCE_ERROR_REQUEST_FAILED)
         event = Event(
             title="Baby Storytime",
             event_date=date(2026, 7, 22),
@@ -1745,7 +1752,10 @@ async def test_digest_discloses_an_operational_supplemental_failure(
     assert "Charles Santore Library — Young Adult" not in response["message"]
     assert "offline" not in response["message"]
     assert response["metadata"]["supplemental_age_failures"] == [
-        "Charles Santore Library — Young Adult could not be loaded: offline"
+        (
+            "Charles Santore Library — Young Adult could not be loaded: "
+            "library source request failed"
+        )
     ]
 
 
@@ -1765,7 +1775,7 @@ async def test_coordinator_retains_partial_source_success(
     async def fetch_feed(_branch, age_category, _coverage_end=None):
         if age_category == "Baby":
             return success
-        raise LibraryApiError("source unavailable")
+        raise LibraryApiError(SOURCE_ERROR_REQUEST_FAILED)
 
     client = types.SimpleNamespace(async_fetch_feed=AsyncMock(side_effect=fetch_feed))
     coordinator = LibraryDataCoordinator(
@@ -1779,12 +1789,63 @@ async def test_coordinator_retains_partial_source_success(
     data = await coordinator._async_update_data()
     assert data.source_counts == {"SWK": 0}
     assert data.source_errors == {
-        "SWK:Toddler": "source unavailable",
-        "SWK:Preschool": "source unavailable",
-        "SWK:School Age": "source unavailable",
-        "SWK:Young Adult": "source unavailable",
+        "SWK:Toddler": SOURCE_ERROR_REQUEST_FAILED,
+        "SWK:Preschool": SOURCE_ERROR_REQUEST_FAILED,
+        "SWK:School Age": SOURCE_ERROR_REQUEST_FAILED,
+        "SWK:Young Adult": SOURCE_ERROR_REQUEST_FAILED,
     }
     assert list(data.source_statuses) == ["SWK:Baby"]
+
+
+async def test_coordinator_does_not_retain_unexpected_exception_text(
+    hass: HomeAssistant,
+) -> None:
+    entry = _entry()
+    private_detail = "synthetic private source detail"
+    success = BranchFeed(
+        events=(),
+        age_category="Baby",
+        source_count=0,
+        parsed_count=0,
+        last_event_date=None,
+        ordered=True,
+    )
+
+    async def fetch_feed(_branch, age_category, _coverage_end=None):
+        if age_category == "Baby":
+            return success
+        raise RuntimeError(private_detail)
+
+    coordinator = LibraryDataCoordinator(
+        hass,
+        entry,
+        types.SimpleNamespace(async_fetch_feed=AsyncMock(side_effect=fetch_feed)),
+        (BRANCHES["SWK"],),
+        date(2025, 1, 15),
+        timedelta(hours=6),
+    )
+
+    data = await coordinator._async_update_data()
+
+    assert set(data.source_errors.values()) == {"unexpected source failure"}
+    assert private_detail not in repr(data)
+
+
+async def test_diagnostics_categorize_unexpected_coordinator_exception(
+    hass: HomeAssistant,
+) -> None:
+    entry = _entry()
+    private_detail = "synthetic private coordinator detail"
+    entry.runtime_data = types.SimpleNamespace(
+        data=None,
+        last_update_success=False,
+        last_exception=RuntimeError(private_detail),
+    )
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert diagnostics["coordinator"]["last_error_category"] == "unexpected"
+    assert private_detail not in repr(diagnostics)
 
 
 async def test_coordinator_rejects_complete_source_failure(
@@ -1792,7 +1853,9 @@ async def test_coordinator_rejects_complete_source_failure(
 ) -> None:
     entry = _entry()
     client = types.SimpleNamespace(
-        async_fetch_feed=AsyncMock(side_effect=LibraryApiError("offline"))
+        async_fetch_feed=AsyncMock(
+            side_effect=LibraryApiError(SOURCE_ERROR_REQUEST_FAILED)
+        )
     )
     coordinator = LibraryDataCoordinator(
         hass,
@@ -1802,7 +1865,7 @@ async def test_coordinator_rejects_complete_source_failure(
         date(2025, 1, 15),
         timedelta(hours=6),
     )
-    with pytest.raises(UpdateFailed, match="offline"):
+    with pytest.raises(UpdateFailed, match=SOURCE_ERROR_REQUEST_FAILED):
         await coordinator._async_update_data()
 
 

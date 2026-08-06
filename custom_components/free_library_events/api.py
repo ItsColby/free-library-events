@@ -38,9 +38,62 @@ OFFICIAL_EVENT_TYPES = (
     "Workshops and Enrichment",
 )
 
+SOURCE_ERROR_REQUEST_FAILED = "request_failed"
+SOURCE_ERROR_INVALID_FEED = "invalid_feed"
+SOURCE_ERROR_PARSE_FAILED = "parse_failed"
+SOURCE_ERROR_RESPONSE_TOO_LARGE = "response_too_large"
+SOURCE_ERROR_UNSAFE_REDIRECT = "unsafe_redirect"
+SOURCE_ERROR_EXPANSION_TIMEOUT = "expansion_timeout"
+SOURCE_ERROR_UNEXPECTED = "unexpected_failure"
+SOURCE_ERROR_CATEGORIES = frozenset(
+    {
+        SOURCE_ERROR_REQUEST_FAILED,
+        SOURCE_ERROR_INVALID_FEED,
+        SOURCE_ERROR_PARSE_FAILED,
+        SOURCE_ERROR_RESPONSE_TOO_LARGE,
+        SOURCE_ERROR_UNSAFE_REDIRECT,
+        SOURCE_ERROR_EXPANSION_TIMEOUT,
+        SOURCE_ERROR_UNEXPECTED,
+    }
+)
+
+SOURCE_ERROR_DESCRIPTIONS = {
+    SOURCE_ERROR_REQUEST_FAILED: "library source request failed",
+    SOURCE_ERROR_INVALID_FEED: "library source returned invalid event data",
+    SOURCE_ERROR_PARSE_FAILED: "library source could not be parsed",
+    SOURCE_ERROR_RESPONSE_TOO_LARGE: "library source response exceeded its size limit",
+    SOURCE_ERROR_UNSAFE_REDIRECT: "library source used an unsafe redirect",
+    SOURCE_ERROR_EXPANSION_TIMEOUT: "library source expansion timed out",
+    SOURCE_ERROR_UNEXPECTED: "unexpected source failure",
+}
+
 
 class LibraryApiError(Exception):
     """Raised when a branch feed cannot be loaded or parsed."""
+
+    def __init__(self, category: str) -> None:
+        safe_category = (
+            category if category in SOURCE_ERROR_CATEGORIES else SOURCE_ERROR_UNEXPECTED
+        )
+        super().__init__(safe_category)
+        self.category = safe_category
+
+
+def source_error_category(error: BaseException) -> str:
+    """Return an allow-listed category without retaining exception text."""
+
+    if isinstance(error, LibraryApiError):
+        return error.category
+    return SOURCE_ERROR_UNEXPECTED
+
+
+def source_error_description(category: str) -> str:
+    """Return a bounded public-safe description for a source error category."""
+
+    return SOURCE_ERROR_DESCRIPTIONS.get(
+        category,
+        SOURCE_ERROR_DESCRIPTIONS[SOURCE_ERROR_UNEXPECTED],
+    )
 
 
 def _is_trusted_rss_url(url: str) -> bool:
@@ -101,7 +154,7 @@ class LibraryClient:
         current_url = url
         for redirect_count in range(MAX_RSS_REDIRECTS + 1):
             if not _is_trusted_rss_url(current_url):
-                raise LibraryApiError("unsafe RSS redirect target")
+                raise LibraryApiError(SOURCE_ERROR_UNSAFE_REDIRECT)
             async with self._session.get(
                 current_url,
                 allow_redirects=False,
@@ -111,7 +164,7 @@ class LibraryClient:
                 if 300 <= response.status < 400:
                     location = response.headers.get("Location", "")
                     if not location or redirect_count == MAX_RSS_REDIRECTS:
-                        raise LibraryApiError("unsafe or excessive RSS redirect")
+                        raise LibraryApiError(SOURCE_ERROR_UNSAFE_REDIRECT)
                     current_url = urllib.parse.urljoin(current_url, location)
                     continue
                 response.raise_for_status()
@@ -119,10 +172,8 @@ class LibraryClient:
                     await response.content.readexactly(MAX_RSS_RESPONSE_BYTES + 1)
                 except asyncio.IncompleteReadError as err:
                     return err.partial
-                raise LibraryApiError(
-                    f"RSS response exceeded {MAX_RSS_RESPONSE_BYTES} bytes"
-                )
-        raise LibraryApiError("excessive RSS redirects")
+                raise LibraryApiError(SOURCE_ERROR_RESPONSE_TOO_LARGE)
+        raise LibraryApiError(SOURCE_ERROR_UNSAFE_REDIRECT)
 
     async def async_fetch_feed(
         self,
@@ -156,7 +207,7 @@ class LibraryClient:
             if isinstance(result, asyncio.CancelledError):
                 raise result
             if isinstance(result, BaseException):
-                failures.append(f"{event_type}: {result}")
+                failures.append(f"{event_type}: {source_error_category(result)}")
                 continue
             if not isinstance(result, BranchFeed):
                 failures.append(f"{event_type}: unexpected response")
@@ -206,15 +257,11 @@ class LibraryClient:
             if event_type
             else branch.rss_url_for_age(age_category)
         )
-        source_name = f"{branch.name} {age_category}"
-        if event_type:
-            source_name += f" {event_type}"
-
         try:
             async with self._request_semaphore:
                 payload = await self._async_get(url)
         except (TimeoutError, aiohttp.ClientError) as err:
-            raise LibraryApiError(f"Unable to load {source_name} feed") from err
+            raise LibraryApiError(SOURCE_ERROR_REQUEST_FAILED) from err
 
         try:
             events, source_count = await asyncio.to_thread(
@@ -224,11 +271,9 @@ class LibraryClient:
                 age_category,
             )
         except (ValueError, TypeError) as err:
-            raise LibraryApiError(
-                f"Invalid event data from {source_name} feed"
-            ) from err
+            raise LibraryApiError(SOURCE_ERROR_INVALID_FEED) from err
         except Exception as err:
-            raise LibraryApiError(f"Unable to parse {source_name} feed") from err
+            raise LibraryApiError(SOURCE_ERROR_PARSE_FAILED) from err
 
         event_dates = [event.event_date for event in events]
         return BranchFeed(
