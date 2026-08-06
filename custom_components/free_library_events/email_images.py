@@ -245,10 +245,10 @@ async def _async_download_one(
                 )
     except _ImageDownloadError:
         raise
-    except (TimeoutError, aiohttp.ClientError) as err:
+    except TimeoutError, aiohttp.ClientError:
         raise _ImageDownloadError(
             "publisher image request failed", allow_remote_fallback=True
-        ) from err
+        ) from None
     extension = _image_extension(content)
     if not extension:
         raise _ImageDownloadError(

@@ -113,7 +113,9 @@ Home Assistant shows both the canonical HTTP(S) URL and the `webcal://`
 convenience URL before saving. It also distinguishes an external or Home
 Assistant Cloud URL from an internal-only URL without claiming that an
 unverified proxy is reachable. Regenerating the URL immediately invalidates the
-old token after reload; disabling publishing removes it.
+old token after reload; disabling publishing removes it. If Home Assistant has
+neither an internal nor external URL available, the flow refuses to save a new
+token and explains which URL prerequisite is missing.
 
 ### Match modes
 
@@ -312,7 +314,9 @@ The status sensor reports:
 
 If one selected feed fails, the calendar and digest retain the successful
 branch and disclose the unavailable source. If every selected feed fails,
-`render_digest` raises an error before returning an email payload.
+`render_digest` raises an error before returning an email payload, and the
+manual refresh button raises the same class of translated Home Assistant error
+instead of reporting a failed refresh as successful.
 
 Diagnostics redact the person's display name and birth date. They include
 per-branch and age-category published/parsed counts, ordering and

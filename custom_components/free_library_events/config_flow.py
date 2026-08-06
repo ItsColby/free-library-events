@@ -8,6 +8,7 @@ from typing import Any
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigFlowResult
+from homeassistant.helpers.network import NoURLAvailableError
 from homeassistant.helpers.selector import (
     BooleanSelector,
     DateSelector,
@@ -315,7 +316,23 @@ class FreeLibraryEventsOptionsFlow(config_entries.OptionsFlowWithReload):
         if user_input is not None:
             return self.async_create_entry(data=self._pending_options)
         token = self._pending_options[CONF_WEBCAL_TOKEN]
-        urls = webcal_subscription_urls(self.hass, token)
+        try:
+            urls = webcal_subscription_urls(self.hass, token)
+        except NoURLAvailableError:
+            pending_options = self._pending_options
+            self._pending_options = None
+            return self.async_show_form(
+                step_id="webcal",
+                data_schema=_webcal_schema(pending_options),
+                errors={"base": "webcal_url_unavailable"},
+                description_placeholders={
+                    "webcal_status": webcal_status(
+                        self.hass,
+                        bool(pending_options[CONF_PUBLISH_WEBCAL]),
+                        pending_options.get(CONF_WEBCAL_TOKEN),
+                    )
+                },
+            )
         return self.async_show_form(
             step_id="webcal_url",
             data_schema=vol.Schema({}),

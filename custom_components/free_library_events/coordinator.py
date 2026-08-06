@@ -169,8 +169,8 @@ async def async_expand_source(
             ),
             timeout=TYPE_EXPANSION_TIMEOUT_SECONDS,
         )
-    except TimeoutError as err:
-        raise LibraryApiError(SOURCE_ERROR_EXPANSION_TIMEOUT) from err
+    except TimeoutError:
+        raise LibraryApiError(SOURCE_ERROR_EXPANSION_TIMEOUT) from None
 
 
 @dataclass(frozen=True, slots=True)
@@ -339,7 +339,7 @@ class LibraryDataCoordinator(DataUpdateCoordinator[LibraryData]):
                 continue
             feed = result
             if not isinstance(feed, BranchFeed):
-                errors[key] = f"Unexpected response from {source_label(key)}"
+                errors[key] = SOURCE_ERROR_UNEXPECTED
                 continue
             statuses[key] = feed
 
@@ -388,7 +388,7 @@ class LibraryDataCoordinator(DataUpdateCoordinator[LibraryData]):
             statuses[key] = replace(
                 statuses[key],
                 type_shards_queried=len(OFFICIAL_EVENT_TYPES),
-                type_shard_failures=("unexpected response",),
+                type_shard_failures=(SOURCE_ERROR_UNEXPECTED,),
             )
 
         events = [event for feed in statuses.values() for event in feed.events]
