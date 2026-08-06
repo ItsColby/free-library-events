@@ -2,33 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 import subprocess
+from collections.abc import Iterator
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-TEXT_SUFFIXES = {
-    ".cfg",
-    ".css",
-    ".csv",
-    ".html",
-    ".ini",
-    ".js",
-    ".json",
-    ".md",
-    ".ps1",
-    ".py",
-    ".rst",
-    ".sh",
-    ".svg",
-    ".toml",
-    ".tsv",
-    ".txt",
-    ".xml",
-    ".yaml",
-    ".yml",
-}
-TEXT_FILENAMES = {"LICENSE", "MANIFEST.in"}
 ALLOWED_EMAILS = {"noreply@github.com"}
 ALLOWED_EMAIL_DOMAINS = {
     "example.com",
@@ -37,10 +17,32 @@ ALLOWED_EMAIL_DOMAINS = {
     "example.test",
     "users.noreply.github.com",
 }
+REVIEWED_BINARY_SHA256 = {
+    "custom_components/free_library_events/brand/icon.png": (
+        "e8b9da34a92b5472a485c9cd172204e6f8fcf95426157e0eb6ed5bc42e4bf9f3"
+    ),
+}
+IGNORED_DIRECTORY_NAMES = {
+    ".git",
+    ".local",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+    "venv",
+}
 
-EMAIL_RE = re.compile(r"\b[A-Z0-9._%+-]+@([A-Z0-9.-]+\.[A-Z]{2,})\b", re.IGNORECASE)
 HOSTNAME_TOKEN_RE = re.compile(r"[A-Z0-9_.-]+", re.IGNORECASE)
 LOCAL_HOSTNAME_SUFFIXES = {"home", "lan", "local"}
+EMAIL_LOCAL_CHARS = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._%+-"
+)
+EMAIL_DOMAIN_CHARS = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-"
+)
 PUBLIC_SAFETY_PATTERNS = (
     (
         "absolute Windows path",
@@ -78,8 +80,82 @@ PUBLIC_SAFETY_PATTERNS = (
 )
 
 
-def _is_text_candidate(path: Path) -> bool:
-    return path.suffix.lower() in TEXT_SUFFIXES or path.name in TEXT_FILENAMES
+def _contains_local_hostname(text: str) -> bool:
+    """Return whether text contains a dotted local hostname in linear time."""
+
+    for match in HOSTNAME_TOKEN_RE.finditer(text):
+        prior_label_count = 0
+        for label in match.group(0).casefold().split("."):
+            if not _valid_hostname_label(label):
+                prior_label_count = 0
+                continue
+            if prior_label_count and label in LOCAL_HOSTNAME_SUFFIXES:
+                return True
+            prior_label_count += 1
+    return False
+
+
+def _valid_hostname_label(label: str) -> bool:
+    return bool(label) and all(char.isalnum() or char in "-_" for char in label)
+
+
+def _email_addresses(text: str) -> Iterator[tuple[str, str]]:
+    """Yield regex-compatible email and domain pairs without backtracking."""
+
+    search_from = 0
+    while (at_index := text.find("@", search_from)) >= 0:
+        local_run_start = at_index
+        while local_run_start > 0 and text[local_run_start - 1] in EMAIL_LOCAL_CHARS:
+            local_run_start -= 1
+        local_start = next(
+            (
+                index
+                for index in range(local_run_start, at_index)
+                if _is_word_boundary(text, index)
+            ),
+            None,
+        )
+
+        domain_start = at_index + 1
+        domain_run_end = domain_start
+        while domain_run_end < len(text) and text[domain_run_end] in EMAIL_DOMAIN_CHARS:
+            domain_run_end += 1
+
+        valid_end: int | None = None
+        last_dot = -1
+        top_level_length = 0
+        top_level_is_alpha = False
+        for index in range(domain_start, domain_run_end):
+            char = text[index]
+            if char == ".":
+                last_dot = index
+                top_level_length = 0
+                top_level_is_alpha = True
+            elif last_dot >= 0:
+                top_level_length += 1
+                top_level_is_alpha = top_level_is_alpha and char.isalpha()
+            if (
+                last_dot > domain_start
+                and top_level_is_alpha
+                and top_level_length >= 2
+                and _is_word_boundary(text, index + 1)
+            ):
+                valid_end = index + 1
+
+        if local_start is not None and valid_end is not None:
+            domain = text[domain_start:valid_end]
+            yield f"{text[local_start:at_index]}@{domain}", domain
+        search_from = at_index + 1
+
+
+def _is_word_boundary(text: str, index: int) -> bool:
+    left_is_word = index > 0 and _is_word_char(text[index - 1])
+    right_is_word = index < len(text) and _is_word_char(text[index])
+    return left_is_word != right_is_word
+
+
+def _is_word_char(char: str) -> bool:
+    return char.isalnum() or char == "_"
 
 
 def _candidate_files(root: Path = ROOT) -> list[Path]:
@@ -118,29 +194,24 @@ def _candidate_files(root: Path = ROOT) -> list[Path]:
         paths = [
             path
             for path in root.rglob("*")
-            if not {".git", ".local", ".venv", "__pycache__"}.intersection(path.parts)
+            if not IGNORED_DIRECTORY_NAMES.intersection(path.parts)
+            and not any(part.endswith(".egg-info") for part in path.parts)
         ]
 
-    return sorted(
-        path
-        for path in paths
-        if path.is_file() and not path.is_symlink() and _is_text_candidate(path)
-    )
+    return sorted(path for path in paths if path.is_file() and not path.is_symlink())
 
 
 def _text_failures(text: str) -> set[str]:
     failures = {
         label for label, pattern in PUBLIC_SAFETY_PATTERNS if pattern.search(text)
     }
-    for match in EMAIL_RE.finditer(text):
-        address = match.group(0).casefold()
-        domain = match.group(1).casefold()
+    if _contains_local_hostname(text):
+        failures.add("local hostname")
+    for raw_address, raw_domain in _email_addresses(text):
+        address = raw_address.casefold()
+        domain = raw_domain.casefold()
         if address not in ALLOWED_EMAILS and domain not in ALLOWED_EMAIL_DOMAINS:
             failures.add("non-example email address")
-    for match in HOSTNAME_TOKEN_RE.finditer(text):
-        labels = match.group(0).casefold().split(".")
-        if len(labels) >= 2 and all(labels) and labels[-1] in LOCAL_HOSTNAME_SUFFIXES:
-            failures.add("local hostname")
     return failures
 
 
@@ -149,11 +220,20 @@ def run_guard(root: Path = ROOT) -> tuple[int, list[str]]:
     failures: set[str] = set()
     for path in files:
         relative = path.relative_to(root)
+        relative_posix = relative.as_posix()
+        raw = path.read_bytes()
+        is_binary = b"\0" in raw
         try:
-            text = path.read_text(encoding="utf-8")
+            text = "" if is_binary else raw.decode("utf-8")
         except UnicodeDecodeError:
-            failures.add(f"{relative}: invalid UTF-8 text")
+            is_binary = True
+
+        if is_binary:
+            expected_hash = REVIEWED_BINARY_SHA256.get(relative_posix)
+            if expected_hash != hashlib.sha256(raw).hexdigest():
+                failures.add(f"{relative}: unreviewed binary content")
             continue
+
         for label in _text_failures(text):
             failures.add(f"{relative}: {label}")
     return len(files), sorted(failures)
@@ -163,7 +243,7 @@ def main() -> int:
     file_count, failures = run_guard()
     if failures:
         raise SystemExit("Public safety guard failed:\n" + "\n".join(failures))
-    print(f"Public safety guard passed for {file_count} text files.")
+    print(f"Public safety guard passed for {file_count} repository files.")
     return 0
 
 
