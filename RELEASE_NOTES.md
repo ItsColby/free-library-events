@@ -33,6 +33,10 @@
   ceiling.
 - Enforce Ruff's exception-name suffix rule and align the private image-download
   exception name without changing its fallback behavior.
+- Add zero-baseline Ruff Bugbear, timezone-awareness, and logging checks while
+  retaining the existing debugger-statement rule.
+- Validate current stable Core `2026.8.0` with test harness `0.13.354`, whose
+  dependency metadata now targets that final release directly.
 - Pin every third-party GitHub Action to a full commit SHA, disable persisted
   checkout credentials, bound job runtimes, add weekly validation and
   Dependabot Actions updates, and expose one stable `Release gate` check.

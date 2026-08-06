@@ -74,9 +74,12 @@ class PublicSafetyGuardTests(unittest.TestCase):
         self.assertTrue(
             {
                 "ASYNC",
+                "B",
                 "BLE",
                 "C4",
                 "C901",
+                "DTZ",
+                "LOG",
                 "N818",
                 "PERF",
                 "PLC",
@@ -110,7 +113,7 @@ class PublicSafetyGuardTests(unittest.TestCase):
         requirements_install = 'python -m pip install --upgrade -r "$REQUIREMENTS_FILE"'
 
         self.assertIn("harness: 0.13.345", workflow)
-        self.assertIn("harness: 0.13.353", workflow)
+        self.assertIn("harness: 0.13.354", workflow)
         self.assertIn("HARNESS_VERSION: ${{ matrix.harness }}", workflow)
         self.assertIn("REQUIREMENTS_FILE: ${{ matrix.requirements }}", workflow)
         self.assertIn(harness_install, workflow)

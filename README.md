@@ -397,7 +397,7 @@ python -m unittest discover -s tests -p "test_public_safety.py"
 python -m compileall -q custom_components\free_library_events tests scripts
 python scripts\check_public_safety.py
 docker run --rm -v "${PWD}:/work" -w /work python:3.14-slim bash -lc "python -m pip install --upgrade pip && python -m pip install pytest-homeassistant-custom-component==0.13.345 && python -m pip install --upgrade -r requirements-ha-test.txt && pytest tests/test_integration_ha.py tests/test_email_images.py -q"
-docker run --rm -v "${PWD}:/work" -w /work python:3.14-slim bash -lc "python -m pip install --upgrade pip && python -m pip install pytest-homeassistant-custom-component==0.13.353 && python -m pip install --upgrade -r requirements-ha-test-current.txt && pytest tests/test_integration_ha.py tests/test_email_images.py -q"
+docker run --rm -v "${PWD}:/work" -w /work python:3.14-slim bash -lc "python -m pip install --upgrade pip && python -m pip install pytest-homeassistant-custom-component==0.13.354 && python -m pip install --upgrade -r requirements-ha-test-current.txt && pytest tests/test_integration_ha.py tests/test_email_images.py -q"
 ```
 
 The protected GitHub workflow pins every third-party Action to a full commit
