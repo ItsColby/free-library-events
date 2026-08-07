@@ -25,7 +25,6 @@ try:
         SOURCE_USER,
         ConfigEntryState,
     )
-    from homeassistant.const import EVENT_CORE_CONFIG_UPDATE
     from homeassistant.core import HomeAssistant
     from homeassistant.data_entry_flow import FlowResultType
     from homeassistant.exceptions import HomeAssistantError
@@ -736,11 +735,7 @@ async def test_status_projection_reschedules_for_runtime_timezone_change(
         with patch.object(
             LibraryStatusSensor, "async_write_ha_state", autospec=True
         ) as write_state:
-            await hass.config.async_set_time_zone("America/Los_Angeles")
-            hass.bus.async_fire_internal(
-                EVENT_CORE_CONFIG_UPDATE,
-                {"time_zone": "America/Los_Angeles"},
-            )
+            await hass.config.async_update(time_zone="America/Los_Angeles")
             await hass.async_block_till_done()
 
             write_state.assert_not_called()
@@ -754,10 +749,7 @@ async def test_status_projection_reschedules_for_runtime_timezone_change(
         assert await hass.config_entries.async_unload(entry.entry_id)
         scheduled[1][2].assert_called_once_with()
 
-        hass.bus.async_fire_internal(
-            EVENT_CORE_CONFIG_UPDATE,
-            {"time_zone": "America/New_York"},
-        )
+        await hass.config.async_update(time_zone="America/New_York")
         await hass.async_block_till_done()
 
     assert len(scheduled) == 2

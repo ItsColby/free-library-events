@@ -274,6 +274,8 @@ class LibraryStatusSensor(CoordinatorEntity[LibraryDataCoordinator], SensorEntit
                 self._handle_core_config_update,
             )
         )
+        self._time_zone_name = self.hass.config.time_zone
+        self._time_zone = dt_util.get_default_time_zone()
         evaluation_time = dt_util.now(self._time_zone)
         self._update_projection(evaluation_time)
         self._schedule_projection_deadline(evaluation_time)
