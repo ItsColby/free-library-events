@@ -25,6 +25,7 @@ try:
         SOURCE_USER,
         ConfigEntryState,
     )
+    from homeassistant.const import EVENT_CORE_CONFIG_UPDATE
     from homeassistant.core import HomeAssistant
     from homeassistant.data_entry_flow import FlowResultType
     from homeassistant.exceptions import HomeAssistantError
@@ -687,7 +688,82 @@ async def test_unchanged_status_projection_skips_state_write_and_source_io(
     assert unchanged.attributes["next_week_events"] == 0
 
 
-async def test_status_projection_reschedules_on_refresh_and_cancels_on_unload(
+async def test_status_projection_reschedules_for_runtime_timezone_change(
+    hass: HomeAssistant,
+) -> None:
+    await hass.config.async_set_time_zone("America/New_York")
+    entry = _entry()
+    entry.add_to_hass(hass)
+    fetch_mock = AsyncMock(
+        side_effect=lambda _branch, age_category, _coverage_end=None: BranchFeed(
+            events=(),
+            age_category=age_category,
+            source_count=0,
+            parsed_count=0,
+            last_event_date=None,
+            ordered=True,
+        )
+    )
+    scheduled: list[tuple[object, datetime, Mock]] = []
+
+    def track_projection(_hass, action, deadline):
+        cancel = Mock()
+        scheduled.append((action, deadline, cancel))
+        return cancel
+
+    utc_now = datetime(2026, 7, 20, 16, tzinfo=ZoneInfo("UTC"))
+
+    def local_now(time_zone=None):
+        return utc_now.astimezone(time_zone) if time_zone is not None else utc_now
+
+    with (
+        patch(
+            "custom_components.free_library_events.api.LibraryClient.async_fetch_feed",
+            new=fetch_mock,
+        ),
+        patch(
+            "custom_components.free_library_events.sensor.async_track_point_in_time",
+            side_effect=track_projection,
+        ),
+        patch("homeassistant.util.dt.now", side_effect=local_now),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        assert len(scheduled) == 1
+        assert scheduled[0][1] == datetime(2026, 7, 21, tzinfo=LOCAL_TIME_ZONE)
+        initial_fetch_count = fetch_mock.await_count
+
+        with patch.object(
+            LibraryStatusSensor, "async_write_ha_state", autospec=True
+        ) as write_state:
+            await hass.config.async_set_time_zone("America/Los_Angeles")
+            hass.bus.async_fire_internal(
+                EVENT_CORE_CONFIG_UPDATE,
+                {"time_zone": "America/Los_Angeles"},
+            )
+            await hass.async_block_till_done()
+
+            write_state.assert_not_called()
+
+        assert len(scheduled) == 2
+        scheduled[0][2].assert_called_once_with()
+        assert scheduled[1][1] == datetime(
+            2026, 7, 21, tzinfo=ZoneInfo("America/Los_Angeles")
+        )
+        assert fetch_mock.await_count == initial_fetch_count
+        assert await hass.config_entries.async_unload(entry.entry_id)
+        scheduled[1][2].assert_called_once_with()
+
+        hass.bus.async_fire_internal(
+            EVENT_CORE_CONFIG_UPDATE,
+            {"time_zone": "America/New_York"},
+        )
+        await hass.async_block_till_done()
+
+    assert len(scheduled) == 2
+
+
+async def test_status_projection_reschedules_on_failure_recovery_and_unload(
     hass: HomeAssistant,
 ) -> None:
     await hass.config.async_set_time_zone("America/New_York")
@@ -729,20 +805,36 @@ async def test_status_projection_reschedules_on_refresh_and_cancels_on_unload(
 
         coordinator = entry.runtime_data
         assert coordinator.data is not None
+        original_data = coordinator.data
+        coordinator.async_set_update_error(
+            UpdateFailed("synthetic source update failure")
+        )
+        await hass.async_block_till_done()
+
+        failed = hass.states.get("sensor.free_library_events_status")
+        assert failed is not None
+        assert failed.state == "error"
+        assert coordinator.data is original_data
+        assert len(scheduled) == 2
+        scheduled[0][2].assert_called_once_with()
+
         coordinator.async_set_updated_data(
             replace(
-                coordinator.data,
-                fetched_at=coordinator.data.fetched_at + timedelta(seconds=1),
+                original_data,
+                fetched_at=original_data.fetched_at + timedelta(seconds=1),
             )
         )
         await hass.async_block_till_done()
 
-        assert len(scheduled) == 2
-        scheduled[0][2].assert_called_once_with()
-        assert scheduled[1][1] == datetime(2026, 7, 21, tzinfo=LOCAL_TIME_ZONE)
+        recovered = hass.states.get("sensor.free_library_events_status")
+        assert recovered is not None
+        assert recovered.state == "ok"
+        assert len(scheduled) == 3
+        scheduled[1][2].assert_called_once_with()
+        assert scheduled[2][1] == datetime(2026, 7, 21, tzinfo=LOCAL_TIME_ZONE)
         assert await hass.config_entries.async_unload(entry.entry_id)
 
-    scheduled[1][2].assert_called_once_with()
+    scheduled[2][2].assert_called_once_with()
 
 
 async def test_setup_entities_action_and_redacted_diagnostics(
