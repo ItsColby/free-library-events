@@ -132,7 +132,8 @@
   advances at Tuesday local midnight, the sensor schedules that exact
   lifecycle-owned boundary, rebuilds without feed I/O, writes only when the
   visible projection changes, reschedules after coordinator refreshes and each
-  boundary, and cancels on unload. Home Assistant Core continues to own native
+  boundary, follows Home Assistant Core timezone changes, and cancels its timer
+  and timezone listener on unload. Home Assistant Core continues to own native
   calendar current/upcoming start and end scheduling. `translations/en.json`
   and `icons.json` own action/entity metadata and icons instead of adding
   hard-coded presentation state to the entities.

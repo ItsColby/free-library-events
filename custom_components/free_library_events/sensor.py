@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, time, timedelta, tzinfo
-from typing import cast
+from datetime import date, datetime, time, timedelta, tzinfo
+from typing import Any, cast
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
-from homeassistant.const import EntityCategory
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.const import EVENT_CORE_CONFIG_UPDATE, EntityCategory
+from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.event import async_track_point_in_time
@@ -232,9 +232,8 @@ class LibraryStatusSensor(CoordinatorEntity[LibraryDataCoordinator], SensorEntit
         config = entry_config(entry.data, entry.options)
         self._birth_date = date.fromisoformat(config[CONF_BIRTH_DATE])
         self._filter_mode = str(config[CONF_FILTER_MODE])
-        self._time_zone = (
-            dt_util.get_time_zone(coordinator.hass.config.time_zone) or UTC
-        )
+        self._time_zone_name = coordinator.hass.config.time_zone
+        self._time_zone = dt_util.get_default_time_zone()
         evaluation_time = dt_util.now(self._time_zone)
         self._projection = _build_status_projection(
             coordinator.data,
@@ -269,6 +268,12 @@ class LibraryStatusSensor(CoordinatorEntity[LibraryDataCoordinator], SensorEntit
         """Start the local projection boundary with the entity lifecycle."""
 
         await super().async_added_to_hass()
+        self.async_on_remove(
+            self.hass.bus.async_listen(
+                EVENT_CORE_CONFIG_UPDATE,
+                self._handle_core_config_update,
+            )
+        )
         evaluation_time = dt_util.now(self._time_zone)
         self._update_projection(evaluation_time)
         self._schedule_projection_deadline(evaluation_time)
@@ -283,6 +288,20 @@ class LibraryStatusSensor(CoordinatorEntity[LibraryDataCoordinator], SensorEntit
     def _handle_coordinator_update(self) -> None:
         """Rebuild and reschedule the snapshot after a source refresh."""
 
+        evaluation_time = dt_util.now(self._time_zone)
+        projection_changed = self._update_projection(evaluation_time)
+        self._schedule_projection_deadline(evaluation_time)
+        if projection_changed:
+            self.async_write_ha_state()
+
+    @callback
+    def _handle_core_config_update(self, _event: Event[dict[str, Any]]) -> None:
+        """Rebuild and reschedule when Home Assistant's timezone changes."""
+
+        if self._time_zone_name == self.hass.config.time_zone:
+            return
+        self._time_zone_name = self.hass.config.time_zone
+        self._time_zone = dt_util.get_default_time_zone()
         evaluation_time = dt_util.now(self._time_zone)
         projection_changed = self._update_projection(evaluation_time)
         self._schedule_projection_deadline(evaluation_time)

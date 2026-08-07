@@ -312,11 +312,13 @@ The status sensor reports:
   or was unordered
 - `error` after a complete refresh failure
 
-The coordinator keeps the configured feed-refresh cadence. Separately, the
-status sensor reevaluates its cached next-week counts and coverage once at
-Tuesday local midnight, when the Monday digest window advances. That local
-projection does not request the feeds again and produces no state write when
-the visible status and attributes are unchanged.
+The coordinator polls the feeds every six hours by default; matching and timing
+options allow a cadence from 15 minutes through 24 hours. `render_digest`
+requests an immediate refresh by default. Separately, the status sensor
+reevaluates its cached next-week counts and coverage once at Tuesday local
+midnight, when the Monday digest window advances. That local projection does
+not request the feeds again and produces no state write when the visible status
+and attributes are unchanged.
 
 If one selected feed fails, the calendar and digest retain the successful
 branch and disclose the unavailable source. If every selected feed fails,
