@@ -78,7 +78,7 @@ jobs:
               and "__pycache__" not in path.parts
               and path.suffix in {".json", ".md", ".py", ".txt", ".yaml", ".yml"}
           ]
-          paths.extend(Path(path) for path in ("AGENTS.md", "LICENSE", "README.md", "hacs.json"))
+          paths.extend(Path(path) for path in ("LICENSE", "README.md", "hacs.json"))
           failures = []
           for path in paths:
               for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):

@@ -183,11 +183,6 @@
   translated Home Assistant error on failure. A platform action therefore
   cannot report success when every requested source failed.
 
-Reusable portfolio engineering practice is owned by the external
-`maintain-ha-custom-integrations` skill when available. This architecture,
-the tests, privacy boundary, and CI retain the Free Library Events consequences
-and remain authoritative for product behavior.
-
 ## Supported Source Boundary
 
 The supported source set is intentionally limited to the Charles Santore
