@@ -10,7 +10,7 @@ import unittest
 from dataclasses import replace
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -31,7 +31,10 @@ try:
     from homeassistant.helpers import entity_registry as er
     from homeassistant.helpers.network import NoURLAvailableError
     from homeassistant.helpers.update_coordinator import UpdateFailed
-    from pytest_homeassistant_custom_component.common import MockConfigEntry
+    from pytest_homeassistant_custom_component.common import (
+        MockConfigEntry,
+        async_fire_time_changed,
+    )
     from pytest_homeassistant_custom_component.typing import ClientSessionGenerator
 except ModuleNotFoundError as err:  # pragma: no cover - local non-HA test env
     raise unittest.SkipTest(f"Home Assistant test harness unavailable: {err}") from err
@@ -105,6 +108,10 @@ from custom_components.free_library_events.email_images import (
     StoredImageBundle,
     remove_stored_image_run,
     store_downloaded_images,
+)
+from custom_components.free_library_events.sensor import (
+    LibraryStatusSensor,
+    _next_projection_deadline,
 )
 from custom_components.free_library_events.webcal import (
     WEBCAL_PATH,
@@ -548,6 +555,194 @@ async def test_version_one_entry_migrates_profile_and_behavior_without_token_lea
         for config_key, branch_code in LEGACY_BRANCH_CONFIG_KEYS
         if entry.data[config_key]
     ] == ["SWK", "IND", "CEN"]
+
+
+def test_status_projection_deadline_uses_local_tuesday_across_dst() -> None:
+    spring_now = datetime(2026, 3, 3, tzinfo=LOCAL_TIME_ZONE)
+    spring_deadline = _next_projection_deadline(spring_now, LOCAL_TIME_ZONE)
+    assert spring_deadline == datetime(2026, 3, 10, tzinfo=LOCAL_TIME_ZONE)
+    assert spring_deadline.astimezone(ZoneInfo("UTC")) - spring_now.astimezone(
+        ZoneInfo("UTC")
+    ) == timedelta(hours=167)
+
+    fall_now = datetime(2026, 10, 27, tzinfo=LOCAL_TIME_ZONE)
+    fall_deadline = _next_projection_deadline(fall_now, LOCAL_TIME_ZONE)
+    assert fall_deadline == datetime(2026, 11, 3, tzinfo=LOCAL_TIME_ZONE)
+    assert fall_deadline.astimezone(ZoneInfo("UTC")) - fall_now.astimezone(
+        ZoneInfo("UTC")
+    ) == timedelta(hours=169)
+
+
+async def test_status_projection_advances_at_tuesday_without_source_io(
+    hass: HomeAssistant,
+) -> None:
+    await hass.config.async_set_time_zone("America/New_York")
+    entry = _entry()
+    entry.add_to_hass(hass)
+    event = Event(
+        title="Monday-window storytime",
+        event_date=date(2026, 7, 22),
+        start_time=time(10, 30),
+        description="Stories and songs for babies with caregivers.",
+        link="https://example.test/events/monday-window-storytime",
+        image_url="",
+        branch=BRANCHES["CEN"],
+        age_categories=("Baby",),
+    )
+
+    async def fetch_feed(branch, age_category, _coverage_end=None):
+        return BranchFeed(
+            events=(
+                (replace(event, branch=branch, age_categories=(age_category,)),)
+                if branch.code == "CEN"
+                else ()
+            ),
+            age_category=age_category,
+            source_count=10,
+            parsed_count=10,
+            last_event_date=event.event_date,
+            ordered=True,
+            type_shards_queried=len(OFFICIAL_EVENT_TYPES),
+            expanded_through=date(2026, 7, 26),
+        )
+
+    fetch_mock = AsyncMock(side_effect=fetch_feed)
+    monday = datetime(2026, 7, 20, 23, 59, tzinfo=LOCAL_TIME_ZONE)
+    with (
+        patch(
+            "custom_components.free_library_events.api.LibraryClient.async_fetch_feed",
+            new=fetch_mock,
+        ),
+        patch("homeassistant.util.dt.now", return_value=monday),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    initial = hass.states.get("sensor.free_library_events_status")
+    assert initial is not None
+    assert initial.state == "ok"
+    assert initial.attributes["next_week_events"] == 1
+    assert initial.attributes["current_age_coverage_complete"] is True
+    cached_data = entry.runtime_data.data
+    initial_fetch_count = fetch_mock.await_count
+
+    async_fire_time_changed(
+        hass,
+        datetime(2026, 7, 21, tzinfo=LOCAL_TIME_ZONE),
+    )
+    await hass.async_block_till_done()
+
+    advanced = hass.states.get("sensor.free_library_events_status")
+    assert advanced is not None
+    assert advanced.state == "partial"
+    assert advanced.attributes["next_week_events"] == 0
+    assert advanced.attributes["current_age_coverage_complete"] is False
+    assert advanced.attributes["current_age_coverage_warnings"]
+    assert entry.runtime_data.data is cached_data
+    assert fetch_mock.await_count == initial_fetch_count
+
+
+async def test_unchanged_status_projection_skips_state_write_and_source_io(
+    hass: HomeAssistant,
+) -> None:
+    await hass.config.async_set_time_zone("America/New_York")
+    entry = _entry()
+    entry.add_to_hass(hass)
+    fetch_mock = AsyncMock(
+        side_effect=lambda _branch, age_category, _coverage_end=None: BranchFeed(
+            events=(),
+            age_category=age_category,
+            source_count=0,
+            parsed_count=0,
+            last_event_date=None,
+            ordered=True,
+        )
+    )
+    monday = datetime(2026, 7, 20, 23, 59, tzinfo=LOCAL_TIME_ZONE)
+    with (
+        patch(
+            "custom_components.free_library_events.api.LibraryClient.async_fetch_feed",
+            new=fetch_mock,
+        ),
+        patch("homeassistant.util.dt.now", return_value=monday),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    initial_fetch_count = fetch_mock.await_count
+    with patch.object(
+        LibraryStatusSensor, "async_write_ha_state", autospec=True
+    ) as write_state:
+        async_fire_time_changed(
+            hass,
+            datetime(2026, 7, 21, tzinfo=LOCAL_TIME_ZONE),
+        )
+        await hass.async_block_till_done()
+
+    write_state.assert_not_called()
+    assert fetch_mock.await_count == initial_fetch_count
+    unchanged = hass.states.get("sensor.free_library_events_status")
+    assert unchanged is not None
+    assert unchanged.state == "ok"
+    assert unchanged.attributes["next_week_events"] == 0
+
+
+async def test_status_projection_reschedules_on_refresh_and_cancels_on_unload(
+    hass: HomeAssistant,
+) -> None:
+    await hass.config.async_set_time_zone("America/New_York")
+    entry = _entry()
+    entry.add_to_hass(hass)
+    fetch_mock = AsyncMock(
+        side_effect=lambda _branch, age_category, _coverage_end=None: BranchFeed(
+            events=(),
+            age_category=age_category,
+            source_count=0,
+            parsed_count=0,
+            last_event_date=None,
+            ordered=True,
+        )
+    )
+    scheduled: list[tuple[object, datetime, Mock]] = []
+
+    def track_projection(_hass, action, deadline):
+        cancel = Mock()
+        scheduled.append((action, deadline, cancel))
+        return cancel
+
+    monday = datetime(2026, 7, 20, 12, tzinfo=LOCAL_TIME_ZONE)
+    with (
+        patch(
+            "custom_components.free_library_events.api.LibraryClient.async_fetch_feed",
+            new=fetch_mock,
+        ),
+        patch(
+            "custom_components.free_library_events.sensor.async_track_point_in_time",
+            side_effect=track_projection,
+        ),
+        patch("homeassistant.util.dt.now", return_value=monday),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        assert len(scheduled) == 1
+        assert scheduled[0][1] == datetime(2026, 7, 21, tzinfo=LOCAL_TIME_ZONE)
+
+        coordinator = entry.runtime_data
+        assert coordinator.data is not None
+        coordinator.async_set_updated_data(
+            replace(
+                coordinator.data,
+                fetched_at=coordinator.data.fetched_at + timedelta(seconds=1),
+            )
+        )
+        await hass.async_block_till_done()
+
+        assert len(scheduled) == 2
+        scheduled[0][2].assert_called_once_with()
+        assert scheduled[1][1] == datetime(2026, 7, 21, tzinfo=LOCAL_TIME_ZONE)
+        assert await hass.config_entries.async_unload(entry.entry_id)
+
+    scheduled[1][2].assert_called_once_with()
 
 
 async def test_setup_entities_action_and_redacted_diagnostics(

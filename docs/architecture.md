@@ -127,8 +127,15 @@
   calendar, diagnostic status, and manual refresh surfaces. The status sensor
   is a finite Home Assistant enum whose raw automation values remain `ok`,
   `limited`, `partial`, and `error`; translations provide user-facing state
-  labels. `translations/en.json` and `icons.json` own action/entity metadata and
-  icons instead of adding hard-coded presentation state to the entities.
+  labels. It exposes one immutable projection built from the coordinator cache
+  and one captured local evaluation clock. Because the Monday digest window
+  advances at Tuesday local midnight, the sensor schedules that exact
+  lifecycle-owned boundary, rebuilds without feed I/O, writes only when the
+  visible projection changes, reschedules after coordinator refreshes and each
+  boundary, and cancels on unload. Home Assistant Core continues to own native
+  calendar current/upcoming start and end scheduling. `translations/en.json`
+  and `icons.json` own action/entity metadata and icons instead of adding
+  hard-coded presentation state to the entities.
 - `config_flow.py` generates, displays, explicitly confirms rotation of, and
   removes the private webcal capability token. It presents both HTTP(S) and
   `webcal://` URL forms, identifies whether Home Assistant supplied an
