@@ -8,6 +8,12 @@ the Free Library Events Home Assistant custom integration.
 Read `docs/architecture.md` before structural, config-flow, parsing, entity,
 email-rendering, or release-layout changes.
 
+For David-maintained cross-portfolio engineering practice, use the external
+`maintain-ha-custom-integrations` skill when available. This repository's
+architecture, tests, privacy boundary, and CI remain authoritative for Free
+Library Events. Release, HACS, installation, restart, live validation, and
+rollback belong to `release-ha-custom-integrations`.
+
 ## Optimization And Quality Target
 
 Optimize for David's private Home Assistant runtime: correctness, privacy,
