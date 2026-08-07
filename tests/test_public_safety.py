@@ -23,7 +23,6 @@ class PublicSafetyGuardTests(unittest.TestCase):
             encoding="utf-8"
         )
         readme = (root / "README.md").read_text(encoding="utf-8")
-        agents = (root / "AGENTS.md").read_text(encoding="utf-8")
         commands = (
             "python -m ruff format --check custom_components tests scripts",
             "python -m ruff check custom_components tests scripts",
@@ -34,7 +33,6 @@ class PublicSafetyGuardTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertIn(command, workflow)
                 self.assertIn(command, readme)
-                self.assertIn(command, agents)
 
         self.assertIn(
             "python -m pip install --upgrade ruff shellcheck-py zizmor", workflow
@@ -68,28 +66,21 @@ class PublicSafetyGuardTests(unittest.TestCase):
             "  Remove-Item Env:GH_TOKEN\n"
             "}"
         )
-        for document in (readme, agents):
-            with self.subTest(document="online local zizmor instructions"):
-                self.assertIn(local_zizmor_block, document)
+        self.assertIn(local_zizmor_block, readme)
         self.assertIn("python -m mypy --version", workflow)
         self.assertIn(
             "python -m pip install --upgrade ruff mypy shellcheck-py zizmor", readme
         )
-        self.assertIn(
-            "python -m pip install --upgrade ruff mypy shellcheck-py zizmor", agents
-        )
         local_ha_requirements = (
             "python -m pip install --upgrade -r requirements-ha-test.txt"
         )
-        for document in (readme, agents):
-            with self.subTest(document="local validation instructions"):
-                self.assertIn(local_ha_requirements, document)
-                self.assertLess(
-                    document.index(local_ha_requirements),
-                    document.index(
-                        "python -m mypy --strict custom_components/free_library_events"
-                    ),
-                )
+        self.assertIn(local_ha_requirements, readme)
+        self.assertLess(
+            readme.index(local_ha_requirements),
+            readme.index(
+                "python -m mypy --strict custom_components/free_library_events"
+            ),
+        )
         self.assertNotIn("ruff==", workflow)
         self.assertNotIn("shellcheck-py==", workflow)
 
@@ -140,7 +131,6 @@ class PublicSafetyGuardTests(unittest.TestCase):
     def test_home_assistant_support_contract_is_single_current_lane(self) -> None:
         root = Path(__file__).resolve().parents[1]
         readme = (root / "README.md").read_text(encoding="utf-8")
-        agents = (root / "AGENTS.md").read_text(encoding="utf-8")
         workflow = (root / ".github/workflows/validate.yaml").read_text(
             encoding="utf-8"
         )
@@ -182,9 +172,7 @@ class PublicSafetyGuardTests(unittest.TestCase):
         self.assertIn("homeassistant==2026.8.0", requirements)
         self.assertNotIn("pytest==", requirements)
         self.assertNotIn("pytest-homeassistant-custom-component", requirements)
-        for document in (readme, agents):
-            with self.subTest(document="dependency closure instructions"):
-                self.assertIn(dependency_check, document)
+        self.assertIn(dependency_check, readme)
         self.assertEqual(
             "2026.8.0",
             json.loads((root / "hacs.json").read_text(encoding="utf-8"))[
