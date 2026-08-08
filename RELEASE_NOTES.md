@@ -16,10 +16,6 @@
 - Publish deeply immutable coordinator snapshots by detaching and freezing the
   source-count, source-status, and source-error mappings alongside the existing
   frozen event tuple.
-- Keep maintainer-specific agent instructions and configuration out of the
-  public product repository while retaining product behavior in architecture,
-  tests, and CI.
-
 ## Validation
 
 - Retain the dependency-closed Core 2026.8.0 supported-minimum lane and add a
