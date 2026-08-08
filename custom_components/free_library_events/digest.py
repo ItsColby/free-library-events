@@ -778,9 +778,19 @@ def clean_image_url(raw_url: str, base_url: str = "") -> str:
     url = _safe_http_url(value, base_url)
     if not url:
         return ""
-    parsed = urllib.parse.urlparse(url)
-    hostname = (parsed.hostname or "").lower()
-    return url if parsed.scheme == "https" and hostname in TRUSTED_IMAGE_HOSTS else ""
+    try:
+        parsed = urllib.parse.urlparse(url)
+        hostname = (parsed.hostname or "").lower()
+        port = parsed.port
+    except ValueError:
+        return ""
+    return (
+        url
+        if parsed.scheme == "https"
+        and hostname in TRUSTED_IMAGE_HOSTS
+        and port in (None, 443)
+        else ""
+    )
 
 
 def parse_feed(

@@ -75,12 +75,12 @@
   improve compatibility across email rendering engines. Linked event images use
   functional alternative text that identifies their official details page. By
   default, email clients load event
-  images only from the publisher's HTTPS hosts; the renderer keeps the
-  publisher's working dot-prefixed image paths and does not resolve a blank
-  image field to the feed URL. An explicit SMTP embedding option
+  images only from the publisher's HTTPS hosts on the default HTTPS port; the
+  renderer keeps the publisher's working dot-prefixed image paths and does not
+  resolve a blank image field to the feed URL. An explicit SMTP embedding option
   deterministically downloads only the selected events' unique images through
   Home Assistant's shared HTTP session, follows at most two HTTPS redirects that
-  remain on trusted publisher hosts,
+  remain on trusted publisher hosts and the default HTTPS port,
   validates signatures and dimensions, and writes them to a random
   integration-owned run under Home Assistant Local Media. It substitutes
   basename-matched `cid:` sources and returns only images whose CIDs remain

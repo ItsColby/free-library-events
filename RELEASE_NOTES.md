@@ -10,6 +10,8 @@
   timezone listener when the entity unloads.
 - Raise a translated Home Assistant update error after complete source failure
   while retaining only bounded source-error categories.
+- Reject initial and redirected publisher image URLs that specify a non-default
+  HTTPS port.
 
 ## Changed
 
@@ -26,6 +28,8 @@
 - Cover immutable nested snapshots, translated total-source failure, captured
   status evaluation clocks, Tuesday-boundary reevaluation, timezone changes,
   DST behavior, no-op Recorder writes, rescheduling, and unload cleanup.
+- Fail Home Assistant test collection when a required Core or harness import is
+  unavailable instead of silently skipping the complete integration-test module.
 
 # Free Library Events v2026.8.5
 

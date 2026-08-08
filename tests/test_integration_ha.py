@@ -6,7 +6,6 @@ import asyncio
 import json
 import sys
 import types
-import unittest
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import date, datetime, time, timedelta
@@ -18,27 +17,24 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-try:
-    import pytest
-    from homeassistant.components.smtp.helpers import _build_html_msg
-    from homeassistant.config_entries import (
-        SOURCE_RECONFIGURE,
-        SOURCE_USER,
-        ConfigEntryState,
-    )
-    from homeassistant.core import HomeAssistant
-    from homeassistant.data_entry_flow import FlowResultType
-    from homeassistant.exceptions import HomeAssistantError
-    from homeassistant.helpers import entity_registry as er
-    from homeassistant.helpers.network import NoURLAvailableError
-    from homeassistant.helpers.update_coordinator import UpdateFailed
-    from pytest_homeassistant_custom_component.common import (
-        MockConfigEntry,
-        async_fire_time_changed,
-    )
-    from pytest_homeassistant_custom_component.typing import ClientSessionGenerator
-except ModuleNotFoundError as err:  # pragma: no cover - local non-HA test env
-    raise unittest.SkipTest(f"Home Assistant test harness unavailable: {err}") from err
+import pytest
+from homeassistant.components.smtp.helpers import _build_html_msg
+from homeassistant.config_entries import (
+    SOURCE_RECONFIGURE,
+    SOURCE_USER,
+    ConfigEntryState,
+)
+from homeassistant.core import HomeAssistant
+from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.network import NoURLAvailableError
+from homeassistant.helpers.update_coordinator import UpdateFailed
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    async_fire_time_changed,
+)
+from pytest_homeassistant_custom_component.typing import ClientSessionGenerator
 
 from custom_components.free_library_events import async_migrate_entry
 from custom_components.free_library_events.api import (

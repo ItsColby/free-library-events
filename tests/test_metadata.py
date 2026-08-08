@@ -91,6 +91,14 @@ class HomeAssistantMetadataTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertIn(f"'{path}'", workflow)
 
+    def test_ha_test_module_fails_closed_when_the_harness_is_unavailable(self) -> None:
+        integration_tests = (ROOT / "tests/test_integration_ha.py").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertNotIn("unittest.SkipTest", integration_tests)
+        self.assertNotIn("except ModuleNotFoundError", integration_tests)
+
 
 if __name__ == "__main__":
     unittest.main()
