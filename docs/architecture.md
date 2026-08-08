@@ -40,7 +40,10 @@
 - `coordinator.py` derives the configured person's current life-stage group from
   the local birth date, requests every official age category in that group for
   each selected branch, refreshes the plan concurrently, consolidates duplicate
-  events while retaining their official classifications and richer safe fields,
+  events with one order-independent effective-row rule while retaining their
+  official classifications and richer safe fields, and lets an inactive
+  publisher title win so a cancellation cannot be hidden by an older
+  overlapping feed,
   and preserves partial source success. Each completed refresh publishes one
   deeply immutable normalized snapshot: event rows are frozen tuples and every
   source-count, status, and error mapping is read-only. Home Assistant's
@@ -167,10 +170,12 @@
   or scheduler exists inside the integration. Opt-in SMTP embedding adds
   `attachments`, rollback-compatible `images`, and bounded download and expiry
   metadata to the response, but the immediately following caller-owned notify
-  action remains the delivery owner. Each render captures exactly one
-  coordinator snapshot before its first image-download await, so an overlapping
-  refresh cannot mix events, coverage evidence, or timestamps from two
-  generations in one response.
+  action remains the delivery owner. Each render captures one complete
+  config-entry owner with its coordinator, rejects a reconfigure or reload that
+  supersedes either during an awaited source refresh, and then captures exactly
+  one coordinator snapshot before its first image-download await. An overlapping
+  refresh therefore cannot mix settings, events, coverage evidence, or
+  timestamps from different generations in one response.
 - `__init__.py` also calculates ephemeral branch distances from Home Assistant's
   native configured latitude/longitude and the integration's public branch
   coordinates. Distance only selects which occurrences retain rich cards when

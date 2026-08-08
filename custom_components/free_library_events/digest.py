@@ -900,16 +900,20 @@ def _xml_security_scan_text(xml_content: bytes | str) -> str:
 
 
 def merge_events(events: Sequence[Event]) -> list[Event]:
-    """Deduplicate events while preserving every official age classification."""
+    """Deduplicate events with one order-independent effective-row rule."""
 
     merged: dict[str, Event] = {}
-    for event in events:
+    for event in sorted(events, key=_event_merge_priority):
         key = event_identity(event)
         if existing := merged.get(key):
             age_categories = tuple(
                 sorted(
                     {*existing.age_categories, *event.age_categories},
-                    key=lambda category: AGE_CATEGORY_ORDER.get(category, 999),
+                    key=lambda category: (
+                        AGE_CATEGORY_ORDER.get(category, 999),
+                        category.casefold(),
+                        category,
+                    ),
                 )
             )
             description_links = tuple(
@@ -937,6 +941,45 @@ def merge_events(events: Sequence[Event]) -> list[Event]:
         else:
             merged[key] = event
     return list(merged.values())
+
+
+def _event_merge_priority(event: Event) -> tuple[bool, int, int, int, int, str]:
+    """Return deterministic source precedence for one duplicate occurrence.
+
+    An inactive publisher title wins so a cancellation cannot be hidden by an
+    older overlapping feed. Otherwise prefer the row with richer safe source
+    content, then use every normalized field as a stable total-order tiebreaker.
+    """
+
+    stable_fields = repr(
+        (
+            event.title,
+            event.description,
+            event.link,
+            event.image_url,
+            event.branch,
+            tuple(sorted(event.age_categories)),
+            event.end_at,
+            tuple(
+                (link.label, link.url, link.occurrence)
+                for link in event.description_links
+            ),
+            event.description_html,
+            event.venue,
+            event.room,
+            event.modality,
+            event.image_layout,
+            event.description_truncated,
+        )
+    )
+    return (
+        event_is_active(event),
+        -len(event.description),
+        -len(event.description_html),
+        -int(bool(event.image_url)),
+        -int(event.end_at is not None),
+        stable_fields,
+    )
 
 
 def event_identity(event: Event) -> str:
@@ -1171,13 +1214,11 @@ def matching_events(
 ) -> list[Event]:
     """Return deduplicated, sorted, included events in a date range."""
 
-    relevant_events = merge_events(
-        [
-            event
-            for event in events
-            if start_date <= event.event_date <= end_date and event_is_active(event)
-        ]
-    )
+    relevant_events = [
+        event
+        for event in merge_events(events)
+        if start_date <= event.event_date <= end_date and event_is_active(event)
+    ]
 
     rank_order = {"best": 0, "good": 1, "possible": 2, "broad": 3}
     included: list[tuple[Event, FitRank]] = []
@@ -2101,13 +2142,11 @@ def select_digest_events(
 ) -> tuple[list[Event], list[Event]]:
     """Return active weekly occurrences and the age-matched subset."""
 
-    weekly_events = merge_events(
-        [
-            event
-            for event in events
-            if week_start <= event.event_date <= week_end and event_is_active(event)
-        ]
-    )
+    weekly_events = [
+        event
+        for event in merge_events(events)
+        if week_start <= event.event_date <= week_end and event_is_active(event)
+    ]
     return weekly_events, matching_events(
         weekly_events,
         birth_date,

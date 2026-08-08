@@ -232,12 +232,23 @@ async def _async_render_digest(call: ServiceCall) -> ServiceResponse:
 
     entry = loaded_entries[0]
     coordinator = entry.runtime_data
+    accepted_owner = (dict(entry.data), dict(entry.options))
+    config = entry_config(*accepted_owner)
     if call.data[ATTR_FORCE_REFRESH]:
         await coordinator.async_request_refresh()
         if not coordinator.last_update_success:
             raise HomeAssistantError(
                 translation_domain=DOMAIN,
                 translation_key="library_refresh_failed",
+            )
+        if (
+            entry.state is not ConfigEntryState.LOADED
+            or getattr(entry, "runtime_data", None) is not coordinator
+            or accepted_owner != (dict(entry.data), dict(entry.options))
+        ):
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="settings_changed_during_render",
             )
     data = coordinator.data
     if data is None:
@@ -246,7 +257,6 @@ async def _async_render_digest(call: ServiceCall) -> ServiceResponse:
             translation_key="library_data_unavailable",
         )
 
-    config = entry_config(entry.data, entry.options)
     reference_date = dt_util.now().date()
     branches = selected_branches(config)
     source_counts = {

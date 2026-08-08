@@ -16,6 +16,13 @@
   or external update changes config-entry data or options before confirmation.
 - Preserve future and unrecognized fields when reconfiguring profile data,
   saving behavior or WebCal options, and migrating older combined entries.
+- Normalize overlapping event rows independently of feed order and let an
+  inactive publisher title win so an older duplicate cannot hide a cancelled,
+  postponed, or rescheduled occurrence.
+- Reject digest generation when a concurrent reconfigure or reload supersedes
+  the config-entry settings and coordinator during an awaited source refresh,
+  instead of mixing source data and filtering settings from different
+  generations.
 
 ## Changed
 
