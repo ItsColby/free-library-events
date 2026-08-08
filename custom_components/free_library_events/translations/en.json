@@ -130,6 +130,9 @@
     "library_refresh_failed": {
       "message": "The library feeds could not be refreshed, so no email was generated. Check the Free Library Events status sensor for details."
     },
+    "settings_changed_during_render": {
+      "message": "The Free Library Events settings changed while the feeds were refreshing, so no email was generated. Run the action again to use the current settings."
+    },
     "manual_refresh_failed": {
       "message": "The library feeds could not be refreshed. Check the Free Library Events status sensor for details."
     },

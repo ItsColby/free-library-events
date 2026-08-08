@@ -4,6 +4,7 @@ import importlib.util
 import sys
 import unittest
 from datetime import date
+from itertools import permutations
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -286,6 +287,56 @@ class DigestTests(unittest.TestCase):
         self.assertEqual(payload["metadata"]["scanned_count"], 1)
         self.assertIn("Storyhour Room", payload["html"])
         self.assertIn(richer.image_url, payload["html"])
+
+    def test_merge_events_is_stable_for_reordered_duplicate_sources(self) -> None:
+        base = digest.Event(
+            title="Baby Storytime",
+            event_date=date(2026, 7, 20),
+            start_time=digest.time(10, 30),
+            description="A detailed published description for this event.",
+            link="https://example.test/events/42",
+            image_url="",
+            branch=digest.BRANCHES["CEN"],
+            age_categories=("Baby",),
+        )
+        cancelled = digest.replace(
+            base,
+            title="Baby Storytime - Cancelled",
+            description="Cancelled.",
+            age_categories=("Toddler",),
+        )
+        illustrated = digest.replace(
+            base,
+            description="Flyer available.",
+            image_url="https://libwww.freelibrary.org/images/storytime.png",
+            age_categories=("Preschool",),
+        )
+
+        merged_results = {
+            digest.merge_events(order)[0]
+            for order in permutations((base, cancelled, illustrated))
+        }
+
+        self.assertEqual(len(merged_results), 1)
+        merged = merged_results.pop()
+        self.assertEqual(merged.title, cancelled.title)
+        self.assertFalse(digest.event_is_active(merged))
+        self.assertEqual(merged.description, base.description)
+        self.assertEqual(merged.image_url, illustrated.image_url)
+        self.assertEqual(
+            merged.age_categories,
+            ("Baby", "Toddler", "Preschool"),
+        )
+        for order in permutations((base, cancelled, illustrated)):
+            weekly, selected = digest.select_digest_events(
+                order,
+                birth_date=date(2025, 10, 7),
+                filter_mode="Recommended",
+                week_start=date(2026, 7, 20),
+                week_end=date(2026, 7, 26),
+            )
+            self.assertEqual(weekly, [])
+            self.assertEqual(selected, [])
 
     def test_next_week_start_treats_monday_as_current_week(self) -> None:
         self.assertEqual(digest.next_week_start(date(2026, 7, 20)), date(2026, 7, 20))

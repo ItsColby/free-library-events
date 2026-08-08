@@ -1276,6 +1276,68 @@ async def test_setup_entities_action_and_redacted_diagnostics(
     ]
 
 
+@pytest.mark.parametrize("supersession", ("profile", "coordinator"))
+async def test_render_digest_rejects_superseded_entry_during_refresh(
+    hass: HomeAssistant, supersession: str
+) -> None:
+    entry = _entry()
+    entry.add_to_hass(hass)
+
+    async def fetch_empty(_branch, age_category):
+        return BranchFeed(
+            events=(),
+            age_category=age_category,
+            source_count=0,
+            parsed_count=0,
+            last_event_date=None,
+            ordered=True,
+        )
+
+    with (
+        patch(
+            "custom_components.free_library_events.api.LibraryClient.async_fetch_feed",
+            side_effect=fetch_empty,
+        ),
+        patch(
+            "custom_components.free_library_events.sensor.async_track_point_in_time",
+            return_value=Mock(),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    coordinator = entry.runtime_data
+
+    async def refresh_while_entry_is_superseded() -> None:
+        if supersession == "profile":
+            hass.config_entries.async_update_entry(
+                entry,
+                data={**dict(entry.data), CONF_CHILD_NAME: "Jordan"},
+            )
+        else:
+            entry.runtime_data = Mock()
+
+    with (
+        patch.object(
+            coordinator,
+            "async_request_refresh",
+            side_effect=refresh_while_entry_is_superseded,
+        ),
+        pytest.raises(HomeAssistantError) as failure,
+    ):
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_RENDER_DIGEST,
+            {ATTR_FORCE_REFRESH: True},
+            blocking=True,
+            return_response=True,
+        )
+
+    assert failure.value.translation_domain == DOMAIN
+    assert failure.value.translation_key == "settings_changed_during_render"
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
 def test_stored_cid_images_match_home_assistant_smtp_mime_contract(
     hass: HomeAssistant,
     tmp_path: Path,

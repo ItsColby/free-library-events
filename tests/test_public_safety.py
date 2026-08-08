@@ -267,6 +267,7 @@ class PublicSafetyGuardTests(unittest.TestCase):
             {
                 "library_data_unavailable",
                 "library_refresh_failed",
+                "settings_changed_during_render",
                 "single_loaded_entry_required",
             },
             exception_keys,
