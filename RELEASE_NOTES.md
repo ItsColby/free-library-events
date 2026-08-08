@@ -33,6 +33,9 @@
 - Install Home Assistant's exact Camera, TTS, and TTS-owned FFmpeg dependencies
   in both HA test lanes because the SMTP MIME-contract test imports those
   optional Core components transitively.
+- Keep historical-clock Home Assistant tests deterministic by owning their
+  projection timers instead of letting a past synthetic deadline fire against
+  the runner's wall clock.
 
 # Free Library Events v2026.8.5
 
