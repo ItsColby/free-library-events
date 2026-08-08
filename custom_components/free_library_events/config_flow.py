@@ -28,6 +28,7 @@ from .config import (
     entry_profile,
     normalize_options,
     profile_entry_data,
+    updated_entry_options,
 )
 from .const import (
     CONF_BIRTH_DATE,
@@ -194,7 +195,7 @@ class FreeLibraryEventsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             else:
                 return self.async_update_reload_and_abort(
                     entry,
-                    data=profile,
+                    data={**dict(entry.data), **profile},
                     reason="reconfigure_successful",
                 )
 
@@ -209,6 +210,26 @@ class FreeLibraryEventsOptionsFlow(config_entries.OptionsFlowWithReload):
     """Manage optional behavior and calendar publication."""
 
     _pending_options: dict[str, Any] | None = None
+    _pending_owner: tuple[dict[str, Any], dict[str, Any]] | None = None
+
+    def _entry_owner(self) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Return the complete mutable config-entry owner."""
+
+        return dict(self.config_entry.data), dict(self.config_entry.options)
+
+    def _stage_options(self, normalized_options: dict[str, Any]) -> None:
+        """Retain an accepted owner snapshot and its proposed replacement."""
+
+        self._pending_owner = self._entry_owner()
+        self._pending_options = updated_entry_options(
+            self._pending_owner[1], normalized_options
+        )
+
+    def _clear_pending_options(self) -> None:
+        """Discard a staged options replacement."""
+
+        self._pending_owner = None
+        self._pending_options = None
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -245,7 +266,9 @@ class FreeLibraryEventsOptionsFlow(config_entries.OptionsFlowWithReload):
             except (TypeError, ValueError) as err:
                 errors["base"] = str(err) or "invalid_config"
             else:
-                return self.async_create_entry(data=options)
+                return self.async_create_entry(
+                    data=updated_entry_options(self.config_entry.options, options)
+                )
 
         return self.async_show_form(
             step_id="behavior",
@@ -270,10 +293,12 @@ class FreeLibraryEventsOptionsFlow(config_entries.OptionsFlowWithReload):
                 errors["base"] = str(err) or "invalid_config"
             else:
                 if not options[CONF_PUBLISH_WEBCAL]:
-                    return self.async_create_entry(data=options)
+                    return self.async_create_entry(
+                        data=updated_entry_options(self.config_entry.options, options)
+                    )
                 if not options.get(CONF_WEBCAL_TOKEN):
                     options[CONF_WEBCAL_TOKEN] = token_urlsafe(32)
-                self._pending_options = options
+                self._stage_options(options)
                 return await self.async_step_webcal_url()
 
         return self.async_show_form(
@@ -299,7 +324,7 @@ class FreeLibraryEventsOptionsFlow(config_entries.OptionsFlowWithReload):
             return await self.async_step_webcal()
         if user_input is not None:
             current[CONF_WEBCAL_TOKEN] = token_urlsafe(32)
-            self._pending_options = current
+            self._stage_options(current)
             return await self.async_step_webcal_url()
         return self.async_show_form(
             step_id="regenerate_webcal",
@@ -314,13 +339,18 @@ class FreeLibraryEventsOptionsFlow(config_entries.OptionsFlowWithReload):
         if self._pending_options is None:
             return await self.async_step_init()
         if user_input is not None:
-            return self.async_create_entry(data=self._pending_options)
+            if self._pending_owner != self._entry_owner():
+                self._clear_pending_options()
+                return self.async_abort(reason="options_changed")
+            pending_options = self._pending_options
+            self._clear_pending_options()
+            return self.async_create_entry(data=pending_options)
         token = self._pending_options[CONF_WEBCAL_TOKEN]
         try:
             urls = webcal_subscription_urls(self.hass, token)
         except NoURLAvailableError:
             pending_options = self._pending_options
-            self._pending_options = None
+            self._clear_pending_options()
             return self.async_show_form(
                 step_id="webcal",
                 data_schema=_webcal_schema(pending_options),

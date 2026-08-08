@@ -181,7 +181,7 @@ async def test_reconfigure_flow_updates_profile_data_only(
         domain=DOMAIN,
         title="Free Library Events",
         unique_id=DOMAIN,
-        data=PROFILE_DATA,
+        data={**PROFILE_DATA, "future_profile": {"enabled": True}},
         options=BEHAVIOR_INPUT,
         version=1,
         minor_version=2,
@@ -211,6 +211,7 @@ async def test_reconfigure_flow_updates_profile_data_only(
         CONF_INCLUDE_INDEPENDENCE: True,
         CONF_INCLUDE_PARKWAY_CENTRAL: False,
         CONF_INCLUDE_PCI: True,
+        "future_profile": {"enabled": True},
     }
     assert entry.options == BEHAVIOR_INPUT
 
@@ -228,12 +229,13 @@ async def test_user_flow_rejects_duplicate_entry(hass: HomeAssistant) -> None:
 async def test_options_flow_enables_and_rotates_webcal_feed(
     hass: HomeAssistant,
 ) -> None:
+    future_option = {"future_behavior": {"enabled": True}}
     entry = MockConfigEntry(
         domain=DOMAIN,
         title="Free Library Events",
         unique_id=DOMAIN,
         data=PROFILE_DATA,
-        options=BEHAVIOR_INPUT,
+        options={**BEHAVIOR_INPUT, **future_option},
         version=1,
         minor_version=2,
     )
@@ -278,12 +280,15 @@ async def test_options_flow_enables_and_rotates_webcal_feed(
         "url_scope": "Home Assistant external or cloud URL configured",
     }
 
+    entry.runtime_data = Mock(source_result_count=1)
+    entry.runtime_data.source_result_count = 2
     result = await hass.config_entries.options.async_configure(result["flow_id"], {})
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert entry.options[CONF_PUBLISH_WEBCAL] is True
     assert entry.options[CONF_WEBCAL_TOKEN] == first_token
     assert entry.options[CONF_WEBCAL_NAME] == "Neighborhood Library Events"
     assert "regenerate_webcal_token" not in entry.options
+    assert entry.options["future_behavior"] == future_option["future_behavior"]
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
     assert result["type"] is FlowResultType.MENU
@@ -309,6 +314,136 @@ async def test_options_flow_enables_and_rotates_webcal_feed(
     result = await hass.config_entries.options.async_configure(result["flow_id"], {})
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert entry.options[CONF_WEBCAL_TOKEN] == second_token
+    assert entry.options["future_behavior"] == future_option["future_behavior"]
+
+
+async def test_webcal_preview_rejects_competing_options_update(
+    hass: HomeAssistant,
+) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Free Library Events",
+        unique_id=DOMAIN,
+        data=PROFILE_DATA,
+        options=BEHAVIOR_INPUT,
+        version=1,
+        minor_version=2,
+    )
+    entry.add_to_hass(hass)
+    hass.config.external_url = "https://ha.example.test"
+
+    webcal_result = await hass.config_entries.options.async_init(entry.entry_id)
+    webcal_result = await hass.config_entries.options.async_configure(
+        webcal_result["flow_id"], {"next_step_id": "webcal"}
+    )
+    with patch(
+        "custom_components.free_library_events.config_flow.token_urlsafe",
+        return_value="pending-synthetic-subscription-token",
+    ):
+        webcal_result = await hass.config_entries.options.async_configure(
+            webcal_result["flow_id"],
+            {
+                CONF_PUBLISH_WEBCAL: True,
+                CONF_WEBCAL_NAME: "Pending Library Events",
+            },
+        )
+    assert webcal_result["step_id"] == "webcal_url"
+
+    behavior_result = await hass.config_entries.options.async_init(entry.entry_id)
+    behavior_result = await hass.config_entries.options.async_configure(
+        behavior_result["flow_id"], {"next_step_id": "behavior"}
+    )
+    with patch.object(
+        hass.config_entries, "async_reload", new_callable=AsyncMock
+    ) as async_reload:
+        behavior_result = await hass.config_entries.options.async_configure(
+            behavior_result["flow_id"], {CONF_FILTER_MODE: "Strict"}
+        )
+        webcal_result = await hass.config_entries.options.async_configure(
+            webcal_result["flow_id"], {}
+        )
+
+    assert behavior_result["type"] is FlowResultType.CREATE_ENTRY
+    assert webcal_result["type"] is FlowResultType.ABORT
+    assert webcal_result["reason"] == "options_changed"
+    assert entry.options[CONF_FILTER_MODE] == "Strict"
+    assert CONF_WEBCAL_TOKEN not in entry.options
+    assert async_reload.await_count == 1
+
+
+async def test_webcal_preview_rejects_external_profile_update(
+    hass: HomeAssistant,
+) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Free Library Events",
+        unique_id=DOMAIN,
+        data=PROFILE_DATA,
+        options=BEHAVIOR_INPUT,
+        version=1,
+        minor_version=2,
+    )
+    entry.add_to_hass(hass)
+    hass.config.external_url = "https://ha.example.test"
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "webcal"}
+    )
+    with patch(
+        "custom_components.free_library_events.config_flow.token_urlsafe",
+        return_value="pending-synthetic-subscription-token",
+    ):
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            {
+                CONF_PUBLISH_WEBCAL: True,
+                CONF_WEBCAL_NAME: "Pending Library Events",
+            },
+        )
+    updated_data = {**entry.data, CONF_CHILD_NAME: "Jordan"}
+    hass.config_entries.async_update_entry(entry, data=updated_data)
+
+    with patch.object(
+        hass.config_entries, "async_reload", new_callable=AsyncMock
+    ) as async_reload:
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], {}
+        )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "options_changed"
+    assert entry.data == updated_data
+    assert entry.options == BEHAVIOR_INPUT
+    async_reload.assert_not_awaited()
+
+
+async def test_options_flow_preserves_unrecognized_options(
+    hass: HomeAssistant,
+) -> None:
+    future_option = {"future_behavior": {"enabled": True}}
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Free Library Events",
+        unique_id=DOMAIN,
+        data=PROFILE_DATA,
+        options={**BEHAVIOR_INPUT, **future_option},
+        version=1,
+        minor_version=2,
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "behavior"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_FILTER_MODE: "Strict"}
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_FILTER_MODE] == "Strict"
+    assert entry.options["future_behavior"] == future_option["future_behavior"]
 
 
 async def test_options_flow_disables_webcal_and_removes_token(
@@ -325,6 +460,7 @@ async def test_options_flow_disables_webcal_and_removes_token(
             CONF_PUBLISH_WEBCAL: True,
             CONF_WEBCAL_TOKEN: old_token,
             CONF_WEBCAL_NAME: "Free Library Events",
+            "future_behavior": {"enabled": True},
         },
         version=1,
         minor_version=2,
@@ -346,6 +482,7 @@ async def test_options_flow_disables_webcal_and_removes_token(
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert entry.options[CONF_PUBLISH_WEBCAL] is False
     assert CONF_WEBCAL_TOKEN not in entry.options
+    assert entry.options["future_behavior"] == {"enabled": True}
 
 
 async def test_options_flow_does_not_save_webcal_without_a_home_assistant_url(
@@ -516,7 +653,7 @@ async def test_version_one_entry_migrates_profile_and_behavior_without_token_lea
         domain=DOMAIN,
         title="Free Library Events",
         unique_id=DOMAIN,
-        data=USER_INPUT,
+        data=USER_INPUT | {"future_data": {"version": 2}},
         options=USER_INPUT
         | {
             CONF_CHILD_NAME: "Jordan",
@@ -524,6 +661,7 @@ async def test_version_one_entry_migrates_profile_and_behavior_without_token_lea
             CONF_FILTER_MODE: "Strict",
             CONF_PUBLISH_WEBCAL: True,
             CONF_WEBCAL_TOKEN: token,
+            "future_options": {"version": 2},
         },
         version=1,
     )
@@ -541,9 +679,11 @@ async def test_version_one_entry_migrates_profile_and_behavior_without_token_lea
         CONF_INCLUDE_INDEPENDENCE: True,
         CONF_INCLUDE_PARKWAY_CENTRAL: True,
         CONF_INCLUDE_PCI: False,
+        "future_data": {"version": 2},
     }
     assert entry.options[CONF_FILTER_MODE] == "Strict"
     assert entry.options[CONF_WEBCAL_TOKEN] == token
+    assert entry.options["future_options"] == {"version": 2}
     assert CONF_CHILD_NAME not in entry.options
     assert CONF_BIRTH_DATE not in entry.options
     assert token not in repr(entry.data)

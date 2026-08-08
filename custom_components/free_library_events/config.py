@@ -46,6 +46,20 @@ LEGACY_BRANCH_CONFIG_KEYS = (
     (CONF_INCLUDE_PARKWAY_CENTRAL, "CEN"),
     (CONF_INCLUDE_PCI, "PCI"),
 )
+PROFILE_CONFIG_KEYS = (
+    CONF_CHILD_NAME,
+    CONF_BIRTH_DATE,
+    CONF_BRANCHES,
+    *(key for key, _branch_code in LEGACY_BRANCH_CONFIG_KEYS),
+)
+OPTION_CONFIG_KEYS = (
+    CONF_FILTER_MODE,
+    CONF_CALENDAR_DURATION,
+    CONF_SCAN_INTERVAL,
+    CONF_PUBLISH_WEBCAL,
+    CONF_WEBCAL_NAME,
+    CONF_WEBCAL_TOKEN,
+)
 
 
 def default_config() -> dict[str, Any]:
@@ -178,6 +192,17 @@ def entry_options(
     return normalize_options({**dict(entry_data), **dict(entry_option_values)})
 
 
+def updated_entry_options(
+    current_options: Mapping[str, Any], normalized_options: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Preserve unrecognized options while replacing current owned values."""
+
+    options = {**dict(current_options), **dict(normalized_options)}
+    if CONF_WEBCAL_TOKEN not in normalized_options:
+        options.pop(CONF_WEBCAL_TOKEN, None)
+    return options
+
+
 def entry_config(
     entry_data: Mapping[str, Any], entry_option_values: Mapping[str, Any]
 ) -> dict[str, Any]:
@@ -194,9 +219,20 @@ def migrated_entry_config(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Split a version-1.1 combined entry into version-1.2 data and options."""
 
+    profile = profile_entry_data({**dict(entry_data), **dict(entry_option_values)})
+    options = entry_options(entry_data, entry_option_values)
+    migrated_data = {
+        key: value for key, value in entry_data.items() if key not in OPTION_CONFIG_KEYS
+    }
+    migrated_data.update(profile)
+    migrated_options = {
+        key: value
+        for key, value in entry_option_values.items()
+        if key not in PROFILE_CONFIG_KEYS
+    }
     return (
-        profile_entry_data({**dict(entry_data), **dict(entry_option_values)}),
-        entry_options(entry_data, entry_option_values),
+        migrated_data,
+        updated_entry_options(migrated_options, options),
     )
 
 
