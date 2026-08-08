@@ -263,15 +263,24 @@ page available outside the integration for schedule changes.
 2. Compare the official RSS builder's age and event-type options with the local
    source taxonomy; the runtime builder route is browser-protected, so this is a
    release-time drift check rather than an unreliable polling dependency.
-3. Keep `manifest.json` version, Git tag, and release title aligned.
-4. Wait for CodeQL analysis of the exact candidate/default-branch commit,
-   inspect open code-scanning alerts, and resolve or explicitly disposition
-   candidate-introduced findings. CodeQL workflow success proves completion of
-   analysis, not a clean result.
-5. Publish an immutable `vYYYY.M.D` release from the validated commit.
-6. Install or update only through HACS using an exact release.
-7. Restart Home Assistant after installation or update and verify the config
-   entry, entities, action, diagnostics, logs, Repairs, and update entity.
+3. On a release-candidate branch, align `manifest.json`, the intended immutable
+   `vYYYY.M.D` tag, and release title before opening the release pull request.
+4. Require terminal pull-request success for **Unit tests and static
+   validation**, **Home Assistant minimum integration tests (Core 2026.8.0)**,
+   **Home Assistant current-patch integration tests (Core 2026.8.1)**,
+   **Hassfest**, **HACS**, the aggregate **Release gate**, and CodeQL's **Analyze
+   (actions)**, **Analyze (python)**, and **CodeQL** checks.
+5. Merge through default-branch protection without bypass, using squash or
+   rebase so history remains linear.
+6. On the resulting `main` commit, require the **Validate** push run and CodeQL
+   analysis to succeed. Inspect their complete logs and open code-scanning
+   alerts; workflow success proves analysis completed, not that it found
+   nothing. Resolve or explicitly disposition candidate-introduced findings.
+7. Publish the immutable tag and GitHub Release only from that exact validated
+   `main` commit.
+8. Treat HACS selection or installation, the Home Assistant configuration
+   check, restart, live validation, migration, and rollback as later, separately
+   gated phases.
 
 Maintainer-specific backup, deployment readback, rollback, and household
 automation procedures deliberately live outside this public repository.
