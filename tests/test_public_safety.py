@@ -207,8 +207,14 @@ class PublicSafetyGuardTests(unittest.TestCase):
         current_requirements = (root / "requirements-ha-current.txt").read_text(
             encoding="utf-8"
         )
-        self.assertEqual("homeassistant==2026.8.0", minimum_requirements.strip())
-        self.assertEqual("homeassistant==2026.8.1", current_requirements.strip())
+        self.assertEqual(
+            ["homeassistant==2026.8.0", "PyTurboJPEG==1.8.3"],
+            minimum_requirements.splitlines(),
+        )
+        self.assertEqual(
+            ["homeassistant==2026.8.1", "PyTurboJPEG==1.8.3"],
+            current_requirements.splitlines(),
+        )
         self.assertIn(dependency_check, readme)
         self.assertIn(compatibility_check, readme)
         self.assertEqual(
