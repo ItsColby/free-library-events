@@ -130,6 +130,9 @@
     "manual_refresh_failed": {
       "message": "The library feeds could not be refreshed. Check the Free Library Events status sensor for details."
     },
+    "library_source_update_failed": {
+      "message": "The library feeds could not be refreshed. Home Assistant will try again automatically."
+    },
     "single_loaded_entry_required": {
       "message": "Free Library Events requires exactly one loaded config entry before rendering a digest."
     }

@@ -395,11 +395,15 @@ must be removed or updated separately.
 
 ## Development and validation
 
-Home Assistant 2026.8.0 or newer is required. Python 3.14 is required for the
-matching integration-test environment.
-The latest Home Assistant custom-component test harness owns its compatible
-pytest version; `requirements-ha-test.txt` pins Core only, and `pip check`
-rejects incompatible dependency overrides.
+Home Assistant 2026.8.0 or newer is required. Python 3.14 and Linux are required
+for the Home Assistant integration-test environments. The supported-minimum
+lane is dependency-closed at Core 2026.8.0, matching the published 0.13.354
+custom-component harness. A separate exact-current lane targets Core 2026.8.1.
+Its bounded checker accepts either a clean environment or only the single
+metadata-proven harness/Core exact-pin mismatch before the complete HA tests
+run. That second lane proves same-month patch compatibility, not dependency
+closure; cross-month, prerelease, additional-conflict, collection-failure, and
+test-failure cases remain hard failures.
 
 ```powershell
 python -m pip install --upgrade ruff mypy shellcheck-py zizmor
@@ -419,17 +423,20 @@ try {
 python -m unittest discover -s tests -p "test_digest.py"
 python -m unittest discover -s tests -p "test_metadata.py"
 python -m unittest discover -s tests -p "test_public_safety.py"
+python -m unittest discover -s tests -p "test_ha_patch_compatibility.py"
 python -m compileall -q custom_components\free_library_events tests scripts
 python scripts\check_public_safety.py
 python -c "import json, pathlib; [json.loads(pathlib.Path(path).read_text(encoding='utf-8')) for path in ['custom_components/free_library_events/icons.json','custom_components/free_library_events/manifest.json','custom_components/free_library_events/translations/en.json','hacs.json']]"
 docker run --rm -v "${PWD}:/work" -w /work python:3.14-slim bash -lc "python -m pip install --upgrade pip && python -m pip install pytest-homeassistant-custom-component==0.13.354 && python -m pip install --upgrade -r requirements-ha-test.txt && python -m pip check && pytest tests/test_integration_ha.py tests/test_email_images.py -q"
+docker run --rm -v "${PWD}:/work" -w /work python:3.14-slim bash -lc "python -m pip install --upgrade pip && python -m pip install pytest-homeassistant-custom-component==0.13.354 && python -m pip install --upgrade -r requirements-ha-current.txt && python scripts/check_ha_patch_compatibility.py --minimum requirements-ha-test.txt --current requirements-ha-current.txt && pytest tests/test_integration_ha.py tests/test_email_images.py -q"
 ```
 
 The protected GitHub workflow pins every third-party Action to a full commit
 SHA and runs the local tier, latest Ruff, mypy, actionlint with latest ShellCheck,
-zizmor auditor, the Home Assistant 2026.8 lane, Hassfest, and the HACS Action. It
-reports the resolved static-analysis tool versions. The stable **Release gate**
-succeeds only when every required job succeeds. Dependabot proposes weekly
+zizmor auditor, dependency-closed minimum-Core and bounded current-patch Home
+Assistant lanes, Hassfest, and the HACS Action. It reports the resolved
+static-analysis tool versions. The stable **Release gate** succeeds only when
+every required job succeeds. Dependabot proposes weekly
 GitHub Actions and Python dependency updates after a seven-day stability and
 supply-chain cooldown. A release additionally waits for CodeQL analysis of the
 exact commit and inspects open alerts because a
