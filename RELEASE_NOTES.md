@@ -1,3 +1,36 @@
+# Unreleased
+
+## Fixed
+
+- Reevaluate the diagnostic status from cached coordinator data at the exact
+  Tuesday local-midnight boundary where the next-week digest window advances,
+  without performing feed I/O or duplicating Home Assistant's calendar timers.
+- Reschedule that projection when Home Assistant's timezone changes, handle
+  local DST boundaries, avoid unchanged state writes, and cancel the timer and
+  timezone listener when the entity unloads.
+- Raise a translated Home Assistant update error after complete source failure
+  while retaining only bounded source-error categories.
+
+## Changed
+
+- Publish deeply immutable coordinator snapshots by detaching and freezing the
+  source-count, source-status, and source-error mappings alongside the existing
+  frozen event tuple.
+- Keep maintainer-specific agent instructions and configuration out of the
+  public product repository while retaining product behavior in architecture,
+  tests, and CI.
+
+## Validation
+
+- Retain the dependency-closed Core 2026.8.0 supported-minimum lane and add a
+  separate exact Core 2026.8.1 same-month compatibility lane. The latter runs
+  the complete HA tests only after a bounded checker accepts either clean
+  dependency closure or the single metadata-proven test-harness/Core pin
+  mismatch.
+- Cover immutable nested snapshots, translated total-source failure, captured
+  status evaluation clocks, Tuesday-boundary reevaluation, timezone changes,
+  DST behavior, no-op Recorder writes, rescheduling, and unload cleanup.
+
 # Free Library Events v2026.8.5
 
 ## Fixed
