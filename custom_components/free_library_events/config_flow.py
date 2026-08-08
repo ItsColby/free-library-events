@@ -8,6 +8,7 @@ from typing import Any
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigFlowResult
+from homeassistant.core import callback
 from homeassistant.helpers.network import NoURLAvailableError
 from homeassistant.helpers.selector import (
     BooleanSelector,
@@ -85,42 +86,38 @@ def _profile_schema(defaults: dict[str, Any]) -> vol.Schema:
     )
 
 
-def _behavior_schema(defaults: dict[str, Any], *, advanced: bool) -> vol.Schema:
-    """Return ordinary behavior fields plus opt-in advanced tuning."""
+def _behavior_schema(defaults: dict[str, Any]) -> vol.Schema:
+    """Return matching and timing behavior fields."""
 
-    fields: dict[vol.Marker, object] = {
-        vol.Required(
-            CONF_FILTER_MODE, default=defaults[CONF_FILTER_MODE]
-        ): SelectSelector(SelectSelectorConfig(options=list(FILTER_MODES))),
-    }
-    if advanced:
-        fields.update(
-            {
-                vol.Required(
-                    CONF_CALENDAR_DURATION,
-                    default=defaults[CONF_CALENDAR_DURATION],
-                ): NumberSelector(
-                    NumberSelectorConfig(
-                        min=MIN_CALENDAR_DURATION,
-                        max=MAX_CALENDAR_DURATION,
-                        step=15,
-                        mode=NumberSelectorMode.BOX,
-                    )
-                ),
-                vol.Required(
-                    CONF_SCAN_INTERVAL,
-                    default=defaults[CONF_SCAN_INTERVAL],
-                ): NumberSelector(
-                    NumberSelectorConfig(
-                        min=MIN_SCAN_INTERVAL,
-                        max=MAX_SCAN_INTERVAL,
-                        step=900,
-                        mode=NumberSelectorMode.BOX,
-                    )
-                ),
-            }
-        )
-    return vol.Schema(fields)
+    return vol.Schema(
+        {
+            vol.Required(
+                CONF_FILTER_MODE, default=defaults[CONF_FILTER_MODE]
+            ): SelectSelector(SelectSelectorConfig(options=list(FILTER_MODES))),
+            vol.Required(
+                CONF_CALENDAR_DURATION,
+                default=defaults[CONF_CALENDAR_DURATION],
+            ): NumberSelector(
+                NumberSelectorConfig(
+                    min=MIN_CALENDAR_DURATION,
+                    max=MAX_CALENDAR_DURATION,
+                    step=15,
+                    mode=NumberSelectorMode.BOX,
+                )
+            ),
+            vol.Required(
+                CONF_SCAN_INTERVAL,
+                default=defaults[CONF_SCAN_INTERVAL],
+            ): NumberSelector(
+                NumberSelectorConfig(
+                    min=MIN_SCAN_INTERVAL,
+                    max=MAX_SCAN_INTERVAL,
+                    step=900,
+                    mode=NumberSelectorMode.BOX,
+                )
+            ),
+        }
+    )
 
 
 def _webcal_schema(defaults: dict[str, Any]) -> vol.Schema:
@@ -147,6 +144,7 @@ class FreeLibraryEventsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     MINOR_VERSION = 2
 
     @staticmethod
+    @callback
     def async_get_options_flow(
         config_entry: config_entries.ConfigEntry,
     ) -> config_entries.OptionsFlow:
@@ -197,6 +195,7 @@ class FreeLibraryEventsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     entry,
                     data={**dict(entry.data), **profile},
                     reason="reconfigure_successful",
+                    reload_even_if_entry_is_unchanged=False,
                 )
 
         return self.async_show_form(
@@ -256,7 +255,7 @@ class FreeLibraryEventsOptionsFlow(config_entries.OptionsFlowWithReload):
     async def async_step_behavior(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Edit filtering plus optional advanced timing controls."""
+        """Edit filtering and timing controls."""
 
         current = entry_options(self.config_entry.data, self.config_entry.options)
         errors: dict[str, str] = {}
@@ -272,10 +271,7 @@ class FreeLibraryEventsOptionsFlow(config_entries.OptionsFlowWithReload):
 
         return self.async_show_form(
             step_id="behavior",
-            data_schema=_behavior_schema(
-                {**current, **(user_input or {})},
-                advanced=self.show_advanced_options,
-            ),
+            data_schema=_behavior_schema({**current, **(user_input or {})}),
             errors=errors,
         )
 

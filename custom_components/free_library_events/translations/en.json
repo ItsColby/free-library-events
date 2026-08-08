@@ -62,7 +62,7 @@
       },
       "behavior": {
         "title": "Matching and timing",
-        "description": "Matching changes apply after saving. Enable Show advanced options to change placeholder duration or source polling.",
+        "description": "Matching and timing changes apply after saving. Keep the recommended timing defaults unless the source or calendar behavior needs tuning.",
         "data": {
           "filter_mode": "Age-match mode",
           "calendar_duration_minutes": "Calendar placeholder duration (minutes)",

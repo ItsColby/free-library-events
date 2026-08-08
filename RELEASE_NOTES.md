@@ -1,3 +1,18 @@
+# Unreleased
+
+## Fixed
+
+- Remove the deprecated Home Assistant advanced-mode dependency from the
+  matching and timing options form before Core removes that API.
+- Avoid reloading the integration and requesting every source when an unchanged
+  profile reconfigure form is submitted.
+
+## Changed
+
+- Keep matching and both bounded timing controls directly available in one
+  small options form, and mark the options-flow factory as a Home Assistant
+  callback.
+
 # Free Library Events v2026.8.8
 
 ## Fixed
