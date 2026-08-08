@@ -209,6 +209,24 @@ class EmailImageTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(bundle.source_url_to_layout[first_url], "hero")
 
+    async def test_rejects_redirects_to_nondefault_publisher_ports(self) -> None:
+        first_url = "https://libwww.freelibrary.org/images/start.png"
+        unsafe_url = "https://libwww.freelibrary.org:8443/images/final.png"
+        session = _Session(
+            {
+                first_url: _Response(b"", 302, {"Location": unsafe_url}),
+            }
+        )
+
+        batch = await email_images.async_download_event_images(
+            session,  # type: ignore[arg-type]
+            [_event("Unsafe redirect", first_url)],
+        )
+
+        self.assertEqual([request[0] for request in session.requests], [first_url])
+        self.assertEqual(batch.images, ())
+        self.assertEqual(batch.failure_count, 1)
+
     def test_reads_jpeg_dimensions_and_classifies_realistic_flyer_layouts(
         self,
     ) -> None:

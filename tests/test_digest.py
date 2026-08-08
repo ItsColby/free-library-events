@@ -752,6 +752,27 @@ class DigestTests(unittest.TestCase):
         )
         self.assertEqual(events[0].image_url, "")
 
+        for unsafe_port in ("8443", "invalid", "65536"):
+            with self.subTest(port=unsafe_port):
+                item["image_url"] = (
+                    "https://libwww.freelibrary.org:"
+                    f"{unsafe_port}/assets/images/calendar/events/171403.jpg"
+                )
+                events, _source_count = digest.parse_feed(
+                    rss([item]), digest.BRANCHES["SWK"], "Toddler"
+                )
+                self.assertEqual(events[0].image_url, "")
+
+        default_port_url = (
+            "https://libwww.freelibrary.org:443/"
+            "assets/images/calendar/events/171403.jpg"
+        )
+        item["image_url"] = default_port_url
+        events, _source_count = digest.parse_feed(
+            rss([item]), digest.BRANCHES["SWK"], "Toddler"
+        )
+        self.assertEqual(events[0].image_url, default_port_url)
+
     def test_parser_resolves_safe_relative_source_urls(self) -> None:
         item = {
             "title": "07/25/26: Family Storytime - Charles Santore Library",

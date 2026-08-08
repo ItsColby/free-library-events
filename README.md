@@ -238,8 +238,9 @@ disclose the configured placeholder used by the calendar link.
 
 For SMTP, set `embed_images: true` to make image display independent of the
 recipient's remote-image setting. This deterministic mode downloads only the
-unique publisher images used by the selected events, follows at most two
-publisher-hosted HTTPS redirects, validates signatures and dimensions, and
+unique publisher images used by the selected events, accepts only the default
+HTTPS port, follows at most two publisher-hosted HTTPS redirects, validates
+signatures and dimensions, and
 stores them in an integration-owned random run directory under Home Assistant
 Local Media. It rewrites the matching HTML sources to SMTP `cid:` references
 and returns modern `smtp.send_message` objects as `digest.attachments` plus
@@ -404,6 +405,9 @@ metadata-proven harness/Core exact-pin mismatch before the complete HA tests
 run. That second lane proves same-month patch compatibility, not dependency
 closure; cross-month, prerelease, additional-conflict, collection-failure, and
 test-failure cases remain hard failures.
+The HA integration-test module imports its Core and harness dependencies
+directly, so a missing supported API fails collection instead of silently
+skipping the integration suite.
 
 ```powershell
 python -m pip install --upgrade ruff mypy shellcheck-py zizmor
