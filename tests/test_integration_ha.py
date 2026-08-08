@@ -7,6 +7,7 @@ import json
 import sys
 import types
 import unittest
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
@@ -86,6 +87,7 @@ from custom_components.free_library_events.const import (
 )
 from custom_components.free_library_events.coordinator import (
     MAX_TYPE_EXPANSIONS_PER_REFRESH,
+    LibraryData,
     LibraryDataCoordinator,
     source_expansion_details,
     source_keys_for_window,
@@ -659,32 +661,48 @@ async def test_unchanged_status_projection_skips_state_write_and_source_io(
         )
     )
     monday = datetime(2026, 7, 20, 23, 59, tzinfo=LOCAL_TIME_ZONE)
+    scheduled: list[tuple[Callable[[datetime], None], datetime, Mock]] = []
+
+    def track_projection(
+        _hass: HomeAssistant,
+        action: Callable[[datetime], None],
+        deadline: datetime,
+    ) -> Mock:
+        cancel = Mock()
+        scheduled.append((action, deadline, cancel))
+        return cancel
+
     with (
         patch(
             "custom_components.free_library_events.api.LibraryClient.async_fetch_feed",
             new=fetch_mock,
         ),
+        patch(
+            "custom_components.free_library_events.sensor.async_track_point_in_time",
+            side_effect=track_projection,
+        ),
         patch("homeassistant.util.dt.now", return_value=monday),
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
+        assert len(scheduled) == 1
+        initial_fetch_count = fetch_mock.await_count
+        with patch.object(
+            LibraryStatusSensor, "async_write_ha_state", autospec=True
+        ) as write_state:
+            scheduled[0][0](datetime(2026, 7, 21, tzinfo=LOCAL_TIME_ZONE))
 
-    initial_fetch_count = fetch_mock.await_count
-    with patch.object(
-        LibraryStatusSensor, "async_write_ha_state", autospec=True
-    ) as write_state:
-        async_fire_time_changed(
-            hass,
-            datetime(2026, 7, 21, tzinfo=LOCAL_TIME_ZONE),
-        )
-        await hass.async_block_till_done()
+        write_state.assert_not_called()
+        assert len(scheduled) == 2
+        assert scheduled[1][1] == datetime(2026, 7, 28, tzinfo=LOCAL_TIME_ZONE)
+        assert fetch_mock.await_count == initial_fetch_count
+        unchanged = hass.states.get("sensor.free_library_events_status")
+        assert unchanged is not None
+        assert unchanged.state == "ok"
+        assert unchanged.attributes["next_week_events"] == 0
+        assert await hass.config_entries.async_unload(entry.entry_id)
 
-    write_state.assert_not_called()
-    assert fetch_mock.await_count == initial_fetch_count
-    unchanged = hass.states.get("sensor.free_library_events_status")
-    assert unchanged is not None
-    assert unchanged.state == "ok"
-    assert unchanged.attributes["next_week_events"] == 0
+    scheduled[1][2].assert_called_once_with()
 
 
 async def test_status_projection_reschedules_for_runtime_timezone_change(
@@ -2213,6 +2231,35 @@ async def test_coordinator_retains_partial_source_success(
         "SWK:Young Adult": SOURCE_ERROR_REQUEST_FAILED,
     }
     assert list(data.source_statuses) == ["SWK:Baby"]
+    with pytest.raises(TypeError):
+        data.source_counts["SWK"] = 1
+    with pytest.raises(TypeError):
+        data.source_statuses["SWK:Toddler"] = success
+    with pytest.raises(TypeError):
+        data.source_errors["SWK:Baby"] = SOURCE_ERROR_REQUEST_FAILED
+
+
+def test_library_data_detaches_nested_mappings() -> None:
+    source_counts = {"SWK": 1}
+    source_statuses: dict[str, BranchFeed] = {}
+    source_errors = {"SWK:Baby": SOURCE_ERROR_REQUEST_FAILED}
+    snapshot = LibraryData(
+        events=(),
+        source_counts=source_counts,
+        source_statuses=source_statuses,
+        source_errors=source_errors,
+        fetched_at=datetime(2026, 8, 8, tzinfo=ZoneInfo("UTC")),
+    )
+
+    source_counts["SWK"] = 2
+    source_statuses["SWK:Baby"] = Mock()
+    source_errors.clear()
+
+    assert snapshot.source_counts == {"SWK": 1}
+    assert snapshot.source_statuses == {}
+    assert snapshot.source_errors == {
+        "SWK:Baby": SOURCE_ERROR_REQUEST_FAILED,
+    }
 
 
 async def test_coordinator_does_not_retain_unexpected_exception_text(
@@ -2285,8 +2332,11 @@ async def test_coordinator_rejects_complete_source_failure(
         date(2025, 1, 15),
         timedelta(hours=6),
     )
-    with pytest.raises(UpdateFailed, match=SOURCE_ERROR_REQUEST_FAILED):
+    with pytest.raises(UpdateFailed) as failure:
         await coordinator._async_update_data()
+
+    assert failure.value.translation_domain == DOMAIN
+    assert failure.value.translation_key == "library_source_update_failed"
 
 
 def _entry() -> MockConfigEntry:

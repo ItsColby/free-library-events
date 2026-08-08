@@ -37,7 +37,13 @@
   the local birth date, requests every official age category in that group for
   each selected branch, refreshes the plan concurrently, consolidates duplicate
   events while retaining their official classifications and richer safe fields,
-  and preserves partial source success. It adaptively expands at most twelve
+  and preserves partial source success. Each completed refresh publishes one
+  deeply immutable normalized snapshot: event rows are frozen tuples and every
+  source-count, status, and error mapping is read-only. Home Assistant's
+  config-entry-owned coordinator debouncer bounds overlapping refresh triggers
+  to one running refresh plus one pending follow-up and shuts down scheduled
+  work on unload. Complete source failure uses a translated update error while
+  retaining only bounded error categories. It adaptively expands at most twelve
   unresolved capped feeds per refresh. Current-age sources come first, followed
   by the numerically nearest official age windows, with branches distributed
   deterministically within each category. A minor uses Baby through Young
@@ -236,9 +242,15 @@ page available outside the integration for schedule changes.
 
 ## Release Contract
 
-1. Use Python 3.14 and run unit, HA integration, compile, JSON, privacy,
-   Ruff, strict mypy, actionlint with ShellCheck, zizmor auditor, Hassfest, and
-   HACS validation.
+1. Use Python 3.14 and run unit, compile, JSON, privacy, Ruff, strict mypy,
+   actionlint with ShellCheck, zizmor auditor, Hassfest, and HACS validation.
+   The Linux HA tests have two exact owners: `requirements-ha-test.txt` proves
+   dependency closure at the 2026.8.0 supported minimum, while
+   `requirements-ha-current.txt` proves 2026.8.1 same-month patch compatibility.
+   The current-patch checker accepts only clean closure or the single
+   metadata-proven harness/Core exact-pin mismatch before running the complete
+   HA suite; it rejects cross-month or prerelease targets, additional conflicts,
+   skipped collection, and test failures.
 2. Compare the official RSS builder's age and event-type options with the local
    source taxonomy; the runtime builder route is browser-protected, so this is a
    release-time drift check rather than an unreliable polling dependency.

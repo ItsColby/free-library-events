@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
+from types import MappingProxyType
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -178,10 +179,23 @@ class LibraryData:
     """Latest normalized events and branch-source health."""
 
     events: tuple[Event, ...]
-    source_counts: dict[str, int]
-    source_statuses: dict[str, BranchFeed]
-    source_errors: dict[str, str]
+    source_counts: Mapping[str, int]
+    source_statuses: Mapping[str, BranchFeed]
+    source_errors: Mapping[str, str]
     fetched_at: datetime
+
+    def __post_init__(self) -> None:
+        """Detach and freeze every nested mapping in the normalized snapshot."""
+
+        object.__setattr__(
+            self, "source_counts", MappingProxyType(dict(self.source_counts))
+        )
+        object.__setattr__(
+            self, "source_statuses", MappingProxyType(dict(self.source_statuses))
+        )
+        object.__setattr__(
+            self, "source_errors", MappingProxyType(dict(self.source_errors))
+        )
 
 
 def coverage_warnings(
@@ -345,9 +359,8 @@ class LibraryDataCoordinator(DataUpdateCoordinator[LibraryData]):
 
         if not statuses:
             raise UpdateFailed(
-                SOURCE_ERROR_UNEXPECTED
-                if not errors
-                else ",".join(sorted(set(errors.values())))
+                translation_domain=DOMAIN,
+                translation_key="library_source_update_failed",
             )
 
         request_by_key = {

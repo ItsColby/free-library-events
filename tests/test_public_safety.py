@@ -128,7 +128,9 @@ class PublicSafetyGuardTests(unittest.TestCase):
         self.assertTrue({"RUF001", "RUF002", "RUF003"}.isdisjoint(lint["ignore"]))
         self.assertEqual(["T20"], lint["per-file-ignores"]["scripts/**"])
 
-    def test_home_assistant_support_contract_is_single_current_lane(self) -> None:
+    def test_home_assistant_support_contract_has_minimum_and_current_lanes(
+        self,
+    ) -> None:
         root = Path(__file__).resolve().parents[1]
         readme = (root / "README.md").read_text(encoding="utf-8")
         workflow = (root / ".github/workflows/validate.yaml").read_text(
@@ -137,42 +139,78 @@ class PublicSafetyGuardTests(unittest.TestCase):
         harness_install = (
             'python -m pip install "pytest-homeassistant-custom-component==0.13.354"'
         )
-        requirements_install = (
-            "python -m pip install --upgrade -r requirements-ha-test.txt"
+        minimum_install = "python -m pip install --upgrade -r requirements-ha-test.txt"
+        current_install = (
+            "python -m pip install --upgrade -r requirements-ha-current.txt"
+        )
+        compatibility_check = (
+            "python scripts/check_ha_patch_compatibility.py --minimum "
+            "requirements-ha-test.txt --current requirements-ha-current.txt"
         )
         dependency_check = "python -m pip check"
 
-        self.assertIn("Home Assistant integration tests (Core 2026.8.0)", workflow)
-        self.assertIn(harness_install, workflow)
-        self.assertIn(requirements_install, workflow)
-        self.assertLess(
-            workflow.index(harness_install), workflow.index(requirements_install)
+        self.assertIn(
+            "Home Assistant minimum integration tests (Core 2026.8.0)", workflow
         )
-        self.assertIn(dependency_check, workflow)
+        self.assertIn(
+            "Home Assistant current-patch integration tests (Core 2026.8.1)",
+            workflow,
+        )
+        minimum_job = workflow.index("  home_assistant_minimum:")
+        current_job = workflow.index("  home_assistant_current:")
+        hassfest_job = workflow.index("  hassfest:")
+        minimum_workflow = workflow[minimum_job:current_job]
+        current_workflow = workflow[current_job:hassfest_job]
+        self.assertIn(harness_install, minimum_workflow)
+        self.assertIn(minimum_install, minimum_workflow)
         self.assertLess(
-            workflow.index(requirements_install), workflow.index(dependency_check)
+            minimum_workflow.index(harness_install),
+            minimum_workflow.index(minimum_install),
+        )
+        self.assertIn(dependency_check, minimum_workflow)
+        self.assertLess(
+            minimum_workflow.index(minimum_install),
+            minimum_workflow.index(dependency_check),
         )
         self.assertLess(
-            workflow.index(dependency_check),
-            workflow.index(
+            minimum_workflow.index(dependency_check),
+            minimum_workflow.index(
                 "python -m mypy --strict custom_components/free_library_events"
             ),
         )
-        self.assertNotIn("matrix.", workflow)
+        self.assertIn(harness_install, current_workflow)
+        self.assertIn(current_install, current_workflow)
+        self.assertIn(compatibility_check, current_workflow)
+        self.assertLess(
+            current_workflow.index(harness_install),
+            current_workflow.index(current_install),
+        )
+        self.assertLess(
+            current_workflow.index(current_install),
+            current_workflow.index(compatibility_check),
+        )
         self.assertEqual(
-            1,
+            2,
             workflow.count("pytest-homeassistant-custom-component=="),
         )
         self.assertEqual(
-            [root / "requirements-ha-test.txt"],
-            list(root.glob("requirements-ha-test*.txt")),
+            [
+                root / "requirements-ha-current.txt",
+                root / "requirements-ha-test.txt",
+            ],
+            sorted(root.glob("requirements-ha-*.txt")),
         )
 
-        requirements = (root / "requirements-ha-test.txt").read_text(encoding="utf-8")
-        self.assertIn("homeassistant==2026.8.0", requirements)
-        self.assertNotIn("pytest==", requirements)
-        self.assertNotIn("pytest-homeassistant-custom-component", requirements)
+        minimum_requirements = (root / "requirements-ha-test.txt").read_text(
+            encoding="utf-8"
+        )
+        current_requirements = (root / "requirements-ha-current.txt").read_text(
+            encoding="utf-8"
+        )
+        self.assertEqual("homeassistant==2026.8.0", minimum_requirements.strip())
+        self.assertEqual("homeassistant==2026.8.1", current_requirements.strip())
         self.assertIn(dependency_check, readme)
+        self.assertIn(compatibility_check, readme)
         self.assertEqual(
             "2026.8.0",
             json.loads((root / "hacs.json").read_text(encoding="utf-8"))[
@@ -218,6 +256,36 @@ class PublicSafetyGuardTests(unittest.TestCase):
             exception_keys,
         )
         self.assertTrue(exception_keys <= set(strings["exceptions"]))
+
+    def test_complete_source_failure_is_translated(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        coordinator_text = (
+            root / "custom_components/free_library_events/coordinator.py"
+        ).read_text(encoding="utf-8")
+        strings = json.loads(
+            (
+                root / "custom_components/free_library_events/translations/en.json"
+            ).read_text(encoding="utf-8")
+        )
+        translated_failures = []
+        for node in ast.walk(ast.parse(coordinator_text)):
+            if not (
+                isinstance(node, ast.Raise)
+                and isinstance(node.exc, ast.Call)
+                and isinstance(node.exc.func, ast.Name)
+                and node.exc.func.id == "UpdateFailed"
+            ):
+                continue
+            self.assertEqual([], node.exc.args)
+            keyword_values = {item.arg: item.value for item in node.exc.keywords}
+            self.assertEqual(
+                "library_source_update_failed",
+                keyword_values["translation_key"].value,
+            )
+            translated_failures.append(keyword_values["translation_key"].value)
+
+        self.assertEqual(["library_source_update_failed"], translated_failures)
+        self.assertTrue(set(translated_failures) <= set(strings["exceptions"]))
 
     def test_generic_patterns_reject_sensitive_shapes(self) -> None:
         samples = {
