@@ -30,8 +30,9 @@
   DST behavior, no-op Recorder writes, rescheduling, and unload cleanup.
 - Fail Home Assistant test collection when a required Core or harness import is
   unavailable instead of silently skipping the complete integration-test module.
-- Install Home Assistant's exact camera dependency in both HA test lanes because
-  the SMTP MIME-contract test imports that optional Core component transitively.
+- Install Home Assistant's exact Camera, TTS, and TTS-owned FFmpeg dependencies
+  in both HA test lanes because the SMTP MIME-contract test imports those
+  optional Core components transitively.
 
 # Free Library Events v2026.8.5
 
