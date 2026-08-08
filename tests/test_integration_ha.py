@@ -32,7 +32,6 @@ from homeassistant.helpers.network import NoURLAvailableError
 from homeassistant.helpers.update_coordinator import UpdateFailed
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
-    async_fire_time_changed,
 )
 from pytest_homeassistant_custom_component.typing import ClientSessionGenerator
 
@@ -606,29 +605,42 @@ async def test_status_projection_advances_at_tuesday_without_source_io(
 
     fetch_mock = AsyncMock(side_effect=fetch_feed)
     monday = datetime(2026, 7, 20, 23, 59, tzinfo=LOCAL_TIME_ZONE)
+    scheduled: list[tuple[Callable[[datetime], None], datetime, Mock]] = []
+
+    def track_projection(
+        _hass: HomeAssistant,
+        action: Callable[[datetime], None],
+        deadline: datetime,
+    ) -> Mock:
+        cancel = Mock()
+        scheduled.append((action, deadline, cancel))
+        return cancel
+
     with (
         patch(
             "custom_components.free_library_events.api.LibraryClient.async_fetch_feed",
             new=fetch_mock,
         ),
+        patch(
+            "custom_components.free_library_events.sensor.async_track_point_in_time",
+            side_effect=track_projection,
+        ),
         patch("homeassistant.util.dt.now", return_value=monday),
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
+        initial = hass.states.get("sensor.free_library_events_status")
+        assert initial is not None
+        assert initial.state == "ok"
+        assert initial.attributes["next_week_events"] == 1
+        assert initial.attributes["current_age_coverage_complete"] is True
+        cached_data = entry.runtime_data.data
+        initial_fetch_count = fetch_mock.await_count
+        assert len(scheduled) == 1
+        assert scheduled[0][1] == datetime(2026, 7, 21, tzinfo=LOCAL_TIME_ZONE)
 
-    initial = hass.states.get("sensor.free_library_events_status")
-    assert initial is not None
-    assert initial.state == "ok"
-    assert initial.attributes["next_week_events"] == 1
-    assert initial.attributes["current_age_coverage_complete"] is True
-    cached_data = entry.runtime_data.data
-    initial_fetch_count = fetch_mock.await_count
-
-    async_fire_time_changed(
-        hass,
-        datetime(2026, 7, 21, tzinfo=LOCAL_TIME_ZONE),
-    )
-    await hass.async_block_till_done()
+        scheduled[0][0](datetime(2026, 7, 21, tzinfo=LOCAL_TIME_ZONE))
+        await hass.async_block_till_done()
 
     advanced = hass.states.get("sensor.free_library_events_status")
     assert advanced is not None
@@ -638,6 +650,8 @@ async def test_status_projection_advances_at_tuesday_without_source_io(
     assert advanced.attributes["current_age_coverage_warnings"]
     assert entry.runtime_data.data is cached_data
     assert fetch_mock.await_count == initial_fetch_count
+    assert len(scheduled) == 2
+    assert scheduled[1][1] == datetime(2026, 7, 28, tzinfo=LOCAL_TIME_ZONE)
 
 
 async def test_unchanged_status_projection_skips_state_write_and_source_io(
@@ -882,6 +896,10 @@ async def test_setup_entities_action_and_redacted_diagnostics(
         patch(
             "homeassistant.util.dt.now",
             return_value=datetime(2026, 7, 17, 12, tzinfo=LOCAL_TIME_ZONE),
+        ),
+        patch(
+            "custom_components.free_library_events.sensor.async_track_point_in_time",
+            return_value=Mock(),
         ),
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
