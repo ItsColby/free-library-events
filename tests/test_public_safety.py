@@ -208,11 +208,21 @@ class PublicSafetyGuardTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertEqual(
-            ["homeassistant==2026.8.0", "PyTurboJPEG==1.8.3"],
+            [
+                "homeassistant==2026.8.0",
+                "PyTurboJPEG==1.8.3",
+                "ha-ffmpeg==3.2.2",
+                "mutagen==1.48.1",
+            ],
             minimum_requirements.splitlines(),
         )
         self.assertEqual(
-            ["homeassistant==2026.8.1", "PyTurboJPEG==1.8.3"],
+            [
+                "homeassistant==2026.8.1",
+                "PyTurboJPEG==1.8.3",
+                "ha-ffmpeg==3.2.2",
+                "mutagen==1.48.1",
+            ],
             current_requirements.splitlines(),
         )
         self.assertIn(dependency_check, readme)
