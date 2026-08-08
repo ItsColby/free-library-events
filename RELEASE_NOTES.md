@@ -12,6 +12,10 @@
   while retaining only bounded source-error categories.
 - Reject initial and redirected publisher image URLs that specify a non-default
   HTTPS port.
+- Abort a pending WebCal preview without saving or reloading when another flow
+  or external update changes config-entry data or options before confirmation.
+- Preserve future and unrecognized fields when reconfiguring profile data,
+  saving behavior or WebCal options, and migrating older combined entries.
 
 ## Changed
 
@@ -28,6 +32,9 @@
 - Cover immutable nested snapshots, translated total-source failure, captured
   status evaluation clocks, Tuesday-boundary reevaluation, timezone changes,
   DST behavior, no-op Recorder writes, rescheduling, and unload cleanup.
+- Cover competing options flows and external profile updates during WebCal
+  preview, token rotation and disable behavior, unrelated coordinator-result
+  changes, and future-field preservation across every replacement path.
 - Fail Home Assistant test collection when a required Core or harness import is
   unavailable instead of silently skipping the complete integration-test module.
 - Install Home Assistant's exact Camera, TTS, and TTS-owned FFmpeg dependencies

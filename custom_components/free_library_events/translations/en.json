@@ -102,6 +102,9 @@
       "invalid_webcal_name": "Enter a calendar name of 80 characters or fewer.",
       "webcal_url_unavailable": "Configure an internal or external Home Assistant URL before enabling calendar subscription.",
       "invalid_config": "Check the settings and try again."
+    },
+    "abort": {
+      "options_changed": "The integration settings changed while this calendar URL was being reviewed. No changes were saved. Open Configure and try again."
     }
   },
   "services": {

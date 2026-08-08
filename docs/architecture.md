@@ -18,7 +18,11 @@
   optional matching, timing, and WebCal controls live in options. Version-1
   branch booleans remain synchronized compatibility mirrors so a downgrade to
   v2026.7.26 retains the selected branches. A minor-version migration splits
-  older combined entries without changing their effective behavior.
+  older combined entries without changing their effective behavior. Every
+  replacement preserves unrecognized fields in its existing data or options
+  owner. The two-step WebCal preview captures the complete accepted data and
+  options mappings and aborts without saving or reloading if either changes
+  before confirmation, so a concurrent flow cannot overwrite newer settings.
 - The config-entry card and service device use the static integration name;
   person identity remains only in private config data and rendered content. The
   internal `child_name` key remains unchanged for compatibility while every
