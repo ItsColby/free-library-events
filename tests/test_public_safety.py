@@ -17,7 +17,7 @@ from scripts.check_public_safety import (
 
 
 class PublicSafetyGuardTests(unittest.TestCase):
-    def test_latest_ruff_and_strict_mypy_are_documented(self) -> None:
+    def test_exact_pinned_tools_and_strict_mypy_are_documented(self) -> None:
         root = Path(__file__).resolve().parents[1]
         workflow = (root / ".github/workflows/validate.yaml").read_text(
             encoding="utf-8"
@@ -48,6 +48,8 @@ class PublicSafetyGuardTests(unittest.TestCase):
         )
         self.assertIn("run_actionlint", release_runner)
         self.assertIn("bash scripts/verify-release-local.sh unit native", workflow)
+        self.assertNotIn("ubuntu-latest", workflow)
+        self.assertEqual(6, workflow.count("runs-on: ubuntu-24.04"))
         self.assertEqual(1, workflow.count("permissions:"))
         permissions = workflow.split("\npermissions:\n", 1)[1].split("\n\n", 1)[0]
         self.assertEqual("  contents: read", permissions)
@@ -85,6 +87,9 @@ class PublicSafetyGuardTests(unittest.TestCase):
         self.assertIn("default-days: 7", dependabot)
         self.assertEqual(1, dependabot.count("package-ecosystem: github-actions"))
         self.assertEqual(1, dependabot.count("package-ecosystem: pip"))
+        self.assertEqual(2, dependabot.count("interval: weekly"))
+        self.assertNotIn("interval: daily", dependabot)
+        self.assertIn("exact-pinned", readme)
 
     def test_ruff_policy_is_repository_owned_and_high_signal(self) -> None:
         root = Path(__file__).resolve().parents[1]
@@ -136,6 +141,9 @@ class PublicSafetyGuardTests(unittest.TestCase):
         release_runner = (root / "scripts/verify-release-local.sh").read_text(
             encoding="utf-8"
         )
+        release_wrapper = (root / "scripts/verify-release-local.ps1").read_text(
+            encoding="utf-8"
+        )
         harness_install = (
             'python -m pip install "pytest-homeassistant-custom-component==0.13.354"'
         )
@@ -158,6 +166,15 @@ class PublicSafetyGuardTests(unittest.TestCase):
         )
         self.assertIn("bash scripts/verify-release-local.sh minimum native", workflow)
         self.assertIn("bash scripts/verify-release-local.sh current native", workflow)
+        self.assertIn(
+            '"${source_git[@]}" ls-files --cached --others --exclude-standard -z',
+            release_runner,
+        )
+        self.assertIn('--git-dir="$source_git_dir"', release_runner)
+        self.assertIn("rev-parse --path-format=absolute --git-dir", release_wrapper)
+        self.assertIn("$Mode container $linuxGitDir", release_wrapper)
+        self.assertIn('tar -C "$source_root" --null --files-from=-', release_runner)
+        self.assertNotIn('cp -a "$source_root/."', release_runner)
         minimum_job = release_runner.index("run_minimum()")
         current_job = release_runner.index("run_current()")
         release_job = release_runner.index("run_release()")
