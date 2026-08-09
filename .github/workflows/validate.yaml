@@ -28,66 +28,8 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.14"
-      - name: Install latest Python static-analysis tools
-        run: python -m pip install --upgrade ruff shellcheck-py zizmor
-      - name: Install latest workflow linter
-        env:
-          GOBIN: ${{ runner.temp }}/actionlint-bin
-        run: |
-          mkdir -p "$GOBIN"
-          go install github.com/rhysd/actionlint/cmd/actionlint@latest
-          echo "$GOBIN" >> "$GITHUB_PATH"
-      - name: Report static-analysis tool versions
-        run: |
-          actionlint -version
-          shellcheck --version
-          python -m ruff --version
-          zizmor --version
-      - name: Lint GitHub Actions workflows
-        run: actionlint
-      - name: Audit GitHub Actions security
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: zizmor --strict-collection --persona auditor .
-      - run: python -m ruff format --check custom_components tests scripts
-      - run: python -m ruff check custom_components tests scripts
-      - run: python -m unittest discover -s tests -p "test_digest.py"
-      - run: python -m unittest discover -s tests -p "test_metadata.py"
-      - run: python -m unittest discover -s tests -p "test_public_safety.py"
-      - run: python -m unittest discover -s tests -p "test_ha_patch_compatibility.py"
-      - run: python -m compileall -q custom_components/free_library_events tests scripts
-      - run: python scripts/check_public_safety.py
-      - name: Validate JSON metadata
-        run: >-
-          python -c "import json, pathlib;
-          [json.loads(pathlib.Path(path).read_text(encoding='utf-8'))
-          for path in
-          ['custom_components/free_library_events/icons.json',
-          'custom_components/free_library_events/manifest.json',
-          'custom_components/free_library_events/translations/en.json',
-          'hacs.json']]"
-      - name: Check trailing whitespace
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          paths = [
-              path
-              for root in ("custom_components", "tests", ".github", "scripts", "docs")
-              for path in Path(root).rglob("*")
-              if path.is_file()
-              and "__pycache__" not in path.parts
-              and path.suffix in {".json", ".md", ".py", ".txt", ".yaml", ".yml"}
-          ]
-          paths.extend(Path(path) for path in ("LICENSE", "README.md", "hacs.json"))
-          failures = []
-          for path in paths:
-              for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-                  if line.endswith((" ", "\t")):
-                      failures.append(f"{path}:{lineno}")
-          if failures:
-              raise SystemExit("Trailing whitespace:\n" + "\n".join(failures))
-          PY
+      - name: Run product-owned unit and static validation
+        run: bash scripts/verify-release-local.sh unit native
 
   home_assistant_minimum:
     name: Home Assistant minimum integration tests (Core 2026.8.0)
@@ -100,16 +42,8 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.14"
-      - name: Install Home Assistant test harness
-        run: python -m pip install "pytest-homeassistant-custom-component==0.13.354"
-      - name: Install supported Home Assistant Core
-        run: python -m pip install --upgrade -r requirements-ha-test.txt
-      - run: python -m pip install --upgrade mypy
-      - name: Verify dependency closure
-        run: python -m pip check
-      - run: python -m mypy --version
-      - run: python -m mypy --strict custom_components/free_library_events
-      - run: pytest tests/test_integration_ha.py tests/test_email_images.py -q
+      - name: Run product-owned minimum-version validation
+        run: bash scripts/verify-release-local.sh minimum native
 
   home_assistant_current:
     name: Home Assistant current-patch integration tests (Core 2026.8.1)
@@ -122,13 +56,8 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.14"
-      - name: Install Home Assistant test harness
-        run: python -m pip install "pytest-homeassistant-custom-component==0.13.354"
-      - name: Install current Home Assistant Core patch
-        run: python -m pip install --upgrade -r requirements-ha-current.txt
-      - name: Verify bounded same-month patch compatibility
-        run: python scripts/check_ha_patch_compatibility.py --minimum requirements-ha-test.txt --current requirements-ha-current.txt
-      - run: pytest tests/test_integration_ha.py tests/test_email_images.py -q
+      - name: Run product-owned current-version validation
+        run: bash scripts/verify-release-local.sh current native
 
   hassfest:
     name: Hassfest

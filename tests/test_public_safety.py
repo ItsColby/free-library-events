@@ -22,6 +22,9 @@ class PublicSafetyGuardTests(unittest.TestCase):
         workflow = (root / ".github/workflows/validate.yaml").read_text(
             encoding="utf-8"
         )
+        release_runner = (root / "scripts/verify-release-local.sh").read_text(
+            encoding="utf-8"
+        )
         readme = (root / "README.md").read_text(encoding="utf-8")
         commands = (
             "python -m ruff format --check custom_components tests scripts",
@@ -31,31 +34,24 @@ class PublicSafetyGuardTests(unittest.TestCase):
 
         for command in commands:
             with self.subTest(command=command):
-                self.assertIn(command, workflow)
+                self.assertIn(command, release_runner)
                 self.assertIn(command, readme)
 
         self.assertIn(
-            "python -m pip install --upgrade ruff shellcheck-py zizmor", workflow
+            "python -m pip install --upgrade ruff shellcheck-py zizmor",
+            release_runner,
         )
-        self.assertIn("python -m pip install --upgrade mypy", workflow)
+        self.assertIn("python -m pip install --upgrade mypy", release_runner)
         self.assertIn(
-            "go install github.com/rhysd/actionlint/cmd/actionlint@latest",
-            workflow,
+            "go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12",
+            release_runner,
         )
-        self.assertIn("actionlint -version", workflow)
-        self.assertIn("shellcheck --version", workflow)
-        self.assertIn("run: actionlint", workflow)
+        self.assertIn("run_actionlint", release_runner)
+        self.assertIn("bash scripts/verify-release-local.sh unit native", workflow)
         self.assertEqual(1, workflow.count("permissions:"))
         permissions = workflow.split("\npermissions:\n", 1)[1].split("\n\n", 1)[0]
         self.assertEqual("  contents: read", permissions)
-        self.assertEqual(1, workflow.count("GH_TOKEN: ${{ github.token }}"))
-        workflow_zizmor_step = (
-            "      - name: Audit GitHub Actions security\n"
-            "        env:\n"
-            "          GH_TOKEN: ${{ github.token }}\n"
-            "        run: zizmor --strict-collection --persona auditor ."
-        )
-        self.assertIn(workflow_zizmor_step, workflow)
+        self.assertNotIn("GH_TOKEN", release_runner)
         local_zizmor_block = (
             "$env:GH_TOKEN = gh auth token\n"
             'if (-not $env:GH_TOKEN) { throw "GitHub CLI authentication required" }\n'
@@ -67,7 +63,6 @@ class PublicSafetyGuardTests(unittest.TestCase):
             "}"
         )
         self.assertIn(local_zizmor_block, readme)
-        self.assertIn("python -m mypy --version", workflow)
         self.assertIn(
             "python -m pip install --upgrade ruff mypy shellcheck-py zizmor", readme
         )
@@ -81,8 +76,8 @@ class PublicSafetyGuardTests(unittest.TestCase):
                 "python -m mypy --strict custom_components/free_library_events"
             ),
         )
-        self.assertNotIn("ruff==", workflow)
-        self.assertNotIn("shellcheck-py==", workflow)
+        self.assertNotIn("ruff==", release_runner)
+        self.assertNotIn("shellcheck-py==", release_runner)
 
         dependabot = (root / ".github/dependabot.yml").read_text(encoding="utf-8")
         self.assertIn("default-days: 7", dependabot)
@@ -136,6 +131,9 @@ class PublicSafetyGuardTests(unittest.TestCase):
         workflow = (root / ".github/workflows/validate.yaml").read_text(
             encoding="utf-8"
         )
+        release_runner = (root / "scripts/verify-release-local.sh").read_text(
+            encoding="utf-8"
+        )
         harness_install = (
             'python -m pip install "pytest-homeassistant-custom-component==0.13.354"'
         )
@@ -156,11 +154,13 @@ class PublicSafetyGuardTests(unittest.TestCase):
             "Home Assistant current-patch integration tests (Core 2026.8.1)",
             workflow,
         )
-        minimum_job = workflow.index("  home_assistant_minimum:")
-        current_job = workflow.index("  home_assistant_current:")
-        hassfest_job = workflow.index("  hassfest:")
-        minimum_workflow = workflow[minimum_job:current_job]
-        current_workflow = workflow[current_job:hassfest_job]
+        self.assertIn("bash scripts/verify-release-local.sh minimum native", workflow)
+        self.assertIn("bash scripts/verify-release-local.sh current native", workflow)
+        minimum_job = release_runner.index("run_minimum()")
+        current_job = release_runner.index("run_current()")
+        release_job = release_runner.index("run_release()")
+        minimum_workflow = release_runner[minimum_job:current_job]
+        current_workflow = release_runner[current_job:release_job]
         self.assertIn(harness_install, minimum_workflow)
         self.assertIn(minimum_install, minimum_workflow)
         self.assertLess(
@@ -191,7 +191,7 @@ class PublicSafetyGuardTests(unittest.TestCase):
         )
         self.assertEqual(
             2,
-            workflow.count("pytest-homeassistant-custom-component=="),
+            release_runner.count("pytest-homeassistant-custom-component=="),
         )
         self.assertEqual(
             [
