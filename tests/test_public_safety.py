@@ -166,6 +166,10 @@ class PublicSafetyGuardTests(unittest.TestCase):
         )
         self.assertIn("bash scripts/verify-release-local.sh minimum native", workflow)
         self.assertIn("bash scripts/verify-release-local.sh current native", workflow)
+        self.assertIn("run_minimum() {\n  run_python '\n", release_runner)
+        self.assertIn("run_current() {\n  run_python '\n", release_runner)
+        self.assertIn("  minimum) run_minimum ;;", release_runner)
+        self.assertIn("  current) run_current ;;", release_runner)
         self.assertIn(
             '"${source_git[@]}" ls-files --cached --others --exclude-standard -z',
             release_runner,
