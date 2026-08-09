@@ -448,7 +448,7 @@ docker run --rm -v "${PWD}:/work" -w /work python:3.14-slim bash -lc "python -m 
 ```
 
 The protected GitHub workflow pins every third-party Action to a full commit
-SHA and runs the local tier, latest Ruff, mypy, actionlint with latest ShellCheck,
+SHA and runs the local tier, exact-pinned Ruff, mypy, actionlint, ShellCheck,
 zizmor auditor, dependency-closed minimum-Core and bounded current-patch Home
 Assistant lanes, Hassfest, and the HACS Action. It reports the resolved
 static-analysis tool versions. The stable **Release gate** succeeds only when
