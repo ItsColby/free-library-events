@@ -80,7 +80,7 @@ class HomeAssistantMetadataTests(unittest.TestCase):
             self.assertIn(f'"{state}"', sensor_text)
 
     def test_workflow_validates_every_integration_json_file(self) -> None:
-        workflow = (ROOT / ".github/workflows/validate.yaml").read_text(
+        release_runner = (ROOT / "scripts/verify-release-local.sh").read_text(
             encoding="utf-8"
         )
         integration_json = {
@@ -89,7 +89,7 @@ class HomeAssistantMetadataTests(unittest.TestCase):
 
         for path in integration_json:
             with self.subTest(path=path):
-                self.assertIn(f"'{path}'", workflow)
+                self.assertIn(f'"{path}"', release_runner)
 
     def test_ha_test_module_fails_closed_when_the_harness_is_unavailable(self) -> None:
         integration_tests = (ROOT / "tests/test_integration_ha.py").read_text(
