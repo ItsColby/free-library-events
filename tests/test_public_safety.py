@@ -38,10 +38,10 @@ class PublicSafetyGuardTests(unittest.TestCase):
                 self.assertIn(command, readme)
 
         self.assertIn(
-            "python -m pip install --upgrade ruff shellcheck-py zizmor",
+            'python -m pip install "ruff==0.16.2" "shellcheck-py==0.11.0.1" "zizmor==1.29.0"',
             release_runner,
         )
-        self.assertIn("python -m pip install --upgrade mypy", release_runner)
+        self.assertIn('python -m pip install "mypy==2.3.0"', release_runner)
         self.assertIn(
             "go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12",
             release_runner,
@@ -64,7 +64,9 @@ class PublicSafetyGuardTests(unittest.TestCase):
         )
         self.assertIn(local_zizmor_block, readme)
         self.assertIn(
-            "python -m pip install --upgrade ruff mypy shellcheck-py zizmor", readme
+            'python -m pip install "ruff==0.16.2" "mypy==2.3.0" '
+            '"shellcheck-py==0.11.0.1" "zizmor==1.29.0"',
+            readme,
         )
         local_ha_requirements = (
             "python -m pip install --upgrade -r requirements-ha-test.txt"
@@ -76,8 +78,8 @@ class PublicSafetyGuardTests(unittest.TestCase):
                 "python -m mypy --strict custom_components/free_library_events"
             ),
         )
-        self.assertNotIn("ruff==", release_runner)
-        self.assertNotIn("shellcheck-py==", release_runner)
+        self.assertIn('"ruff==0.16.2"', release_runner)
+        self.assertIn('"shellcheck-py==0.11.0.1"', release_runner)
 
         dependabot = (root / ".github/dependabot.yml").read_text(encoding="utf-8")
         self.assertIn("default-days: 7", dependabot)
