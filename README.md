@@ -422,7 +422,7 @@ directly, so a missing supported API fails collection instead of silently
 skipping the integration suite.
 
 ```powershell
-python -m pip install --upgrade ruff mypy shellcheck-py zizmor
+python -m pip install "ruff==0.16.2" "mypy==2.3.0" "shellcheck-py==0.11.0.1" "zizmor==1.29.0"
 python -m pip install --upgrade -r requirements-ha-test.txt
 python -m pip check
 python -m ruff format --check custom_components tests scripts
