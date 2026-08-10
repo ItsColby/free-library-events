@@ -10,7 +10,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock, PropertyMock, patch
 from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,7 +24,7 @@ from homeassistant.config_entries import (
     SOURCE_USER,
     ConfigEntryState,
 )
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, is_callback
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
@@ -60,6 +60,9 @@ from custom_components.free_library_events.config import (
     normalize_options,
     normalize_profile,
     selected_branches,
+)
+from custom_components.free_library_events.config_flow import (
+    FreeLibraryEventsConfigFlow,
 )
 from custom_components.free_library_events.const import (
     ATTR_EMBED_IMAGES,
@@ -216,6 +219,35 @@ async def test_reconfigure_flow_updates_profile_data_only(
     assert entry.options == BEHAVIOR_INPUT
 
 
+async def test_reconfigure_flow_does_not_reload_unchanged_profile(
+    hass: HomeAssistant,
+) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Free Library Events",
+        unique_id=DOMAIN,
+        data=PROFILE_DATA,
+        options=BEHAVIOR_INPUT,
+        version=1,
+        minor_version=2,
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": SOURCE_RECONFIGURE, "entry_id": entry.entry_id},
+    )
+    with patch.object(hass.config_entries, "async_schedule_reload") as schedule_reload:
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], PROFILE_INPUT
+        )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data == PROFILE_DATA
+    schedule_reload.assert_not_called()
+
+
 async def test_user_flow_rejects_duplicate_entry(hass: HomeAssistant) -> None:
     _entry().add_to_hass(hass)
     result = await hass.config_entries.flow.async_init(
@@ -224,6 +256,40 @@ async def test_user_flow_rejects_duplicate_entry(hass: HomeAssistant) -> None:
     )
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "single_instance_allowed"
+
+
+async def test_behavior_options_do_not_depend_on_deprecated_advanced_mode(
+    hass: HomeAssistant,
+) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Free Library Events",
+        unique_id=DOMAIN,
+        data=PROFILE_DATA,
+        options=BEHAVIOR_INPUT,
+        version=1,
+        minor_version=2,
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    with patch(
+        "homeassistant.data_entry_flow.FlowHandler.show_advanced_options",
+        new_callable=PropertyMock,
+        side_effect=AssertionError("deprecated advanced-mode property accessed"),
+    ):
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], {"next_step_id": "behavior"}
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "behavior"
+    assert {marker.schema for marker in result["data_schema"].schema} == {
+        CONF_FILTER_MODE,
+        CONF_CALENDAR_DURATION,
+        CONF_SCAN_INTERVAL,
+    }
+    assert is_callback(FreeLibraryEventsConfigFlow.async_get_options_flow)
 
 
 async def test_options_flow_enables_and_rotates_webcal_feed(
