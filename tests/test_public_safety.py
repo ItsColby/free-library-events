@@ -86,8 +86,8 @@ class PublicSafetyGuardTests(unittest.TestCase):
         dependabot = (root / ".github/dependabot.yml").read_text(encoding="utf-8")
         self.assertIn("default-days: 7", dependabot)
         self.assertEqual(1, dependabot.count("package-ecosystem: github-actions"))
-        self.assertEqual(1, dependabot.count("package-ecosystem: pip"))
-        self.assertEqual(2, dependabot.count("interval: weekly"))
+        self.assertNotIn("package-ecosystem: pip", dependabot)
+        self.assertEqual(1, dependabot.count("interval: weekly"))
         self.assertNotIn("interval: daily", dependabot)
         self.assertIn("exact-pinned", readme)
 
