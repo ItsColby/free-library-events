@@ -23,6 +23,10 @@
   owner. The two-step WebCal preview captures the complete accepted data and
   options mappings and aborts without saving or reloading if either changes
   before confirmation, so a concurrent flow cannot overwrite newer settings.
+  Matching and timing remain one small directly accessible options form rather
+  than depending on Home Assistant's deprecated profile-level advanced mode.
+  Submitting an unchanged reconfigure form does not reload the integration or
+  request the sources again.
 - The config-entry card and service device use the static integration name;
   person identity remains only in private config data and rendered content. The
   internal `child_name` key remains unchanged for compatibility while every

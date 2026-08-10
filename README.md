@@ -110,9 +110,9 @@ person or selected branches.
 
 The **Configure** menu separates optional behavior from required profile data:
 
-- **Matching and timing** changes the age-match mode. Home Assistant's
-  **Show advanced options** control reveals the placeholder event duration and
-  source refresh interval when those technical defaults actually need tuning.
+- **Matching and timing** changes the age-match mode, placeholder event
+  duration, and source refresh interval. Keep the recommended timing defaults
+  unless the source or calendar behavior needs tuning.
 - **Calendar subscription** enables or disables the private feed and controls
   the name shown by calendar clients.
 - **Regenerate calendar subscription URL** appears only while publishing is
