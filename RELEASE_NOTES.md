@@ -1,3 +1,23 @@
+# Free Library Events v2026.8.11
+
+## Fixed
+
+- Distinguish a healthy publisher event-type ceiling from successful shards
+  whose parsed, ordering, or boundary evidence is unusable. Healthy ceilings
+  remain `limited`; integrity failures now remain operationally `partial`.
+- Preserve whether the official event-type feeds recovered every capped
+  base-feed item instead of flattening every unresolved expansion into one
+  generic limitation.
+
+## Diagnostics
+
+- Record each unresolved event type with a stable reason, published and parsed
+  counts, and last event date. On-demand diagnostics retain the complete bounded
+  set; status and action metadata retain the count and three examples.
+- Explain healthy source limitations with the exact capped event types and
+  observed publisher boundaries so operators can review the official calendar
+  without mistaking the publisher ceiling for an integration failure.
+
 # Free Library Events v2026.8.10
 
 ## Fixed

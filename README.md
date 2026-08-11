@@ -342,8 +342,10 @@ instead of reporting a failed refresh as successful.
 Diagnostics redact the person's display name and birth date. They include
 per-branch and age-category published/parsed counts, ordering and
 coverage-boundary evidence, adaptive type-feed request/failure counts,
-discovered-event counts, source availability, bounded errors, last refresh
-time, next-week match count, and cached event counts by branch.
+structured type-feed coverage blockers, base-prefix recovery, discovered-event
+counts, source availability, bounded errors, last refresh time, next-week match
+count, and cached event counts by branch. Status and render-response metadata
+retain the blocker count and at most three structured examples.
 
 ## Source limitations
 
@@ -359,10 +361,13 @@ time, next-week match count, and cached event counts by branch.
   prioritizes every current-age source before the nearest supplemental age
   windows. All RSS traffic shares an eight-request ceiling. Each
   decoded RSS response is capped at 256 KiB. Coverage is proven only when every
-  type shard covers the digest horizon and recovers the capped base prefix. A
-  stalled source expansion stops after 90 seconds and retains its base events
-  with an explicit coverage warning. A healthy supplemental category that
-  remains unresolved produces the honest
+  type shard covers the digest horizon and recovers the capped base prefix.
+  Successful shards that remain capped retain their official event type, item
+  counts, and last event date; malformed, unordered, or boundary-less shards
+  remain operational failures instead of being flattened into a healthy cap
+  limitation. A stalled source expansion stops after 90 seconds and retains
+  its base events with an explicit coverage warning. A healthy supplemental
+  category that remains unresolved produces the honest
   `limited` status; operational failures remain `partial`. Relevant current-age
   coverage problems and operational supplemental failures are also disclosed in
   the rendered digest; known cap limitations stay out of the event-focused email

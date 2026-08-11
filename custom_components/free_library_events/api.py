@@ -38,6 +38,18 @@ OFFICIAL_EVENT_TYPES = (
     "Workshops and Enrichment",
 )
 
+TYPE_SHARD_BLOCKER_CAPPED = "capped_before_horizon"
+TYPE_SHARD_BLOCKER_PARSE_INCOMPLETE = "parse_incomplete"
+TYPE_SHARD_BLOCKER_UNORDERED = "unordered"
+TYPE_SHARD_BLOCKER_MISSING_BOUNDARY = "missing_boundary"
+TYPE_SHARD_INTEGRITY_BLOCKERS = frozenset(
+    {
+        TYPE_SHARD_BLOCKER_PARSE_INCOMPLETE,
+        TYPE_SHARD_BLOCKER_UNORDERED,
+        TYPE_SHARD_BLOCKER_MISSING_BOUNDARY,
+    }
+)
+
 SOURCE_ERROR_REQUEST_FAILED = "request_failed"
 SOURCE_ERROR_INVALID_FEED = "invalid_feed"
 SOURCE_ERROR_PARSE_FAILED = "parse_failed"
@@ -114,6 +126,17 @@ def _is_trusted_rss_url(url: str) -> bool:
 
 
 @dataclass(frozen=True, slots=True)
+class TypeShardBlocker:
+    """Bounded reason why one successful event-type feed did not prove coverage."""
+
+    event_type: str
+    reason: str
+    source_count: int
+    parsed_count: int
+    last_event_date: date | None
+
+
+@dataclass(frozen=True, slots=True)
 class BranchFeed:
     """Normalized result and coverage evidence from one custom feed."""
 
@@ -125,6 +148,8 @@ class BranchFeed:
     ordered: bool
     type_shards_queried: int = 0
     type_shard_failures: tuple[str, ...] = ()
+    type_shard_blockers: tuple[TypeShardBlocker, ...] = ()
+    base_prefix_recovered: bool | None = None
     expanded_through: date | None = None
 
     def covers_through(self, end_date: date) -> bool:
@@ -203,6 +228,7 @@ class LibraryClient:
         events = list(base_feed.events)
         successful_shards: list[BranchFeed] = []
         failures: list[str] = []
+        blockers: list[TypeShardBlocker] = []
         for event_type, result in zip(OFFICIAL_EVENT_TYPES, results, strict=True):
             if isinstance(result, asyncio.CancelledError):
                 raise result
@@ -214,23 +240,45 @@ class LibraryClient:
                 continue
             successful_shards.append(result)
             events.extend(result.events)
+            if result.covers_through(coverage_end):
+                continue
+            if result.parsed_count != result.source_count:
+                reason = TYPE_SHARD_BLOCKER_PARSE_INCOMPLETE
+            elif not result.ordered:
+                reason = TYPE_SHARD_BLOCKER_UNORDERED
+            elif result.last_event_date is None:
+                reason = TYPE_SHARD_BLOCKER_MISSING_BOUNDARY
+            else:
+                reason = TYPE_SHARD_BLOCKER_CAPPED
+            blockers.append(
+                TypeShardBlocker(
+                    event_type=event_type,
+                    reason=reason,
+                    source_count=result.source_count,
+                    parsed_count=result.parsed_count,
+                    last_event_date=result.last_event_date,
+                )
+            )
 
         merged_events = merge_events(events)
         base_ids = {event_identity(event) for event in base_feed.events}
         shard_ids = {
             event_identity(event) for feed in successful_shards for event in feed.events
         }
+        base_prefix_recovered = base_ids <= shard_ids
         expansion_proves_coverage = (
             not failures
             and len(successful_shards) == len(OFFICIAL_EVENT_TYPES)
-            and base_ids <= shard_ids
-            and all(feed.covers_through(coverage_end) for feed in successful_shards)
+            and base_prefix_recovered
+            and not blockers
         )
         return replace(
             base_feed,
             events=tuple(merged_events),
             type_shards_queried=len(OFFICIAL_EVENT_TYPES),
             type_shard_failures=tuple(failures),
+            type_shard_blockers=tuple(blockers),
+            base_prefix_recovered=base_prefix_recovered,
             expanded_through=coverage_end if expansion_proves_coverage else None,
         )
 

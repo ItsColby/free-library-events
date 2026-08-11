@@ -193,11 +193,13 @@
   receive unusable CID references.
 - `diagnostics.py` redacts the person's display name and birth date and exposes
   only bounded per-source counts, type-expansion evidence, ordering, coverage
-  boundaries, and health. Source and coordinator failures use allow-listed
-  categories, while unexpected image and storage failures use fixed bounded
-  summaries rather than arbitrary exception text. Finite shard failures remain
-  available in on-demand diagnostics; entity state and action-response metadata
-  retain a count and three examples.
+  boundaries, and health. Successful type shards that cannot prove coverage
+  retain a stable reason identifier, official event type, counts, and last event
+  date, while base-prefix recovery remains explicit. Source and coordinator
+  failures use allow-listed categories, while unexpected image and storage
+  failures use fixed bounded summaries rather than arbitrary exception text.
+  Finite shard failures and blockers remain available in on-demand diagnostics;
+  entity state and action-response metadata retain counts and three examples.
 - The manual refresh button checks the coordinator result and raises a
   translated Home Assistant error on failure. A platform action therefore
   cannot report success when every requested source failed.
@@ -222,8 +224,11 @@ that boundary, its parsed order and last event must prove coverage beyond the
 target digest week. If they do not, the coordinator requests the stable official
 event-type taxonomy and merges the resulting overlapping rows. Expansion
 proves coverage only when all type shards cover the week and collectively
-recover the capped base prefix;
-otherwise the limitation remains visible. At most twelve capped sources are
+recover the capped base prefix. A successful, ordered shard stopped by the
+publisher's item ceiling remains a healthy limitation; a parsed-incompletely,
+unordered, or boundary-less shard is an operational failure. The exact bounded
+blocker evidence remains visible instead of flattening both cases into one
+generic limitation. At most twelve capped sources are
 expanded in one refresh, enough for the maximum three overlapping current-age
 categories across all four supported branches while the worst case stays
 bounded. Current-age sources are always selected before supplemental discovery.
