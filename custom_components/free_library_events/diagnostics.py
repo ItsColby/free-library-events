@@ -14,6 +14,7 @@ from .coordinator import (
     LibraryDataCoordinator,
     coordinator_error_category,
     source_label,
+    type_shard_blocker_data,
 )
 from .runtime import LibraryConfigEntry
 
@@ -73,6 +74,15 @@ async def async_get_config_entry_diagnostics(
                 "type_feed_failures": list(source_statuses[key].type_shard_failures)
                 if key in source_statuses
                 else [],
+                "type_feed_blockers": [
+                    type_shard_blocker_data(blocker)
+                    for blocker in source_statuses[key].type_shard_blockers
+                ]
+                if key in source_statuses
+                else [],
+                "base_prefix_recovered": source_statuses[key].base_prefix_recovered
+                if key in source_statuses
+                else None,
                 "expanded_through": _isoformat_optional(
                     source_statuses[key].expanded_through
                 )

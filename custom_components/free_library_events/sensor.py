@@ -41,6 +41,28 @@ PARALLEL_UPDATES = 0
 
 
 @dataclass(frozen=True, slots=True)
+class _TypeFeedBlockerProjection:
+    """Immutable status fields for one bounded type-feed blocker example."""
+
+    event_type: str
+    reason: str
+    published_item_count: int
+    parsed_item_count: int
+    last_event_date: str | None
+
+    def attributes(self) -> dict[str, object]:
+        """Return fresh Home Assistant attributes for this blocker."""
+
+        return {
+            "event_type": self.event_type,
+            "reason": self.reason,
+            "published_item_count": self.published_item_count,
+            "parsed_item_count": self.parsed_item_count,
+            "last_event_date": self.last_event_date,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class _ExpandedSourceProjection:
     """Immutable status fields for one expanded capped source."""
 
@@ -49,6 +71,9 @@ class _ExpandedSourceProjection:
     type_feeds_queried: int
     type_feed_failure_count: int
     type_feed_failure_examples: tuple[str, ...]
+    type_feed_blocker_count: int
+    type_feed_blocker_examples: tuple[_TypeFeedBlockerProjection, ...]
+    base_prefix_recovered: bool | None
     coverage_through: str | None
 
 
@@ -99,6 +124,12 @@ class _StatusProjection:
                         "type_feed_failure_examples": list(
                             source.type_feed_failure_examples
                         ),
+                        "type_feed_blocker_count": source.type_feed_blocker_count,
+                        "type_feed_blocker_examples": [
+                            blocker.attributes()
+                            for blocker in source.type_feed_blocker_examples
+                        ],
+                        "base_prefix_recovered": source.base_prefix_recovered,
                         "coverage_through": source.coverage_through,
                     }
                     for source in self.expanded_capped_sources
@@ -128,6 +159,18 @@ def _expanded_source_projection(
     """Freeze expanded-source details used by the status attributes."""
 
     details_by_source = source_expansion_details(data)
+
+    def blocker_projection(
+        details: dict[str, object],
+    ) -> _TypeFeedBlockerProjection:
+        return _TypeFeedBlockerProjection(
+            event_type=cast(str, details["event_type"]),
+            reason=cast(str, details["reason"]),
+            published_item_count=cast(int, details["published_item_count"]),
+            parsed_item_count=cast(int, details["parsed_item_count"]),
+            last_event_date=cast(str | None, details["last_event_date"]),
+        )
+
     return tuple(
         _ExpandedSourceProjection(
             label=label,
@@ -137,6 +180,14 @@ def _expanded_source_projection(
             type_feed_failure_examples=tuple(
                 cast(list[str], details["type_feed_failure_examples"])
             ),
+            type_feed_blocker_count=cast(int, details["type_feed_blocker_count"]),
+            type_feed_blocker_examples=tuple(
+                blocker_projection(blocker)
+                for blocker in cast(
+                    list[dict[str, object]], details["type_feed_blocker_examples"]
+                )
+            ),
+            base_prefix_recovered=cast(bool | None, details["base_prefix_recovered"]),
             coverage_through=cast(str | None, details["coverage_through"]),
         )
         for label, details in details_by_source.items()

@@ -8,7 +8,7 @@ import sys
 import types
 from collections.abc import Callable
 from dataclasses import replace
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, PropertyMock, patch
 from zoneinfo import ZoneInfo
@@ -45,9 +45,14 @@ from custom_components.free_library_events.api import (
     SOURCE_ERROR_RESPONSE_TOO_LARGE,
     SOURCE_ERROR_UNEXPECTED,
     SOURCE_ERROR_UNSAFE_REDIRECT,
+    TYPE_SHARD_BLOCKER_CAPPED,
+    TYPE_SHARD_BLOCKER_MISSING_BOUNDARY,
+    TYPE_SHARD_BLOCKER_PARSE_INCOMPLETE,
+    TYPE_SHARD_BLOCKER_UNORDERED,
     BranchFeed,
     LibraryApiError,
     LibraryClient,
+    TypeShardBlocker,
 )
 from custom_components.free_library_events.button import LibraryRefreshButton
 from custom_components.free_library_events.calendar import LibraryCalendar
@@ -1818,6 +1823,8 @@ async def test_client_expands_only_an_unresolved_capped_feed() -> None:
     assert expanded.source_count == 10
     assert expanded.type_shards_queried == len(OFFICIAL_EVENT_TYPES)
     assert expanded.type_shard_failures == ()
+    assert expanded.type_shard_blockers == ()
+    assert expanded.base_prefix_recovered is True
     assert expanded.expanded_through == date(2026, 7, 26)
     assert expanded.covers_through(date(2026, 7, 26))
     assert client._async_fetch_single.await_count == len(OFFICIAL_EVENT_TYPES)
@@ -1876,8 +1883,207 @@ async def test_client_keeps_recovered_rows_but_discloses_safe_shard_failures() -
     assert not expanded.covers_through(date(2026, 7, 26))
 
 
+async def test_client_records_a_successful_capped_type_shard_blocker() -> None:
+    branch = BRANCHES["CEN"]
+    base_event = Event(
+        title="Base event",
+        event_date=date(2026, 7, 24),
+        start_time=time(10, 0),
+        description="Published event",
+        link="https://example.test/events/base",
+        image_url="",
+        branch=branch,
+        age_categories=("Young Adult",),
+    )
+    base_feed = BranchFeed(
+        events=(base_event,),
+        age_category="Young Adult",
+        source_count=10,
+        parsed_count=10,
+        last_event_date=base_event.event_date,
+        ordered=True,
+    )
+
+    async def fetch_single(_branch, age_category, event_type=None):
+        if event_type == "Community Events":
+            return BranchFeed(
+                events=(base_event,),
+                age_category=age_category,
+                source_count=10,
+                parsed_count=10,
+                last_event_date=date(2026, 7, 25),
+                ordered=True,
+            )
+        return BranchFeed(
+            events=(base_event,),
+            age_category=age_category,
+            source_count=1,
+            parsed_count=1,
+            last_event_date=base_event.event_date,
+            ordered=True,
+        )
+
+    client = LibraryClient(None)  # type: ignore[arg-type]
+    client._async_fetch_single = AsyncMock(side_effect=fetch_single)
+
+    expanded = await client.async_expand_feed(
+        branch, "Young Adult", base_feed, date(2026, 7, 26)
+    )
+
+    assert expanded.type_shard_failures == ()
+    assert expanded.type_shard_blockers == (
+        TypeShardBlocker(
+            event_type="Community Events",
+            reason=TYPE_SHARD_BLOCKER_CAPPED,
+            source_count=10,
+            parsed_count=10,
+            last_event_date=date(2026, 7, 25),
+        ),
+    )
+    assert expanded.base_prefix_recovered is True
+    assert expanded.expanded_through is None
+
+    data = types.SimpleNamespace(
+        source_statuses={"CEN:Young Adult": expanded}, source_errors={}
+    )
+    failures, limitations = supplemental_coverage(
+        data,
+        date(2025, 11, 7),
+        date(2026, 7, 20),
+        date(2026, 7, 26),
+    )
+    assert failures == []
+    assert len(limitations) == 1
+    assert "Community Events returned 10 items through July 25" in limitations[0]
+    assert "proving coverage through July 26" in limitations[0]
+
+
+@pytest.mark.parametrize(
+    ("reason", "source_count", "parsed_count", "last_event_date", "ordered"),
+    (
+        (TYPE_SHARD_BLOCKER_PARSE_INCOMPLETE, 10, 9, date(2026, 7, 27), True),
+        (TYPE_SHARD_BLOCKER_UNORDERED, 10, 10, date(2026, 7, 27), False),
+        (TYPE_SHARD_BLOCKER_MISSING_BOUNDARY, 10, 10, None, True),
+    ),
+)
+async def test_supplemental_type_shard_integrity_blockers_are_partial(
+    reason: str,
+    source_count: int,
+    parsed_count: int,
+    last_event_date: date | None,
+    ordered: bool,
+) -> None:
+    branch = BRANCHES["CEN"]
+    event = Event(
+        title="Base event",
+        event_date=date(2026, 7, 24),
+        start_time=time(10, 0),
+        description="Published event",
+        link="https://example.test/events/base",
+        image_url="",
+        branch=branch,
+        age_categories=("Young Adult",),
+    )
+    base_feed = BranchFeed(
+        events=(event,),
+        age_category="Young Adult",
+        source_count=10,
+        parsed_count=10,
+        last_event_date=event.event_date,
+        ordered=True,
+    )
+
+    async def fetch_single(_branch, age_category, event_type=None):
+        if event_type == "Community Events":
+            return BranchFeed(
+                events=(event,),
+                age_category=age_category,
+                source_count=source_count,
+                parsed_count=parsed_count,
+                last_event_date=last_event_date,
+                ordered=ordered,
+            )
+        return BranchFeed(
+            events=(event,),
+            age_category=age_category,
+            source_count=1,
+            parsed_count=1,
+            last_event_date=event.event_date,
+            ordered=True,
+        )
+
+    client = LibraryClient(None)  # type: ignore[arg-type]
+    client._async_fetch_single = AsyncMock(side_effect=fetch_single)
+    feed = await client.async_expand_feed(
+        branch, "Young Adult", base_feed, date(2026, 7, 26)
+    )
+
+    assert feed.type_shard_blockers == (
+        TypeShardBlocker(
+            event_type="Community Events",
+            reason=reason,
+            source_count=source_count,
+            parsed_count=parsed_count,
+            last_event_date=last_event_date,
+        ),
+    )
+    assert feed.base_prefix_recovered is True
+    assert feed.expanded_through is None
+    data = types.SimpleNamespace(
+        source_statuses={"CEN:Young Adult": feed}, source_errors={}
+    )
+
+    failures, limitations = supplemental_coverage(
+        data,
+        date(2025, 11, 7),
+        date(2026, 7, 20),
+        date(2026, 7, 26),
+    )
+
+    assert len(failures) == 1
+    assert "Community Events" in failures[0]
+    assert limitations == []
+
+
+def test_missing_base_prefix_recovery_remains_a_healthy_limitation() -> None:
+    feed = BranchFeed(
+        events=(),
+        age_category="Young Adult",
+        source_count=10,
+        parsed_count=10,
+        last_event_date=date(2026, 7, 24),
+        ordered=True,
+        type_shards_queried=len(OFFICIAL_EVENT_TYPES),
+        base_prefix_recovered=False,
+    )
+    data = types.SimpleNamespace(
+        source_statuses={"CEN:Young Adult": feed}, source_errors={}
+    )
+
+    failures, limitations = supplemental_coverage(
+        data,
+        date(2025, 11, 7),
+        date(2026, 7, 20),
+        date(2026, 7, 26),
+    )
+
+    assert failures == []
+    assert len(limitations) == 1
+    assert "did not recover every base-feed item" in limitations[0]
+
+
 def test_state_expansion_details_bound_failure_examples() -> None:
     failures = tuple(f"Type {index}: offline" for index in range(19))
+    blockers = tuple(
+        TypeShardBlocker(
+            event_type=f"Type {index}",
+            reason=TYPE_SHARD_BLOCKER_CAPPED,
+            source_count=10,
+            parsed_count=10,
+            last_event_date=date(2026, 7, 24),
+        )
+        for index in range(19)
+    )
     feed = BranchFeed(
         events=(),
         age_category="Young Adult",
@@ -1887,6 +2093,8 @@ def test_state_expansion_details_bound_failure_examples() -> None:
         ordered=True,
         type_shards_queried=19,
         type_shard_failures=failures,
+        type_shard_blockers=blockers,
+        base_prefix_recovered=False,
     )
     data = types.SimpleNamespace(source_statuses={"CEN:Young Adult": feed})
 
@@ -1895,6 +2103,69 @@ def test_state_expansion_details_bound_failure_examples() -> None:
     assert details["type_feed_failure_count"] == 19
     assert details["type_feed_failure_examples"] == list(failures[:3])
     assert "type_feed_failures" not in details
+    assert details["type_feed_blocker_count"] == 19
+    assert details["type_feed_blocker_examples"] == [
+        {
+            "event_type": f"Type {index}",
+            "reason": TYPE_SHARD_BLOCKER_CAPPED,
+            "published_item_count": 10,
+            "parsed_item_count": 10,
+            "last_event_date": "2026-07-24",
+        }
+        for index in range(3)
+    ]
+    assert details["base_prefix_recovered"] is False
+
+
+async def test_diagnostics_include_all_structured_type_feed_blockers(
+    hass: HomeAssistant,
+) -> None:
+    entry = _entry()
+    blockers = tuple(
+        TypeShardBlocker(
+            event_type=f"Type {index}",
+            reason=TYPE_SHARD_BLOCKER_CAPPED,
+            source_count=10,
+            parsed_count=10,
+            last_event_date=date(2026, 7, 24),
+        )
+        for index in range(4)
+    )
+    feed = BranchFeed(
+        events=(),
+        age_category="Young Adult",
+        source_count=10,
+        parsed_count=10,
+        last_event_date=date(2026, 7, 24),
+        ordered=True,
+        type_shards_queried=len(OFFICIAL_EVENT_TYPES),
+        type_shard_blockers=blockers,
+        base_prefix_recovered=True,
+    )
+    entry.runtime_data = types.SimpleNamespace(
+        data=LibraryData(
+            events=(),
+            source_counts={"CEN": 0},
+            source_statuses={"CEN:Young Adult": feed},
+            source_errors={},
+            fetched_at=datetime(2026, 7, 18, tzinfo=UTC),
+        ),
+        last_update_success=True,
+        last_exception=None,
+    )
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    source = next(iter(diagnostics["sources"].values()))
+    assert len(source["type_feed_blockers"]) == 4
+    assert source["type_feed_blockers"][0] == {
+        "event_type": "Type 0",
+        "reason": TYPE_SHARD_BLOCKER_CAPPED,
+        "published_item_count": 10,
+        "parsed_item_count": 10,
+        "last_event_date": "2026-07-24",
+    }
+    assert source["base_prefix_recovered"] is True
 
 
 async def test_client_bounds_all_rss_request_concurrency() -> None:

@@ -19,9 +19,14 @@ from .api import (
     RSS_ITEM_LIMIT,
     SOURCE_ERROR_EXPANSION_TIMEOUT,
     SOURCE_ERROR_UNEXPECTED,
+    TYPE_SHARD_BLOCKER_CAPPED,
+    TYPE_SHARD_BLOCKER_PARSE_INCOMPLETE,
+    TYPE_SHARD_BLOCKER_UNORDERED,
+    TYPE_SHARD_INTEGRITY_BLOCKERS,
     BranchFeed,
     LibraryApiError,
     LibraryClient,
+    TypeShardBlocker,
     source_error_category,
     source_error_description,
 )
@@ -44,6 +49,81 @@ SOURCE_AGE_HORIZON = timedelta(days=90)
 MAX_TYPE_EXPANSIONS_PER_REFRESH = 12
 TYPE_EXPANSION_TIMEOUT_SECONDS = 90
 MAX_TYPE_FAILURE_EXAMPLES = 3
+
+
+def type_shard_blocker_data(blocker: TypeShardBlocker) -> dict[str, object]:
+    """Return privacy-safe structured evidence for one type-feed blocker."""
+
+    return {
+        "event_type": blocker.event_type,
+        "reason": blocker.reason,
+        "published_item_count": blocker.source_count,
+        "parsed_item_count": blocker.parsed_count,
+        "last_event_date": blocker.last_event_date.isoformat()
+        if blocker.last_event_date
+        else None,
+    }
+
+
+def _type_shard_blocker_description(blocker: TypeShardBlocker) -> str:
+    """Return a bounded operator-facing description of one type-feed blocker."""
+
+    if blocker.reason == TYPE_SHARD_BLOCKER_CAPPED:
+        boundary = (
+            f"{blocker.last_event_date:%B} {blocker.last_event_date.day}"
+            if blocker.last_event_date
+            else "an unknown date"
+        )
+        return (
+            f"{blocker.event_type} returned {blocker.source_count} items "
+            f"through {boundary}"
+        )
+    if blocker.reason == TYPE_SHARD_BLOCKER_PARSE_INCOMPLETE:
+        return (
+            f"{blocker.event_type} published {blocker.source_count} items but only "
+            f"{blocker.parsed_count} could be parsed"
+        )
+    if blocker.reason == TYPE_SHARD_BLOCKER_UNORDERED:
+        return f"{blocker.event_type} was not ordered by event date"
+    return f"{blocker.event_type} did not expose a usable coverage boundary"
+
+
+def _type_shard_integrity_blockers(
+    feed: BranchFeed,
+) -> tuple[TypeShardBlocker, ...]:
+    """Return successful type feeds whose evidence is operationally unusable."""
+
+    return tuple(
+        blocker
+        for blocker in feed.type_shard_blockers
+        if blocker.reason in TYPE_SHARD_INTEGRITY_BLOCKERS
+    )
+
+
+def _type_expansion_limitation_reason(feed: BranchFeed, end_date: date) -> str:
+    """Explain why a healthy type expansion could not prove the target horizon."""
+
+    reasons = [
+        _type_shard_blocker_description(blocker)
+        for blocker in feed.type_shard_blockers
+        if blocker.reason == TYPE_SHARD_BLOCKER_CAPPED
+    ]
+    if len(reasons) > MAX_TYPE_FAILURE_EXAMPLES:
+        omitted = len(reasons) - MAX_TYPE_FAILURE_EXAMPLES
+        reasons = reasons[:MAX_TYPE_FAILURE_EXAMPLES]
+        reasons.append(f"{omitted} additional event types were capped")
+    if feed.base_prefix_recovered is False:
+        reasons.append("the official event types did not recover every base-feed item")
+    if not reasons:
+        return (
+            f"coverage through {end_date:%B} {end_date.day} could not be proven "
+            f"after querying {feed.type_shards_queried} official event types"
+        )
+    return (
+        "; ".join(reasons)
+        + f"; proving coverage through {end_date:%B} {end_date.day} requires "
+        "later complete publisher evidence"
+    )
 
 
 def source_key(branch: Branch, age_category: str) -> str:
@@ -94,6 +174,12 @@ def source_expansion_details(data: LibraryData) -> dict[str, dict[str, object]]:
             "type_feed_failure_examples": list(
                 feed.type_shard_failures[:MAX_TYPE_FAILURE_EXAMPLES]
             ),
+            "type_feed_blocker_count": len(feed.type_shard_blockers),
+            "type_feed_blocker_examples": [
+                type_shard_blocker_data(blocker)
+                for blocker in feed.type_shard_blockers[:MAX_TYPE_FAILURE_EXAMPLES]
+            ],
+            "base_prefix_recovered": feed.base_prefix_recovered,
             "coverage_through": feed.expanded_through.isoformat()
             if feed.expanded_through
             else None,
@@ -230,10 +316,20 @@ def coverage_warnings(
                 f"{len(feed.type_shard_failures)} official feeds; later events "
                 "in this digest week may be missing"
             )
+        elif integrity_blockers := _type_shard_integrity_blockers(feed):
+            examples = "; ".join(
+                _type_shard_blocker_description(blocker)
+                for blocker in integrity_blockers[:MAX_TYPE_FAILURE_EXAMPLES]
+            )
+            warnings.append(
+                f"{label} event-type expansion returned unusable evidence for "
+                f"{len(integrity_blockers)} official feeds ({examples}); later events "
+                "in this digest week may be missing"
+            )
         elif feed.type_shards_queried:
             warnings.append(
-                f"{label} remained limited after querying "
-                f"{feed.type_shards_queried} official event types; later events "
+                f"{label} remained limited because "
+                f"{_type_expansion_limitation_reason(feed, end_date)}; later events "
                 "in this digest week may be missing"
             )
         else:
@@ -277,6 +373,15 @@ def supplemental_coverage(
                 f"{source_label(key)} event-type expansion failed for "
                 f"{len(feed.type_shard_failures)} official feeds"
             )
+        elif integrity_blockers := _type_shard_integrity_blockers(feed):
+            examples = "; ".join(
+                _type_shard_blocker_description(blocker)
+                for blocker in integrity_blockers[:MAX_TYPE_FAILURE_EXAMPLES]
+            )
+            failures.append(
+                f"{source_label(key)} event-type expansion returned unusable "
+                f"evidence for {len(integrity_blockers)} official feeds ({examples})"
+            )
         elif not feed.covers_through(end_date):
             boundary = (
                 f"{feed.last_event_date:%B} {feed.last_event_date.day}"
@@ -286,8 +391,8 @@ def supplemental_coverage(
             limitations.append(
                 f"{source_label(key)} "
                 + (
-                    f"remained limited after querying {feed.type_shards_queried} "
-                    "official event types"
+                    "remained limited because "
+                    f"{_type_expansion_limitation_reason(feed, end_date)}"
                     if feed.type_shards_queried
                     else f"reached its {feed.source_count}-item limit through {boundary}"
                 )
