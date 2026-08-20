@@ -621,7 +621,7 @@ async def test_options_flow_updates_behavior_without_profile_data(
     assert entry.options[CONF_SCAN_INTERVAL] == 21600
 
 
-async def test_manual_refresh_button_raises_a_translated_failure(
+async def test_manual_refresh_button_remains_available_and_reports_result(
     hass: HomeAssistant,
 ) -> None:
     entry = _entry()
@@ -637,15 +637,20 @@ async def test_manual_refresh_button_raises_a_translated_failure(
     coordinator.last_update_success = False
     button = LibraryRefreshButton(coordinator)
 
+    assert button.available
+
     with pytest.raises(HomeAssistantError) as failure:
         await button.async_press()
 
     assert failure.value.translation_domain == DOMAIN
     assert failure.value.translation_key == "manual_refresh_failed"
+    assert coordinator.async_request_refresh.await_count == 1
+    assert button.available
 
     coordinator.last_update_success = True
     await button.async_press()
     assert coordinator.async_request_refresh.await_count == 2
+    assert button.available
 
 
 def test_normalize_config_enforces_non_ui_bounds() -> None:

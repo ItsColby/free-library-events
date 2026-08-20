@@ -202,7 +202,10 @@
   entity state and action-response metadata retain counts and three examples.
 - The manual refresh button checks the coordinator result and raises a
   translated Home Assistant error on failure. A platform action therefore
-  cannot report success when every requested source failed.
+  cannot report success when every requested source failed. It deliberately
+  remains available while the config entry is loaded, independent of the last
+  coordinator result, so a complete source failure cannot disable manual
+  recovery.
 
 ## Supported Source Boundary
 

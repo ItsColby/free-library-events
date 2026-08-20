@@ -40,6 +40,12 @@ class LibraryRefreshButton(CoordinatorEntity[LibraryDataCoordinator], ButtonEnti
         self._attr_unique_id = f"{DOMAIN}_refresh"
 
     @property
+    def available(self) -> bool:
+        """Keep manual recovery available when a refresh fails."""
+
+        return True
+
+    @property
     def device_info(self) -> DeviceInfo:
         """Return the integration's user-facing device."""
 

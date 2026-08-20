@@ -337,7 +337,9 @@ If one selected feed fails, the calendar and digest retain the successful
 branch and disclose the unavailable source. If every selected feed fails,
 `render_digest` raises an error before returning an email payload, and the
 manual refresh button raises the same class of translated Home Assistant error
-instead of reporting a failed refresh as successful.
+instead of reporting a failed refresh as successful. The button remains
+available while the config entry is loaded even after a complete refresh
+failure, so it can be used to retry recovery.
 
 Diagnostics redact the person's display name and birth date. They include
 per-branch and age-category published/parsed counts, ordering and
