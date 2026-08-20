@@ -15,6 +15,7 @@ RSS_ITEM_LIMIT = 10
 MAX_RSS_RESPONSE_BYTES = 256 * 1024
 MAX_RSS_REQUEST_CONCURRENCY = 8
 MAX_RSS_REDIRECTS = 2
+TRANSIENT_HTTP_STATUSES = frozenset({408, 425, 429, 500, 502, 503, 504})
 TRUSTED_RSS_HOSTS = frozenset({"libwww.freelibrary.org", "www.freelibrary.org"})
 OFFICIAL_EVENT_TYPES = (
     "Arts and Crafts Programs",
@@ -83,12 +84,13 @@ SOURCE_ERROR_DESCRIPTIONS = {
 class LibraryApiError(Exception):
     """Raised when a branch feed cannot be loaded or parsed."""
 
-    def __init__(self, category: str) -> None:
+    def __init__(self, category: str, *, retryable: bool = False) -> None:
         safe_category = (
             category if category in SOURCE_ERROR_CATEGORIES else SOURCE_ERROR_UNEXPECTED
         )
         super().__init__(safe_category)
         self.category = safe_category
+        self.retryable = retryable
 
 
 def source_error_category(error: BaseException) -> str:
@@ -105,6 +107,17 @@ def source_error_description(category: str) -> str:
     return SOURCE_ERROR_DESCRIPTIONS.get(
         category,
         SOURCE_ERROR_DESCRIPTIONS[SOURCE_ERROR_UNEXPECTED],
+    )
+
+
+def _is_retryable_request_error(error: BaseException) -> bool:
+    """Return whether another bounded attempt can plausibly recover."""
+
+    if isinstance(error, TimeoutError | aiohttp.ClientConnectionError):
+        return True
+    return bool(
+        isinstance(error, aiohttp.ClientResponseError)
+        and error.status in TRANSIENT_HTTP_STATUSES
     )
 
 
@@ -308,8 +321,11 @@ class LibraryClient:
         try:
             async with self._request_semaphore:
                 payload = await self._async_get(url)
-        except TimeoutError, aiohttp.ClientError:
-            raise LibraryApiError(SOURCE_ERROR_REQUEST_FAILED) from None
+        except (TimeoutError, aiohttp.ClientError) as err:
+            raise LibraryApiError(
+                SOURCE_ERROR_REQUEST_FAILED,
+                retryable=_is_retryable_request_error(err),
+            ) from None
 
         try:
             events, source_count = await asyncio.to_thread(

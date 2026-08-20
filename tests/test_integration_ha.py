@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+import aiohttp
 import pytest
 from homeassistant.components.smtp.helpers import _build_html_msg
 from homeassistant.config_entries import (
@@ -24,6 +25,7 @@ from homeassistant.config_entries import (
     SOURCE_USER,
     ConfigEntryState,
 )
+from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant, is_callback
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.exceptions import HomeAssistantError
@@ -1047,6 +1049,21 @@ async def test_status_projection_reschedules_on_failure_recovery_and_unload(
         )
         await hass.async_block_till_done()
 
+        failed_button = hass.states.get("button.free_library_events_refresh_events")
+        assert failed_button is not None
+        assert failed_button.state != STATE_UNAVAILABLE
+        coordinator.async_request_refresh = AsyncMock()
+        with pytest.raises(HomeAssistantError) as failure:
+            await hass.services.async_call(
+                "button",
+                "press",
+                {"entity_id": "button.free_library_events_refresh_events"},
+                blocking=True,
+            )
+        assert failure.value.translation_domain == DOMAIN
+        assert failure.value.translation_key == "manual_refresh_failed"
+        assert coordinator.async_request_refresh.await_count == 1
+
         failed = hass.states.get("sensor.free_library_events_status")
         assert failed is not None
         assert failed.state == "error"
@@ -1065,6 +1082,16 @@ async def test_status_projection_reschedules_on_failure_recovery_and_unload(
         recovered = hass.states.get("sensor.free_library_events_status")
         assert recovered is not None
         assert recovered.state == "ok"
+        await hass.services.async_call(
+            "button",
+            "press",
+            {"entity_id": "button.free_library_events_refresh_events"},
+            blocking=True,
+        )
+        assert coordinator.async_request_refresh.await_count == 2
+        recovered_button = hass.states.get("button.free_library_events_refresh_events")
+        assert recovered_button is not None
+        assert recovered_button.state != STATE_UNAVAILABLE
         assert len(scheduled) == 3
         scheduled[1][2].assert_called_once_with()
         assert scheduled[2][1] == datetime(2026, 7, 21, tzinfo=LOCAL_TIME_ZONE)
@@ -1162,6 +1189,12 @@ async def test_setup_entities_action_and_redacted_diagnostics(
     assert status_state.attributes["current_age_coverage_complete"] is True
     assert status_state.attributes["supplemental_age_coverage_complete"] is True
     assert status_state.attributes["expanded_capped_sources"] == {}
+    assert status_state.attributes["last_attempt_requested_sources"] == 20
+    assert status_state.attributes["last_attempt_successful_sources"] == 20
+    assert status_state.attributes["last_attempt_failed_sources"] == 0
+    assert status_state.attributes["last_attempt_retryable_failures"] == 0
+    assert status_state.attributes["last_attempt_error_categories"] == {}
+    assert status_state.attributes["expedited_retry_scheduled"] is False
     assert status_state.attributes["cached_events_by_branch"] == {
         "Charles Santore Library": 1,
         "Independence Library": 1,
@@ -1350,6 +1383,17 @@ async def test_setup_entities_action_and_redacted_diagnostics(
         for branch in BRANCHES.values()
         for category in ("Baby", "Toddler", "Preschool", "School Age", "Young Adult")
     ]
+    assert diagnostics["last_attempt"]["requested_source_count"] == 20
+    assert diagnostics["last_attempt"]["successful_source_count"] == 20
+    assert diagnostics["last_attempt"]["failed_source_count"] == 0
+    assert diagnostics["last_attempt"]["sources"] == {
+        f"{branch.name} — {category}": {
+            "available": True,
+            "error_category": None,
+        }
+        for branch in BRANCHES.values()
+        for category in ("Baby", "Toddler", "Preschool", "School Age", "Young Adult")
+    }
 
 
 @pytest.mark.parametrize("supersession", ("profile", "coordinator"))
@@ -2237,7 +2281,30 @@ async def test_client_does_not_chain_private_transport_details() -> None:
         await client.async_fetch_feed(BRANCHES["CEN"], "Baby")
 
     assert failure.value.__cause__ is None
+    assert failure.value.retryable is True
     assert private_detail not in repr(failure.value)
+
+
+@pytest.mark.parametrize(
+    ("status", "retryable"),
+    ((404, False), (408, True), (429, True), (500, True), (503, True)),
+)
+async def test_client_classifies_retryable_http_failures(
+    status: int, retryable: bool
+) -> None:
+    error = aiohttp.ClientResponseError(
+        request_info=Mock(),
+        history=(),
+        status=status,
+    )
+    client = LibraryClient(None)  # type: ignore[arg-type]
+    client._async_get = AsyncMock(side_effect=error)
+
+    with pytest.raises(LibraryApiError) as failure:
+        await client.async_fetch_feed(BRANCHES["CEN"], "Baby")
+
+    assert failure.value.category == SOURCE_ERROR_REQUEST_FAILED
+    assert failure.value.retryable is retryable
 
 
 async def test_client_rejects_an_oversized_rss_response() -> None:
@@ -2789,6 +2856,12 @@ async def test_coordinator_retains_partial_source_success(
         "SWK:Young Adult": SOURCE_ERROR_REQUEST_FAILED,
     }
     assert list(data.source_statuses) == ["SWK:Baby"]
+    assert coordinator.last_attempt is not None
+    assert coordinator.last_attempt.requested_source_count == 5
+    assert coordinator.last_attempt.successful_source_count == 1
+    assert coordinator.last_attempt.failed_source_count == 4
+    assert coordinator.last_attempt.retryable_failure_count == 0
+    assert coordinator.last_attempt.expedited_retry_scheduled is False
     with pytest.raises(TypeError):
         data.source_counts["SWK"] = 1
     with pytest.raises(TypeError):
@@ -2873,7 +2946,7 @@ async def test_diagnostics_categorize_unexpected_coordinator_exception(
     assert private_detail not in repr(diagnostics)
 
 
-async def test_coordinator_rejects_complete_source_failure(
+async def test_coordinator_retains_complete_failure_evidence_without_retrying_policy_errors(
     hass: HomeAssistant,
 ) -> None:
     entry = _entry()
@@ -2895,6 +2968,121 @@ async def test_coordinator_rejects_complete_source_failure(
 
     assert failure.value.translation_domain == DOMAIN
     assert failure.value.translation_key == "library_source_update_failed"
+    assert failure.value.retry_after is None
+    assert coordinator.last_attempt is not None
+    assert coordinator.last_attempt.requested_source_count == 5
+    assert coordinator.last_attempt.successful_source_count == 0
+    assert coordinator.last_attempt.failed_source_count == 5
+    assert coordinator.last_attempt.retryable_failure_count == 0
+    assert coordinator.last_attempt.error_category_counts == {
+        SOURCE_ERROR_REQUEST_FAILED: 5
+    }
+    assert coordinator.last_attempt.expedited_retry_scheduled is False
+    with pytest.raises(TypeError):
+        coordinator.last_attempt.source_errors["SWK:Baby"] = SOURCE_ERROR_UNEXPECTED
+
+
+async def test_coordinator_bounds_expedited_retry_and_exposes_current_attempt(
+    hass: HomeAssistant,
+) -> None:
+    entry = _entry()
+    client = types.SimpleNamespace(
+        async_fetch_feed=AsyncMock(
+            side_effect=LibraryApiError(
+                SOURCE_ERROR_REQUEST_FAILED,
+                retryable=True,
+            )
+        )
+    )
+    coordinator = LibraryDataCoordinator(
+        hass,
+        entry,
+        client,
+        (BRANCHES["SWK"],),
+        date(2025, 1, 15),
+        timedelta(hours=6),
+    )
+
+    with pytest.raises(UpdateFailed) as first_failure:
+        await coordinator._async_update_data()
+
+    assert first_failure.value.retry_after == 5 * 60
+    assert coordinator.last_attempt is not None
+    assert coordinator.last_attempt.retryable_failure_count == 5
+    assert coordinator.last_attempt.expedited_retry_scheduled is True
+
+    with pytest.raises(UpdateFailed) as second_failure:
+        await coordinator._async_update_data()
+
+    assert second_failure.value.retry_after is None
+    assert coordinator.last_attempt is not None
+    assert coordinator.last_attempt.expedited_retry_scheduled is False
+
+    success = BranchFeed(
+        events=(),
+        age_category="Baby",
+        source_count=0,
+        parsed_count=0,
+        last_event_date=None,
+        ordered=True,
+    )
+    client.async_fetch_feed.side_effect = None
+    client.async_fetch_feed.return_value = success
+    data = await coordinator._async_update_data()
+    coordinator.async_set_updated_data(data)
+    assert coordinator.last_attempt is not None
+    assert coordinator.last_attempt.successful_source_count == 5
+
+    client.async_fetch_feed.return_value = None
+    client.async_fetch_feed.side_effect = LibraryApiError(
+        SOURCE_ERROR_REQUEST_FAILED,
+        retryable=True,
+    )
+    with pytest.raises(UpdateFailed) as recovered_streak_failure:
+        await coordinator._async_update_data()
+
+    assert recovered_streak_failure.value.retry_after == 5 * 60
+    coordinator.async_set_update_error(recovered_streak_failure.value)
+    entry.runtime_data = coordinator
+    status = LibraryStatusSensor(entry, coordinator)
+    status_attributes = status.extra_state_attributes
+    assert status.available is True
+    assert status.native_value == "error"
+    assert status_attributes["cached_events"] == 0
+    assert status_attributes["last_attempt_requested_sources"] == 5
+    assert status_attributes["last_attempt_successful_sources"] == 0
+    assert status_attributes["last_attempt_failed_sources"] == 5
+    assert status_attributes["last_attempt_retryable_failures"] == 5
+    assert status_attributes["last_attempt_error_categories"] == {
+        SOURCE_ERROR_REQUEST_FAILED: 5
+    }
+    assert status_attributes["expedited_retry_scheduled"] is True
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert diagnostics["cached_event_count"] == 0
+    assert all(source["available"] for source in diagnostics["sources"].values())
+    assert diagnostics["last_attempt"] == {
+        "completed_at": coordinator.last_attempt.completed_at.isoformat(),
+        "requested_source_count": 5,
+        "successful_source_count": 0,
+        "failed_source_count": 5,
+        "retryable_failure_count": 5,
+        "error_category_counts": {SOURCE_ERROR_REQUEST_FAILED: 5},
+        "expedited_retry_scheduled": True,
+        "sources": {
+            f"Charles Santore Library — {category}": {
+                "available": False,
+                "error_category": SOURCE_ERROR_REQUEST_FAILED,
+            }
+            for category in (
+                "Baby",
+                "Toddler",
+                "Preschool",
+                "School Age",
+                "Young Adult",
+            )
+        },
+    }
 
 
 def _entry() -> MockConfigEntry:

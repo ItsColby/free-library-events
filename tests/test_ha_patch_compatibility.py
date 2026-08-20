@@ -63,14 +63,14 @@ class HomeAssistantPatchCompatibilityTests(unittest.TestCase):
                 harness_core_pin(requirements)
 
     def test_harness_pin_stays_inside_supported_patch_window(self) -> None:
-        validate_harness_window("2026.8.0", "2026.8.0", "2026.8.1")
-        validate_harness_window("2026.8.0", "2026.8.1", "2026.8.1")
-        for harness in ("2026.7.9", "2026.8.2", "2026.8.1b0"):
+        validate_harness_window("2026.8.0", "2026.8.0", "2026.8.2")
+        validate_harness_window("2026.8.0", "2026.8.1", "2026.8.2")
+        for harness in ("2026.7.9", "2026.8.3", "2026.8.1b0"):
             with (
                 self.subTest(harness=harness),
                 self.assertRaises(CompatibilityError),
             ):
-                validate_harness_window("2026.8.0", harness, "2026.8.1")
+                validate_harness_window("2026.8.0", harness, "2026.8.2")
 
     def test_pip_check_accepts_clean_environment(self) -> None:
         self.assertEqual(

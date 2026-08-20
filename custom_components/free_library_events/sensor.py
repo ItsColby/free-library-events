@@ -21,6 +21,7 @@ from .const import CONF_BIRTH_DATE, CONF_FILTER_MODE, DOMAIN
 from .coordinator import (
     LibraryData,
     LibraryDataCoordinator,
+    RefreshAttempt,
     coverage_warnings,
     source_expansion_details,
     source_keys_for_window,
@@ -78,6 +79,19 @@ class _ExpandedSourceProjection:
 
 
 @dataclass(frozen=True, slots=True)
+class _AttemptProjection:
+    """Immutable compact evidence from one completed source attempt."""
+
+    completed_at: str
+    requested_sources: int
+    successful_sources: int
+    failed_sources: int
+    retryable_failures: int
+    error_categories: tuple[tuple[str, int], ...]
+    expedited_retry_scheduled: bool
+
+
+@dataclass(frozen=True, slots=True)
 class _StatusProjection:
     """Immutable state derived from one cached-data evaluation."""
 
@@ -93,6 +107,7 @@ class _StatusProjection:
     supplemental_age_limitations: tuple[str, ...] = ()
     expanded_capped_sources: tuple[_ExpandedSourceProjection, ...] = ()
     unavailable_current_age_sources: tuple[str, ...] = ()
+    last_attempt: _AttemptProjection | None = None
 
     def attributes(self) -> dict[str, object]:
         """Return fresh Home Assistant attributes from the immutable snapshot."""
@@ -101,6 +116,24 @@ class _StatusProjection:
             "cached_events": self.cached_events,
             "next_week_events": self.next_week_events,
         }
+        if self.last_attempt is not None:
+            attributes.update(
+                {
+                    "last_attempt": self.last_attempt.completed_at,
+                    "last_attempt_requested_sources": self.last_attempt.requested_sources,
+                    "last_attempt_successful_sources": (
+                        self.last_attempt.successful_sources
+                    ),
+                    "last_attempt_failed_sources": self.last_attempt.failed_sources,
+                    "last_attempt_retryable_failures": self.last_attempt.retryable_failures,
+                    "last_attempt_error_categories": dict(
+                        self.last_attempt.error_categories
+                    ),
+                    "expedited_retry_scheduled": (
+                        self.last_attempt.expedited_retry_scheduled
+                    ),
+                }
+            )
         if self.last_refresh is None:
             return attributes
         attributes.update(
@@ -196,6 +229,7 @@ def _expanded_source_projection(
 
 def _build_status_projection(
     data: LibraryData | None,
+    last_attempt: RefreshAttempt | None,
     last_update_success: bool,
     birth_date: date,
     filter_mode: str,
@@ -203,11 +237,23 @@ def _build_status_projection(
 ) -> _StatusProjection:
     """Build one bounded status projection from cached coordinator data."""
 
+    attempt_projection = None
+    if last_attempt is not None:
+        attempt_projection = _AttemptProjection(
+            completed_at=last_attempt.completed_at.isoformat(),
+            requested_sources=last_attempt.requested_source_count,
+            successful_sources=last_attempt.successful_source_count,
+            failed_sources=last_attempt.failed_source_count,
+            retryable_failures=last_attempt.retryable_failure_count,
+            error_categories=tuple(last_attempt.error_category_counts.items()),
+            expedited_retry_scheduled=last_attempt.expedited_retry_scheduled,
+        )
     if data is None:
         return _StatusProjection(
             state="error" if not last_update_success else None,
             cached_events=0,
             next_week_events=0,
+            last_attempt=attempt_projection,
         )
 
     week_start = next_week_start(evaluation_time.date())
@@ -253,6 +299,7 @@ def _build_status_projection(
         unavailable_current_age_sources=tuple(
             source_label(key) for key in relevant_error_keys
         ),
+        last_attempt=attempt_projection,
     )
 
 
@@ -288,6 +335,7 @@ class LibraryStatusSensor(CoordinatorEntity[LibraryDataCoordinator], SensorEntit
         evaluation_time = dt_util.now(self._time_zone)
         self._projection = _build_status_projection(
             coordinator.data,
+            coordinator.last_attempt,
             coordinator.last_update_success,
             self._birth_date,
             self._filter_mode,
@@ -378,6 +426,7 @@ class LibraryStatusSensor(CoordinatorEntity[LibraryDataCoordinator], SensorEntit
 
         projection = _build_status_projection(
             self.coordinator.data,
+            self.coordinator.last_attempt,
             self.coordinator.last_update_success,
             self._birth_date,
             self._filter_mode,

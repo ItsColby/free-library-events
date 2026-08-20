@@ -36,6 +36,7 @@ async def async_get_config_entry_diagnostics(
     del hass
     coordinator: LibraryDataCoordinator | None = getattr(entry, "runtime_data", None)
     data = coordinator.data if coordinator else None
+    last_attempt = getattr(coordinator, "last_attempt", None)
     source_statuses = data.source_statuses if data else {}
     source_errors = data.source_errors if data else {}
     diagnostics = {
@@ -49,6 +50,24 @@ async def async_get_config_entry_diagnostics(
             ),
             "fetched_at": data.fetched_at.isoformat() if data else None,
         },
+        "last_attempt": {
+            "completed_at": last_attempt.completed_at.isoformat(),
+            "requested_source_count": last_attempt.requested_source_count,
+            "successful_source_count": last_attempt.successful_source_count,
+            "failed_source_count": last_attempt.failed_source_count,
+            "retryable_failure_count": last_attempt.retryable_failure_count,
+            "error_category_counts": dict(last_attempt.error_category_counts),
+            "expedited_retry_scheduled": last_attempt.expedited_retry_scheduled,
+            "sources": {
+                source_label(key): {
+                    "available": key not in last_attempt.source_errors,
+                    "error_category": last_attempt.source_errors.get(key),
+                }
+                for key in last_attempt.source_keys
+            },
+        }
+        if last_attempt
+        else None,
         "sources": {
             source_label(key): {
                 "published_item_count": source_statuses[key].source_count

@@ -341,13 +341,26 @@ instead of reporting a failed refresh as successful. The button remains
 available while the config entry is loaded even after a complete refresh
 failure, so it can be used to retry recovery.
 
+After the first complete failure in a continuous failure streak, the
+coordinator schedules one five-minute retry only when every source failed with
+a retryable timeout, connection, rate-limit, or server response. If that retry
+also fails, normal configured polling resumes; a successful or partially
+successful refresh resets the one-retry allowance. Deterministic feed,
+parsing, redirect-safety, response-size, and non-transient HTTP failures never
+enter the accelerated retry path.
+
 Diagnostics redact the person's display name and birth date. They include
 per-branch and age-category published/parsed counts, ordering and
 coverage-boundary evidence, adaptive type-feed request/failure counts,
 structured type-feed coverage blockers, base-prefix recovery, discovered-event
 counts, source availability, bounded errors, last refresh time, next-week match
-count, and cached event counts by branch. Status and render-response metadata
-retain the blocker count and at most three structured examples.
+count, and cached event counts by branch. Cached-source evidence remains
+separate from the latest completed refresh attempt, whose timestamp,
+success/failure totals, retryable count, allow-listed error-category counts,
+per-source result, and accelerated-retry decision remain visible even after a
+complete failure. The status sensor exposes only the compact attempt counts;
+status and render-response metadata retain the blocker count and at most three
+structured examples.
 
 ## Source limitations
 
@@ -418,7 +431,7 @@ must be removed or updated separately.
 Home Assistant 2026.8.0 or newer is required. Python 3.14 and Linux are required
 for the Home Assistant integration-test environments. The supported-minimum
 lane is dependency-closed at Core 2026.8.0, matching the published 0.13.354
-custom-component harness. A separate exact-current lane targets Core 2026.8.1.
+custom-component harness. A separate exact-current lane targets Core 2026.8.2.
 Its bounded checker accepts either a clean environment or only the single
 metadata-proven harness/Core exact-pin mismatch before the complete HA tests
 run. That second lane proves same-month patch compatibility, not dependency

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
@@ -18,6 +19,7 @@ from .api import (
     OFFICIAL_EVENT_TYPES,
     RSS_ITEM_LIMIT,
     SOURCE_ERROR_EXPANSION_TIMEOUT,
+    SOURCE_ERROR_REQUEST_FAILED,
     SOURCE_ERROR_UNEXPECTED,
     TYPE_SHARD_BLOCKER_CAPPED,
     TYPE_SHARD_BLOCKER_PARSE_INCOMPLETE,
@@ -49,6 +51,7 @@ SOURCE_AGE_HORIZON = timedelta(days=90)
 MAX_TYPE_EXPANSIONS_PER_REFRESH = 12
 TYPE_EXPANSION_TIMEOUT_SECONDS = 90
 MAX_TYPE_FAILURE_EXAMPLES = 3
+EXPEDITED_RETRY_SECONDS = 5 * 60
 
 
 def type_shard_blocker_data(blocker: TypeShardBlocker) -> dict[str, object]:
@@ -284,6 +287,50 @@ class LibraryData:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class RefreshAttempt:
+    """Privacy-safe evidence from the latest completed base-source attempt."""
+
+    completed_at: datetime
+    source_keys: tuple[str, ...]
+    source_errors: Mapping[str, str]
+    retryable_failure_count: int
+    expedited_retry_scheduled: bool
+
+    def __post_init__(self) -> None:
+        """Detach and freeze nested attempt evidence."""
+
+        object.__setattr__(
+            self, "source_errors", MappingProxyType(dict(self.source_errors))
+        )
+
+    @property
+    def requested_source_count(self) -> int:
+        """Return the number of base sources in this attempt."""
+
+        return len(self.source_keys)
+
+    @property
+    def failed_source_count(self) -> int:
+        """Return the number of failed base sources in this attempt."""
+
+        return len(self.source_errors)
+
+    @property
+    def successful_source_count(self) -> int:
+        """Return the number of successful base sources in this attempt."""
+
+        return self.requested_source_count - self.failed_source_count
+
+    @property
+    def error_category_counts(self) -> Mapping[str, int]:
+        """Return stable allow-listed failure-category counts."""
+
+        return MappingProxyType(
+            dict(sorted(Counter(self.source_errors.values()).items()))
+        )
+
+
 def coverage_warnings(
     data: LibraryData,
     birth_date: date,
@@ -424,6 +471,8 @@ class LibraryDataCoordinator(DataUpdateCoordinator[LibraryData]):
         self._client = client
         self.branches = tuple(branches)
         self.birth_date = birth_date
+        self.last_attempt: RefreshAttempt | None = None
+        self._expedited_retry_used = False
 
     async def _async_update_data(self) -> LibraryData:
         """Fetch every selected branch, retaining partial successes."""
@@ -449,12 +498,19 @@ class LibraryDataCoordinator(DataUpdateCoordinator[LibraryData]):
         )
         statuses: dict[str, BranchFeed] = {}
         errors: dict[str, str] = {}
+        retryable_failure_keys: set[str] = set()
         for (branch, age_category), result in zip(requests, results, strict=True):
             key = source_key(branch, age_category)
             if isinstance(result, asyncio.CancelledError):
                 raise result
             if isinstance(result, BaseException):
                 errors[key] = source_error_category(result)
+                if (
+                    isinstance(result, LibraryApiError)
+                    and result.category == SOURCE_ERROR_REQUEST_FAILED
+                    and result.retryable
+                ):
+                    retryable_failure_keys.add(key)
                 continue
             feed = result
             if not isinstance(feed, BranchFeed):
@@ -463,9 +519,39 @@ class LibraryDataCoordinator(DataUpdateCoordinator[LibraryData]):
             statuses[key] = feed
 
         if not statuses:
+            all_failures_retryable = len(retryable_failure_keys) == len(requests)
+            schedule_expedited_retry = (
+                all_failures_retryable and not self._expedited_retry_used
+            )
+            if schedule_expedited_retry:
+                self._expedited_retry_used = True
+            completed_at = dt_util.utcnow()
+            self.last_attempt = RefreshAttempt(
+                completed_at=completed_at,
+                source_keys=tuple(
+                    source_key(branch, age_category)
+                    for branch, age_category in requests
+                ),
+                source_errors=errors,
+                retryable_failure_count=len(retryable_failure_keys),
+                expedited_retry_scheduled=schedule_expedited_retry,
+            )
+            categories = ", ".join(
+                f"{category}={count}"
+                for category, count in self.last_attempt.error_category_counts.items()
+            )
+            _LOGGER.warning(
+                "All %d library sources failed (%s); expedited retry scheduled: %s",
+                len(requests),
+                categories,
+                schedule_expedited_retry,
+            )
             raise UpdateFailed(
                 translation_domain=DOMAIN,
                 translation_key="library_source_update_failed",
+                retry_after=(
+                    EXPEDITED_RETRY_SECONDS if schedule_expedited_retry else None
+                ),
             )
 
         request_by_key = {
@@ -522,12 +608,23 @@ class LibraryDataCoordinator(DataUpdateCoordinator[LibraryData]):
             for branch in self.branches
             if branch.code in successful_branches
         }
+        completed_at = dt_util.utcnow()
+        self._expedited_retry_used = False
+        self.last_attempt = RefreshAttempt(
+            completed_at=completed_at,
+            source_keys=tuple(
+                source_key(branch, age_category) for branch, age_category in requests
+            ),
+            source_errors=errors,
+            retryable_failure_count=len(retryable_failure_keys),
+            expedited_retry_scheduled=False,
+        )
         return LibraryData(
             events=tuple(merged_events),
             source_counts=counts,
             source_statuses=statuses,
             source_errors=errors,
-            fetched_at=dt_util.utcnow(),
+            fetched_at=completed_at,
         )
 
 
