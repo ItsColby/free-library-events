@@ -1100,6 +1100,98 @@ async def test_status_projection_reschedules_on_failure_recovery_and_unload(
     scheduled[2][2].assert_called_once_with()
 
 
+async def test_status_publishes_each_consecutive_failure_attempt(
+    hass: HomeAssistant,
+) -> None:
+    entry = _entry()
+    entry.add_to_hass(hass)
+    fetch_mock = AsyncMock(
+        side_effect=lambda _branch, age_category, _coverage_end=None: BranchFeed(
+            events=(),
+            age_category=age_category,
+            source_count=0,
+            parsed_count=0,
+            last_event_date=None,
+            ordered=True,
+        )
+    )
+
+    with patch(
+        "custom_components.free_library_events.api.LibraryClient.async_fetch_feed",
+        new=fetch_mock,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        coordinator = entry.runtime_data
+        assert coordinator.last_attempt is not None
+        requested_source_count = coordinator.last_attempt.requested_source_count
+        initial_fetch_count = fetch_mock.await_count
+
+        fetch_mock.side_effect = LibraryApiError(
+            SOURCE_ERROR_REQUEST_FAILED,
+            retryable=True,
+        )
+        await coordinator.async_refresh()
+        await hass.async_block_till_done()
+
+        first_failure = hass.states.get("sensor.free_library_events_status")
+        assert first_failure is not None
+        assert first_failure.state == "error"
+        assert first_failure.attributes["expedited_retry_scheduled"] is True
+        first_attempt = first_failure.attributes["last_attempt"]
+
+        failed_button = hass.states.get("button.free_library_events_refresh_events")
+        assert failed_button is not None
+        assert failed_button.state != STATE_UNAVAILABLE
+        with pytest.raises(HomeAssistantError) as failure:
+            await hass.services.async_call(
+                "button",
+                "press",
+                {"entity_id": "button.free_library_events_refresh_events"},
+                blocking=True,
+            )
+        assert failure.value.translation_domain == DOMAIN
+        assert failure.value.translation_key == "manual_refresh_failed"
+
+        second_failure = hass.states.get("sensor.free_library_events_status")
+        assert second_failure is not None
+        assert second_failure.state == "error"
+        assert second_failure.attributes["last_attempt"] != first_attempt
+        assert second_failure.attributes["expedited_retry_scheduled"] is False
+        assert (
+            fetch_mock.await_count == initial_fetch_count + 2 * requested_source_count
+        )
+        failed_button = hass.states.get("button.free_library_events_refresh_events")
+        assert failed_button is not None
+        assert failed_button.state != STATE_UNAVAILABLE
+
+        fetch_mock.side_effect = lambda _branch, age_category, _coverage_end=None: (
+            BranchFeed(
+                events=(),
+                age_category=age_category,
+                source_count=0,
+                parsed_count=0,
+                last_event_date=None,
+                ordered=True,
+            )
+        )
+        await coordinator.async_refresh()
+        await hass.async_block_till_done()
+
+        recovered = hass.states.get("sensor.free_library_events_status")
+        assert recovered is not None
+        assert recovered.state == "ok"
+        assert (
+            recovered.attributes["last_attempt_successful_sources"]
+            == requested_source_count
+        )
+        assert recovered.attributes["expedited_retry_scheduled"] is False
+        assert (
+            fetch_mock.await_count == initial_fetch_count + 3 * requested_source_count
+        )
+        assert await hass.config_entries.async_unload(entry.entry_id)
+
+
 async def test_setup_entities_action_and_redacted_diagnostics(
     hass: HomeAssistant,
 ) -> None:

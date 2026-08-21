@@ -368,6 +368,9 @@ class LibraryStatusSensor(CoordinatorEntity[LibraryDataCoordinator], SensorEntit
 
         await super().async_added_to_hass()
         self.async_on_remove(
+            self.coordinator.async_add_attempt_listener(self._handle_coordinator_update)
+        )
+        self.async_on_remove(
             self.hass.bus.async_listen(
                 EVENT_CORE_CONFIG_UPDATE,
                 self._handle_core_config_update,

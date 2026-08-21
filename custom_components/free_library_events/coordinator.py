@@ -5,13 +5,13 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from types import MappingProxyType
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
@@ -473,10 +473,26 @@ class LibraryDataCoordinator(DataUpdateCoordinator[LibraryData]):
         self.birth_date = birth_date
         self.last_attempt: RefreshAttempt | None = None
         self._expedited_retry_used = False
+        self._notify_consecutive_failure_attempt = False
+        self._attempt_listeners: set[Callable[[], None]] = set()
+
+    @callback
+    def async_add_attempt_listener(
+        self, update_callback: Callable[[], None]
+    ) -> Callable[[], None]:
+        """Listen for attempt changes Core suppresses after repeated failures."""
+
+        self._attempt_listeners.add(update_callback)
+
+        def remove_listener() -> None:
+            self._attempt_listeners.discard(update_callback)
+
+        return remove_listener
 
     async def _async_update_data(self) -> LibraryData:
         """Fetch every selected branch, retaining partial successes."""
 
+        self._notify_consecutive_failure_attempt = False
         today = dt_util.now().date()
         coverage_end = next_week_start(today) + timedelta(days=6)
         age_categories = source_age_categories_for_window(
@@ -519,6 +535,7 @@ class LibraryDataCoordinator(DataUpdateCoordinator[LibraryData]):
             statuses[key] = feed
 
         if not statuses:
+            self._notify_consecutive_failure_attempt = not self.last_update_success
             all_failures_retryable = len(retryable_failure_keys) == len(requests)
             schedule_expedited_retry = (
                 all_failures_retryable and not self._expedited_retry_used
@@ -616,6 +633,24 @@ class LibraryDataCoordinator(DataUpdateCoordinator[LibraryData]):
             source_errors=errors,
             fetched_at=completed_at,
         )
+
+    @callback
+    def _async_refresh_finished(self) -> None:
+        """Publish current attempt evidence after a consecutive failure."""
+
+        super()._async_refresh_finished()
+        if not self._notify_consecutive_failure_attempt:
+            return
+        self._notify_consecutive_failure_attempt = False
+        for update_callback in list(self._attempt_listeners):
+            try:
+                update_callback()
+            except Exception:
+                self.logger.exception(
+                    "Unexpected error updating attempt listener %s for %s",
+                    id(update_callback),
+                    self.name,
+                )
 
 
 def coordinator_error_category(error: BaseException | None) -> str | None:
