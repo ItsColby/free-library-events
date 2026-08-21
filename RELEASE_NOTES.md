@@ -1,3 +1,35 @@
+# Free Library Events v2026.8.20
+
+## Fixed
+
+- Keep the manual refresh button available while the config entry is loaded,
+  even after every selected feed fails, so Home Assistant can initiate a
+  recovery attempt instead of disabling the action that performs it.
+- Preserve the translated Home Assistant failure result when a manual retry
+  fails, while continuing to use the coordinator's native refresh debouncer.
+
+## Recovery and diagnostics
+
+- Schedule one five-minute retry after the first complete all-transient source
+  failure in a continuous failure streak. Later failures return to the normal
+  configured polling interval, and any partial or full success resets the
+  bounded retry allowance.
+- Retain privacy-safe evidence from the latest completed refresh attempt
+  separately from the last successful cache, including source totals,
+  allow-listed failure categories, retryability, and the expedited-retry
+  decision.
+- Keep the status sensor current across consecutive failures that Home
+  Assistant intentionally coalesces, without retaining raw exception details
+  or expanding Recorder state with per-source data.
+
+## Validation
+
+- Exercise the manual button through Home Assistant's entity service after a
+  coordinator failure and prove failed retry, successful recovery, continued
+  availability, listener cleanup, and consecutive-attempt projection.
+- Retain dependency closure on the supported Core 2026.8.0 minimum and validate
+  same-month patch compatibility against Core 2026.8.2.
+
 # Free Library Events v2026.8.11
 
 ## Fixed

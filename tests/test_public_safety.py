@@ -161,7 +161,7 @@ class PublicSafetyGuardTests(unittest.TestCase):
             "Home Assistant minimum integration tests (Core 2026.8.0)", workflow
         )
         self.assertIn(
-            "Home Assistant current-patch integration tests (Core 2026.8.1)",
+            "Home Assistant current-patch integration tests (Core 2026.8.2)",
             workflow,
         )
         self.assertIn("bash scripts/verify-release-local.sh minimum native", workflow)
@@ -241,7 +241,7 @@ class PublicSafetyGuardTests(unittest.TestCase):
         )
         self.assertEqual(
             [
-                "homeassistant==2026.8.1",
+                "homeassistant==2026.8.2",
                 "PyTurboJPEG==1.8.3",
                 "ha-ffmpeg==3.2.2",
                 "mutagen==1.48.1",

@@ -53,8 +53,16 @@
   source-count, status, and error mapping is read-only. Home Assistant's
   config-entry-owned coordinator debouncer bounds overlapping refresh triggers
   to one running refresh plus one pending follow-up and shuts down scheduled
-  work on unload. Complete source failure uses a translated update error while
-  retaining only bounded error categories. It adaptively expands at most twelve
+  work on unload. Every completed base-source attempt also replaces one
+  immutable privacy-safe record containing the requested source keys,
+  allow-listed error categories, retryable count, completion time, and retry
+  decision. That record remains distinct from the last successful normalized
+  cache, so a complete source failure uses a translated update error without
+  losing its current evidence. When every source in the first complete failure
+  of a continuous failure streak has a retryable transport, rate-limit, or
+  server failure, the update error requests one five-minute coordinator retry.
+  A repeated failure returns to the configured interval; any partial or full
+  success resets the allowance. It adaptively expands at most twelve
   unresolved capped feeds per refresh. Current-age sources come first, followed
   by the numerically nearest official age windows, with branches distributed
   deterministically within each category. A minor uses Baby through Young
@@ -193,7 +201,10 @@
   receive unusable CID references.
 - `diagnostics.py` redacts the person's display name and birth date and exposes
   only bounded per-source counts, type-expansion evidence, ordering, coverage
-  boundaries, and health. Successful type shards that cannot prove coverage
+  boundaries, and health. It labels the retained normalized cache separately
+  from the latest completed base-source attempt, including compact totals,
+  allow-listed error-category counts, per-source result, retryable count, and
+  one-retry decision. Successful type shards that cannot prove coverage
   retain a stable reason identifier, official event type, counts, and last event
   date, while base-prefix recovery remains explicit. Source and coordinator
   failures use allow-listed categories, while unexpected image and storage
@@ -202,7 +213,10 @@
   entity state and action-response metadata retain counts and three examples.
 - The manual refresh button checks the coordinator result and raises a
   translated Home Assistant error on failure. A platform action therefore
-  cannot report success when every requested source failed.
+  cannot report success when every requested source failed. It deliberately
+  remains available while the config entry is loaded, independent of the last
+  coordinator result, so a complete source failure cannot disable manual
+  recovery.
 
 ## Supported Source Boundary
 
@@ -264,7 +278,7 @@ page available outside the integration for schedule changes.
    actionlint with ShellCheck, zizmor auditor, Hassfest, and HACS validation.
    The Linux HA tests have two exact owners: `requirements-ha-test.txt` proves
    dependency closure at the 2026.8.0 supported minimum, while
-   `requirements-ha-current.txt` proves 2026.8.1 same-month patch compatibility.
+   `requirements-ha-current.txt` proves 2026.8.2 same-month patch compatibility.
    The current-patch checker accepts only clean closure or the single
    metadata-proven harness/Core exact-pin mismatch before running the complete
    HA suite; it rejects cross-month or prerelease targets, additional conflicts,
@@ -276,7 +290,7 @@ page available outside the integration for schedule changes.
    `vYYYY.M.D` tag, and release title before opening the release pull request.
 4. Require terminal pull-request success for **Unit tests and static
    validation**, **Home Assistant minimum integration tests (Core 2026.8.0)**,
-   **Home Assistant current-patch integration tests (Core 2026.8.1)**,
+   **Home Assistant current-patch integration tests (Core 2026.8.2)**,
    **Hassfest**, **HACS**, the aggregate **Release gate**, and CodeQL's **Analyze
    (actions)**, **Analyze (python)**, and **CodeQL** checks.
 5. Merge through default-branch protection without bypass, using squash or

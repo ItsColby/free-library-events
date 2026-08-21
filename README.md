@@ -1,17 +1,5 @@
 # Free Library Events for Home Assistant
 
-## Local release validation
-
-Run `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-release-local.ps1`
-before publishing a release candidate. It uses the `Ubuntu-24.04` WSL2
-distribution and rootless Podman to run the same local-tree unit,
-minimum/current Home Assistant, and Hassfest validation classes as the hosted
-workflow. Images are pinned by digest. HACS validation reads a pushed repository
-through GitHub's API, so the hosted HACS job remains the independent public
-metadata and release gate rather than receiving a local GitHub credential. The
-hosted unit and Home Assistant jobs call this same script in `native` mode, so
-future validation changes have one product-owned command surface.
-
 Free Library Events is a Home Assistant custom integration that turns selected
 Free Library of Philadelphia branches into an age-aware calendar and a response
 action for weekly email digests.
@@ -337,15 +325,30 @@ If one selected feed fails, the calendar and digest retain the successful
 branch and disclose the unavailable source. If every selected feed fails,
 `render_digest` raises an error before returning an email payload, and the
 manual refresh button raises the same class of translated Home Assistant error
-instead of reporting a failed refresh as successful.
+instead of reporting a failed refresh as successful. The button remains
+available while the config entry is loaded even after a complete refresh
+failure, so it can be used to retry recovery.
+
+After the first complete failure in a continuous failure streak, the
+coordinator schedules one five-minute retry only when every source failed with
+a retryable timeout, connection, rate-limit, or server response. If that retry
+also fails, normal configured polling resumes; a successful or partially
+successful refresh resets the one-retry allowance. Deterministic feed,
+parsing, redirect-safety, response-size, and non-transient HTTP failures never
+enter the accelerated retry path.
 
 Diagnostics redact the person's display name and birth date. They include
 per-branch and age-category published/parsed counts, ordering and
 coverage-boundary evidence, adaptive type-feed request/failure counts,
 structured type-feed coverage blockers, base-prefix recovery, discovered-event
 counts, source availability, bounded errors, last refresh time, next-week match
-count, and cached event counts by branch. Status and render-response metadata
-retain the blocker count and at most three structured examples.
+count, and cached event counts by branch. Cached-source evidence remains
+separate from the latest completed refresh attempt, whose timestamp,
+success/failure totals, retryable count, allow-listed error-category counts,
+per-source result, and accelerated-retry decision remain visible even after a
+complete failure. The status sensor exposes only the compact attempt counts;
+status and render-response metadata retain the blocker count and at most three
+structured examples.
 
 ## Source limitations
 
@@ -356,10 +359,13 @@ retain the blocker count and at most three structured examples.
   they were assigned to a narrower children's category, without mixing in an
   unclassified all-events feed. The RSS endpoint ignores `page=2`, so an
   unresolved capped feed is instead queried through all official event-type
-  filters and deduplicated. Expansion is bounded to twelve feeds per refresh,
-  enough for all four branches when three official age windows overlap, and
-  prioritizes every current-age source before the nearest supplemental age
-  windows. All RSS traffic shares an eight-request ceiling. Each
+  filters and deduplicated. Expansion is bounded to twelve capped branch-age
+  sources per refresh, enough for all four branches when three official age
+  windows overlap. Each expanded source fans out through all nineteen official
+  event-type filters, so the expansion ceiling is 228 type-feed requests per
+  refresh. Expansion prioritizes every current-age source before the nearest
+  supplemental age windows. All RSS traffic shares an eight-request concurrency
+  ceiling. Each
   decoded RSS response is capped at 256 KiB. Coverage is proven only when every
   type shard covers the digest horizon and recovers the capped base prefix.
   Successful shards that remain capped retain their official event type, item
@@ -413,10 +419,20 @@ must be removed or updated separately.
 
 ## Development and validation
 
+Run `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-release-local.ps1`
+before publishing a release candidate. It uses the `Ubuntu-24.04` WSL2
+distribution and rootless Podman to run the same local-tree unit,
+minimum/current Home Assistant, and Hassfest validation classes as the hosted
+workflow. Images are pinned by digest. HACS validation reads a pushed repository
+through GitHub's API, so the hosted HACS job remains the independent public
+metadata and release gate rather than receiving a local GitHub credential. The
+hosted unit and Home Assistant jobs call this same script in `native` mode, so
+future validation changes have one product-owned command surface.
+
 Home Assistant 2026.8.0 or newer is required. Python 3.14 and Linux are required
 for the Home Assistant integration-test environments. The supported-minimum
 lane is dependency-closed at Core 2026.8.0, matching the published 0.13.354
-custom-component harness. A separate exact-current lane targets Core 2026.8.1.
+custom-component harness. A separate exact-current lane targets Core 2026.8.2.
 Its bounded checker accepts either a clean environment or only the single
 metadata-proven harness/Core exact-pin mismatch before the complete HA tests
 run. That second lane proves same-month patch compatibility, not dependency
@@ -457,9 +473,10 @@ SHA and runs the local tier, exact-pinned Ruff, mypy, actionlint, ShellCheck,
 zizmor auditor, dependency-closed minimum-Core and bounded current-patch Home
 Assistant lanes, Hassfest, and the HACS Action. It reports the resolved
 static-analysis tool versions. The stable **Release gate** succeeds only when
-every required job succeeds. Dependabot proposes weekly
-GitHub Actions and Python dependency updates after a seven-day stability and
-supply-chain cooldown. A release additionally waits for CodeQL analysis of the
+every required job succeeds. Dependabot proposes weekly GitHub Actions updates
+after a seven-day stability and supply-chain cooldown. Python dependency pins
+move manually with the product's supported Core and harness contracts. A
+release additionally waits for CodeQL analysis of the
 exact commit and inspects open alerts because a
 successful analysis workflow does not imply zero findings. See
 [`docs/architecture.md`](docs/architecture.md) for ownership and release
