@@ -83,12 +83,6 @@ def webcal_subscription_urls(hass: HomeAssistant, token: str) -> WebcalSubscript
     )
 
 
-def webcal_subscription_url(hass: HomeAssistant, token: str) -> str:
-    """Return the convenience WebCal subscription URL."""
-
-    return webcal_subscription_urls(hass, token).webcal_url
-
-
 def webcal_status(hass: HomeAssistant, enabled: bool, token: object) -> str:
     """Return a safe options-flow status without logging the token."""
 

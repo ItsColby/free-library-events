@@ -536,16 +536,6 @@ class LibraryDataCoordinator(DataUpdateCoordinator[LibraryData]):
                 retryable_failure_count=len(retryable_failure_keys),
                 expedited_retry_scheduled=schedule_expedited_retry,
             )
-            categories = ", ".join(
-                f"{category}={count}"
-                for category, count in self.last_attempt.error_category_counts.items()
-            )
-            _LOGGER.warning(
-                "All %d library sources failed (%s); expedited retry scheduled: %s",
-                len(requests),
-                categories,
-                schedule_expedited_retry,
-            )
             raise UpdateFailed(
                 translation_domain=DOMAIN,
                 translation_key="library_source_update_failed",

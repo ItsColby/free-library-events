@@ -1,17 +1,5 @@
 # Free Library Events for Home Assistant
 
-## Local release validation
-
-Run `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-release-local.ps1`
-before publishing a release candidate. It uses the `Ubuntu-24.04` WSL2
-distribution and rootless Podman to run the same local-tree unit,
-minimum/current Home Assistant, and Hassfest validation classes as the hosted
-workflow. Images are pinned by digest. HACS validation reads a pushed repository
-through GitHub's API, so the hosted HACS job remains the independent public
-metadata and release gate rather than receiving a local GitHub credential. The
-hosted unit and Home Assistant jobs call this same script in `native` mode, so
-future validation changes have one product-owned command surface.
-
 Free Library Events is a Home Assistant custom integration that turns selected
 Free Library of Philadelphia branches into an age-aware calendar and a response
 action for weekly email digests.
@@ -371,10 +359,13 @@ structured examples.
   they were assigned to a narrower children's category, without mixing in an
   unclassified all-events feed. The RSS endpoint ignores `page=2`, so an
   unresolved capped feed is instead queried through all official event-type
-  filters and deduplicated. Expansion is bounded to twelve feeds per refresh,
-  enough for all four branches when three official age windows overlap, and
-  prioritizes every current-age source before the nearest supplemental age
-  windows. All RSS traffic shares an eight-request ceiling. Each
+  filters and deduplicated. Expansion is bounded to twelve capped branch-age
+  sources per refresh, enough for all four branches when three official age
+  windows overlap. Each expanded source fans out through all nineteen official
+  event-type filters, so the expansion ceiling is 228 type-feed requests per
+  refresh. Expansion prioritizes every current-age source before the nearest
+  supplemental age windows. All RSS traffic shares an eight-request concurrency
+  ceiling. Each
   decoded RSS response is capped at 256 KiB. Coverage is proven only when every
   type shard covers the digest horizon and recovers the capped base prefix.
   Successful shards that remain capped retain their official event type, item
@@ -428,6 +419,16 @@ must be removed or updated separately.
 
 ## Development and validation
 
+Run `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-release-local.ps1`
+before publishing a release candidate. It uses the `Ubuntu-24.04` WSL2
+distribution and rootless Podman to run the same local-tree unit,
+minimum/current Home Assistant, and Hassfest validation classes as the hosted
+workflow. Images are pinned by digest. HACS validation reads a pushed repository
+through GitHub's API, so the hosted HACS job remains the independent public
+metadata and release gate rather than receiving a local GitHub credential. The
+hosted unit and Home Assistant jobs call this same script in `native` mode, so
+future validation changes have one product-owned command surface.
+
 Home Assistant 2026.8.0 or newer is required. Python 3.14 and Linux are required
 for the Home Assistant integration-test environments. The supported-minimum
 lane is dependency-closed at Core 2026.8.0, matching the published 0.13.354
@@ -472,9 +473,10 @@ SHA and runs the local tier, exact-pinned Ruff, mypy, actionlint, ShellCheck,
 zizmor auditor, dependency-closed minimum-Core and bounded current-patch Home
 Assistant lanes, Hassfest, and the HACS Action. It reports the resolved
 static-analysis tool versions. The stable **Release gate** succeeds only when
-every required job succeeds. Dependabot proposes weekly
-GitHub Actions and Python dependency updates after a seven-day stability and
-supply-chain cooldown. A release additionally waits for CodeQL analysis of the
+every required job succeeds. Dependabot proposes weekly GitHub Actions updates
+after a seven-day stability and supply-chain cooldown. Python dependency pins
+move manually with the product's supported Core and harness contracts. A
+release additionally waits for CodeQL analysis of the
 exact commit and inspects open alerts because a
 successful analysis workflow does not imply zero findings. See
 [`docs/architecture.md`](docs/architecture.md) for ownership and release
