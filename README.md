@@ -419,6 +419,12 @@ must be removed or updated separately.
 
 ## Development and validation
 
+For focused digest checks without Home Assistant or containers, run:
+
+```powershell
+python -m unittest discover -s tests -p "test_digest.py"
+```
+
 Run `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-release-local.ps1`
 before publishing a release candidate. It uses the `Ubuntu-24.04` WSL2
 distribution and rootless Podman to run the same local-tree unit,

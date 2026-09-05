@@ -66,6 +66,7 @@ run_unit() {
   run_actionlint
   run_python '
     python -m pip install "ruff==0.16.2" "shellcheck-py==0.11.0.1" "zizmor==1.29.0" &&
+    shellcheck scripts/verify-release-local.sh &&
     zizmor --strict-collection --persona auditor . &&
     python -m ruff format --check custom_components tests scripts &&
     python -m ruff check custom_components tests scripts &&
