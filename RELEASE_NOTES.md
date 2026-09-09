@@ -1,3 +1,31 @@
+# Free Library Events v2026.9.8
+
+## Fixed
+
+- Manual refreshes and digest requests with `force_refresh: true` now wait for
+  completed source work, including an already-running refresh; preserve
+  cancellation and unload handling and keep setup retries separate from polling
+  retries.
+- Preserve event identity when titles are shortened, retain nested description
+  lists, handle malformed age text and negated highlights, and enforce the final
+  HTML size limit with consistent omission notices.
+- Accept valid short lossless WebP images and preserve existing storage on path
+  collisions. Include calendar-setting changes in subscription cache timestamps.
+- Reject invalid timing and birth-date values, redact custom calendar names in
+  diagnostics, and keep invalid stored settings from breaking diagnostic downloads.
+
+## Maintenance
+
+- Consolidate repeated implementation, tests and documentation without additional
+  user-facing behavior changes; move pytest settings into `pyproject.toml`.
+- Isolate validation environments, harden public-payload and dependency checks,
+  and validate Core 2026.8.0 and 2026.9.1 with matching test harnesses.
+
+## Validation
+
+- 113 unit tests and 120 Home Assistant tests on each supported Core lane passed.
+- Ruff, ShellCheck, actionlint, strict typing, dependency checks and Hassfest passed.
+
 # Free Library Events v2026.8.20
 
 ## Fixed
