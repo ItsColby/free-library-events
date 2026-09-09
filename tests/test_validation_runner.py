@@ -108,6 +108,32 @@ class ValidationRunnerTests(unittest.TestCase):
         self.assertNotIn("Local validation passed", result.stdout)
         self.assertEqual([], list(self.scratch.iterdir()))
 
+    def test_all_native_keeps_support_lanes_sequential(self) -> None:
+        self.install_python_stand_in()
+        self.executable("zizmor", "exit 0\n")
+        self.executable(
+            "go",
+            'printf "#!/usr/bin/env bash\\nexit 0\\n" > "$GOBIN/actionlint"\n'
+            'chmod +x "$GOBIN/actionlint"\n',
+        )
+        self.executable("docker", 'printf "release\\n" >> "$TRACE"\n')
+        result = self.run_lane("all", "native")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        records = self.trace.read_text(encoding="utf-8").splitlines()
+        tests = [
+            index for index, line in enumerate(records) if line.startswith("pytest:")
+        ]
+        current_install = next(
+            index
+            for index, line in enumerate(records)
+            if "pip install --upgrade -r requirements-ha-current.txt" in line
+        )
+        self.assertEqual(len(tests), 2)
+        self.assertLess(tests[0], current_install)
+        self.assertLess(current_install, tests[1])
+        self.assertEqual(records[-1], "release")
+        self.assertEqual([], list(self.scratch.iterdir()))
+
     def test_actionlint_failure_cleans_tools_and_uses_repository_cwd(self) -> None:
         self.install_python_stand_in()
         self.executable(
@@ -184,6 +210,37 @@ class ValidationRunnerTests(unittest.TestCase):
         self.assertEqual([], list(self.scratch.iterdir()))
         self.assertEqual("changed", (self.repo / "tracked.txt").read_text())
         self.assertTrue((self.repo / "private.txt").exists())
+
+    def test_container_lanes_reuse_downloads_but_keep_fresh_installs(self) -> None:
+        subprocess.run(
+            ["git", "-C", str(self.repo), "init", "-q"],
+            env=self.env,
+            check=True,
+            capture_output=True,
+        )
+        self.executable(
+            "podman",
+            '[[ "$1" == run && "$2" == --rm ]]\n'
+            '[[ "$*" == *":/workspace"* ]] || exit 0\n'
+            '[[ "$*" == *"PIP_CACHE_DIR=/pip-cache"* ]]\n'
+            '[[ "$*" == *"--mount type=volume,source=free-library-events-validation-pip,target=/pip-cache"* ]]\n'
+            'lane="${!#}"\n'
+            '[[ "$lane" == *"python -m pip install"* ]]\n'
+            'if [[ "$lane" == *"requirements-ha-current.txt"* ]]; then\n'
+            '  [[ "$lane" == *"check_ha_patch_compatibility.py"* ]]\n'
+            'elif [[ "$lane" == *"requirements-ha-test.txt"* ]]; then\n'
+            '  [[ "$lane" == *"python -m pip check"* ]]\n'
+            "fi\n"
+            'printf "fresh-python-lane\\n" >> "$TRACE"\n',
+        )
+        for _ in range(2):
+            result = self.run_lane("all", "container")
+            self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            self.trace.read_text(encoding="utf-8").splitlines(),
+            ["fresh-python-lane"] * 6,
+        )
+        self.assertEqual([], list(self.scratch.iterdir()))
 
 
 if __name__ == "__main__":

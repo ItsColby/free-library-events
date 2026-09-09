@@ -424,6 +424,18 @@ The source checkout stays untouched. Container images are pinned by digest.
 `unit`, `minimum`, `current`, and `release` select individual lanes; `release`
 runs only Hassfest, so use `all` for the full local gate.
 
+Local containers reuse pip downloads and wheels in the Podman volume
+`free-library-events-validation-pip`. Each lane still installs its dependencies
+into a fresh container and reruns every check. The disposable cache contains
+neither installed environments nor validation results; remove it with
+`podman volume rm free-library-events-validation-pip` when no local validation
+is running to force fresh downloads.
+
+After unit/static checks pass, `all container` runs the minimum/current HA lanes
+concurrently against a read-only snapshot. It waits for both results before
+cleanup and runs Hassfest only when both pass. Individual lanes and native
+execution remain sequential.
+
 The hosted unit and Home Assistant jobs use the same runner with the `native`
 backend. That backend requires Python 3.14 on Linux and Go for actionlint; its
 `release` lane requires Docker. Each Python lane creates and removes its own
