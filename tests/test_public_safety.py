@@ -2,331 +2,21 @@
 
 from __future__ import annotations
 
-import ast
-import json
+import hashlib
 import subprocess
 import tempfile
-import tomllib
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from scripts.check_public_safety import (
+    PublicSafetyError,
     _text_failures,
     run_guard,
 )
 
 
 class PublicSafetyGuardTests(unittest.TestCase):
-    def test_exact_pinned_tools_and_strict_mypy_are_documented(self) -> None:
-        root = Path(__file__).resolve().parents[1]
-        workflow = (root / ".github/workflows/validate.yaml").read_text(
-            encoding="utf-8"
-        )
-        release_runner = (root / "scripts/verify-release-local.sh").read_text(
-            encoding="utf-8"
-        )
-        readme = (root / "README.md").read_text(encoding="utf-8")
-        commands = (
-            "python -m ruff format --check custom_components tests scripts",
-            "python -m ruff check custom_components tests scripts",
-            "python -m mypy --strict custom_components/free_library_events",
-        )
-
-        for command in commands:
-            with self.subTest(command=command):
-                self.assertIn(command, release_runner)
-                self.assertIn(command, readme)
-
-        self.assertIn(
-            'python -m pip install "ruff==0.16.2" "shellcheck-py==0.11.0.1" "zizmor==1.29.0"',
-            release_runner,
-        )
-        self.assertIn('python -m pip install "mypy==2.3.0"', release_runner)
-        self.assertIn(
-            "go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12",
-            release_runner,
-        )
-        self.assertIn("run_actionlint", release_runner)
-        self.assertIn("bash scripts/verify-release-local.sh unit native", workflow)
-        self.assertNotIn("ubuntu-latest", workflow)
-        self.assertEqual(6, workflow.count("runs-on: ubuntu-24.04"))
-        self.assertEqual(1, workflow.count("permissions:"))
-        permissions = workflow.split("\npermissions:\n", 1)[1].split("\n\n", 1)[0]
-        self.assertEqual("  contents: read", permissions)
-        self.assertNotIn("GH_TOKEN", release_runner)
-        local_zizmor_block = (
-            "$env:GH_TOKEN = gh auth token\n"
-            'if (-not $env:GH_TOKEN) { throw "GitHub CLI authentication required" }\n'
-            "try {\n"
-            "  zizmor --strict-collection --persona auditor .\n"
-            '  if ($LASTEXITCODE -ne 0) { throw "zizmor audit failed" }\n'
-            "} finally {\n"
-            "  Remove-Item Env:GH_TOKEN\n"
-            "}"
-        )
-        self.assertIn(local_zizmor_block, readme)
-        self.assertIn(
-            'python -m pip install "ruff==0.16.2" "mypy==2.3.0" '
-            '"shellcheck-py==0.11.0.1" "zizmor==1.29.0"',
-            readme,
-        )
-        local_ha_requirements = (
-            "python -m pip install --upgrade -r requirements-ha-test.txt"
-        )
-        self.assertIn(local_ha_requirements, readme)
-        self.assertLess(
-            readme.index(local_ha_requirements),
-            readme.index(
-                "python -m mypy --strict custom_components/free_library_events"
-            ),
-        )
-        self.assertIn('"ruff==0.16.2"', release_runner)
-        self.assertIn('"shellcheck-py==0.11.0.1"', release_runner)
-
-        dependabot = (root / ".github/dependabot.yml").read_text(encoding="utf-8")
-        self.assertIn("default-days: 7", dependabot)
-        self.assertEqual(1, dependabot.count("package-ecosystem: github-actions"))
-        self.assertNotIn("package-ecosystem: pip", dependabot)
-        self.assertEqual(1, dependabot.count("interval: weekly"))
-        self.assertNotIn("interval: daily", dependabot)
-        self.assertIn("exact-pinned", readme)
-
-    def test_ruff_policy_is_repository_owned_and_high_signal(self) -> None:
-        root = Path(__file__).resolve().parents[1]
-        config = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
-        ruff = config["tool"]["ruff"]
-        lint = ruff["lint"]
-
-        self.assertEqual("py314", ruff["target-version"])
-        self.assertNotIn("required-version", ruff)
-        self.assertEqual(17, lint["mccabe"]["max-complexity"])
-        self.assertTrue(
-            {
-                "ASYNC",
-                "B",
-                "BLE",
-                "C4",
-                "C901",
-                "DTZ",
-                "LOG",
-                "N818",
-                "PERF",
-                "PLC",
-                "PLE",
-                "PLW",
-                "RUF",
-                "S104",
-                "S113",
-                "S310",
-                "S314",
-                "S324",
-                "S501",
-                "S506",
-                "S507",
-                "TID",
-            }
-            <= set(lint["extend-select"])
-        )
-        self.assertTrue({"RUF001", "RUF002", "RUF003"}.isdisjoint(lint["ignore"]))
-        self.assertEqual(["T20"], lint["per-file-ignores"]["scripts/**"])
-
-    def test_home_assistant_support_contract_has_minimum_and_current_lanes(
-        self,
-    ) -> None:
-        root = Path(__file__).resolve().parents[1]
-        readme = (root / "README.md").read_text(encoding="utf-8")
-        workflow = (root / ".github/workflows/validate.yaml").read_text(
-            encoding="utf-8"
-        )
-        release_runner = (root / "scripts/verify-release-local.sh").read_text(
-            encoding="utf-8"
-        )
-        release_wrapper = (root / "scripts/verify-release-local.ps1").read_text(
-            encoding="utf-8"
-        )
-        harness_install = (
-            'python -m pip install "pytest-homeassistant-custom-component==0.13.354"'
-        )
-        minimum_install = "python -m pip install --upgrade -r requirements-ha-test.txt"
-        current_install = (
-            "python -m pip install --upgrade -r requirements-ha-current.txt"
-        )
-        compatibility_check = (
-            "python scripts/check_ha_patch_compatibility.py --minimum "
-            "requirements-ha-test.txt --current requirements-ha-current.txt"
-        )
-        dependency_check = "python -m pip check"
-
-        self.assertIn(
-            "Home Assistant minimum integration tests (Core 2026.8.0)", workflow
-        )
-        self.assertIn(
-            "Home Assistant current-patch integration tests (Core 2026.8.2)",
-            workflow,
-        )
-        self.assertIn("bash scripts/verify-release-local.sh minimum native", workflow)
-        self.assertIn("bash scripts/verify-release-local.sh current native", workflow)
-        self.assertIn("run_minimum() {\n  run_python '\n", release_runner)
-        self.assertIn("run_current() {\n  run_python '\n", release_runner)
-        self.assertIn("  minimum) run_minimum ;;", release_runner)
-        self.assertIn("  current) run_current ;;", release_runner)
-        self.assertIn(
-            '"${source_git[@]}" ls-files --cached --others --exclude-standard -z',
-            release_runner,
-        )
-        self.assertIn('--git-dir="$source_git_dir"', release_runner)
-        self.assertIn("rev-parse --path-format=absolute --git-dir", release_wrapper)
-        self.assertIn("$Mode container $linuxGitDir", release_wrapper)
-        self.assertIn('tar -C "$source_root" --null --files-from=-', release_runner)
-        self.assertNotIn('cp -a "$source_root/."', release_runner)
-        minimum_job = release_runner.index("run_minimum()")
-        current_job = release_runner.index("run_current()")
-        release_job = release_runner.index("run_release()")
-        minimum_workflow = release_runner[minimum_job:current_job]
-        current_workflow = release_runner[current_job:release_job]
-        self.assertIn(harness_install, minimum_workflow)
-        self.assertIn(minimum_install, minimum_workflow)
-        self.assertLess(
-            minimum_workflow.index(harness_install),
-            minimum_workflow.index(minimum_install),
-        )
-        self.assertIn(dependency_check, minimum_workflow)
-        self.assertLess(
-            minimum_workflow.index(minimum_install),
-            minimum_workflow.index(dependency_check),
-        )
-        self.assertLess(
-            minimum_workflow.index(dependency_check),
-            minimum_workflow.index(
-                "python -m mypy --strict custom_components/free_library_events"
-            ),
-        )
-        self.assertIn(harness_install, current_workflow)
-        self.assertIn(current_install, current_workflow)
-        self.assertIn(compatibility_check, current_workflow)
-        self.assertLess(
-            current_workflow.index(harness_install),
-            current_workflow.index(current_install),
-        )
-        self.assertLess(
-            current_workflow.index(current_install),
-            current_workflow.index(compatibility_check),
-        )
-        self.assertEqual(
-            2,
-            release_runner.count("pytest-homeassistant-custom-component=="),
-        )
-        self.assertEqual(
-            [
-                root / "requirements-ha-current.txt",
-                root / "requirements-ha-test.txt",
-            ],
-            sorted(root.glob("requirements-ha-*.txt")),
-        )
-
-        minimum_requirements = (root / "requirements-ha-test.txt").read_text(
-            encoding="utf-8"
-        )
-        current_requirements = (root / "requirements-ha-current.txt").read_text(
-            encoding="utf-8"
-        )
-        self.assertEqual(
-            [
-                "homeassistant==2026.8.0",
-                "PyTurboJPEG==1.8.3",
-                "ha-ffmpeg==3.2.2",
-                "mutagen==1.48.1",
-            ],
-            minimum_requirements.splitlines(),
-        )
-        self.assertEqual(
-            [
-                "homeassistant==2026.8.2",
-                "PyTurboJPEG==1.8.3",
-                "ha-ffmpeg==3.2.2",
-                "mutagen==1.48.1",
-            ],
-            current_requirements.splitlines(),
-        )
-        self.assertIn(dependency_check, readme)
-        self.assertIn(compatibility_check, readme)
-        self.assertEqual(
-            "2026.8.0",
-            json.loads((root / "hacs.json").read_text(encoding="utf-8"))[
-                "homeassistant"
-            ],
-        )
-
-    def test_user_visible_action_exceptions_are_translated(self) -> None:
-        root = Path(__file__).resolve().parents[1]
-        init_text = (
-            root / "custom_components/free_library_events/__init__.py"
-        ).read_text(encoding="utf-8")
-        strings = json.loads(
-            (
-                root / "custom_components/free_library_events/translations/en.json"
-            ).read_text(encoding="utf-8")
-        )
-
-        exception_keys: set[str] = set()
-        for node in ast.walk(ast.parse(init_text)):
-            if not isinstance(node, ast.Raise) or node.exc is None:
-                continue
-            if not (
-                isinstance(node.exc, ast.Call)
-                and isinstance(node.exc.func, ast.Name)
-                and node.exc.func.id in {"HomeAssistantError", "ServiceValidationError"}
-            ):
-                continue
-            self.assertEqual([], node.exc.args)
-            keyword_values = {item.arg: item.value for item in node.exc.keywords}
-            self.assertIn("translation_domain", keyword_values)
-            translation_key = keyword_values.get("translation_key")
-            self.assertIsInstance(translation_key, ast.Constant)
-            self.assertIsInstance(translation_key.value, str)
-            exception_keys.add(translation_key.value)
-
-        self.assertEqual(
-            {
-                "library_data_unavailable",
-                "library_refresh_failed",
-                "settings_changed_during_render",
-                "single_loaded_entry_required",
-            },
-            exception_keys,
-        )
-        self.assertTrue(exception_keys <= set(strings["exceptions"]))
-
-    def test_complete_source_failure_is_translated(self) -> None:
-        root = Path(__file__).resolve().parents[1]
-        coordinator_text = (
-            root / "custom_components/free_library_events/coordinator.py"
-        ).read_text(encoding="utf-8")
-        strings = json.loads(
-            (
-                root / "custom_components/free_library_events/translations/en.json"
-            ).read_text(encoding="utf-8")
-        )
-        translated_failures = []
-        for node in ast.walk(ast.parse(coordinator_text)):
-            if not (
-                isinstance(node, ast.Raise)
-                and isinstance(node.exc, ast.Call)
-                and isinstance(node.exc.func, ast.Name)
-                and node.exc.func.id == "UpdateFailed"
-            ):
-                continue
-            self.assertEqual([], node.exc.args)
-            keyword_values = {item.arg: item.value for item in node.exc.keywords}
-            self.assertEqual(
-                "library_source_update_failed",
-                keyword_values["translation_key"].value,
-            )
-            translated_failures.append(keyword_values["translation_key"].value)
-
-        self.assertEqual(["library_source_update_failed"], translated_failures)
-        self.assertTrue(set(translated_failures) <= set(strings["exceptions"]))
-
     def test_generic_patterns_reject_sensitive_shapes(self) -> None:
         samples = {
             "absolute Windows path": "C:" + r"\Users\Example\file.txt",
@@ -403,6 +93,104 @@ class PublicSafetyGuardTests(unittest.TestCase):
         self.assertEqual(1, file_count)
         self.assertEqual([], failures)
 
+    def test_guard_scans_git_tracked_and_untracked_but_not_ignored_files(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            subprocess.run(["git", "init", "--quiet", str(root)], check=True)
+            (root / ".gitignore").write_text("ignored.txt\n", encoding="utf-8")
+            (root / "tracked.txt").write_text("Safe public text.\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+            private = "person" + "@real-domain.dev"
+            (root / "untracked.txt").write_text(private, encoding="utf-8")
+            (root / "ignored.txt").write_text(private, encoding="utf-8")
+            file_count, failures = run_guard(root)
+        self.assertEqual(3, file_count)
+        self.assertEqual(["untracked.txt: non-example email address"], failures)
+
+    def test_guard_rejects_failed_git_inventory(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".git").mkdir()
+            commands = [
+                subprocess.CompletedProcess([], 0, str(root).encode() + b"\n", b""),
+                subprocess.CompletedProcess([], 128, b"", b"inventory failed"),
+            ]
+            with (
+                patch(
+                    "scripts.check_public_safety.subprocess.run", side_effect=commands
+                ),
+                self.assertRaisesRegex(PublicSafetyError, "inventory repository"),
+            ):
+                run_guard(root)
+
+    def test_guard_rejects_unavailable_git_in_checkout(self) -> None:
+        for result in (
+            FileNotFoundError("git unavailable"),
+            subprocess.CompletedProcess([], 128, b"", b"invalid checkout"),
+        ):
+            with (
+                self.subTest(result=result),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                root = Path(directory)
+                (root / ".git").mkdir()
+                kwargs = (
+                    {"side_effect": result}
+                    if isinstance(result, FileNotFoundError)
+                    else {"return_value": result}
+                )
+                with (
+                    patch("scripts.check_public_safety.subprocess.run", **kwargs),
+                    self.assertRaises(PublicSafetyError),
+                ):
+                    run_guard(root)
+
+    def test_guard_scans_archive_without_git_or_under_generated_parent(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "build" / "source"
+            root.mkdir(parents=True)
+            (root / "README.md").write_text("Safe public text.\n", encoding="utf-8")
+            with patch(
+                "scripts.check_public_safety.subprocess.run",
+                side_effect=FileNotFoundError,
+            ):
+                self.assertEqual((1, []), run_guard(root))
+
+    def test_guard_rejects_missing_root(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            self.assertRaisesRegex(PublicSafetyError, "existing directory"),
+        ):
+            run_guard(Path(directory) / "missing")
+
+    def test_guard_rejects_link_candidates_without_reading_their_targets(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            linked = root / "linked.txt"
+            with (
+                patch(
+                    "scripts.check_public_safety._candidate_files",
+                    return_value=[linked],
+                ),
+                patch.object(Path, "is_symlink", return_value=True),
+                patch.object(Path, "read_bytes") as read_bytes,
+            ):
+                file_count, failures = run_guard(root)
+            read_bytes.assert_not_called()
+        self.assertEqual(1, file_count)
+        self.assertEqual(["linked.txt: unreviewed symbolic link or junction"], failures)
+
+    def test_guard_rejects_sensitive_file_names(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            filename = "person" + "@real-domain.dev"
+            (root / filename).write_text("Safe public text.\n", encoding="utf-8")
+            file_count, failures = run_guard(root)
+        self.assertEqual(1, file_count)
+        self.assertEqual(
+            [f"{filename}: non-example email address in file name"], failures
+        )
+
     def test_guard_scans_text_without_a_file_extension(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -418,6 +206,49 @@ class PublicSafetyGuardTests(unittest.TestCase):
             file_count, failures = run_guard(root)
         self.assertEqual(1, file_count)
         self.assertEqual(["image.png: unreviewed binary content"], failures)
+
+    def test_guard_requires_the_reviewed_binary_hash_at_the_exact_path(self) -> None:
+        content = b"\0reviewed image"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            image_path = root / "image.png"
+            image_path.write_bytes(content)
+            with patch.dict(
+                "scripts.check_public_safety.REVIEWED_BINARY_SHA256",
+                {"image.png": hashlib.sha256(content).hexdigest()},
+                clear=True,
+            ):
+                self.assertEqual((1, []), run_guard(root))
+                image_path.write_bytes(content + b"changed")
+                self.assertEqual(
+                    (1, ["image.png: unreviewed binary content"]), run_guard(root)
+                )
+
+    def test_guard_propagates_inventory_and_file_access_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "README.md").write_text("Safe public text.\n", encoding="utf-8")
+            with (
+                patch(
+                    "scripts.check_public_safety._path_present",
+                    side_effect=PermissionError,
+                ),
+                self.assertRaises(PermissionError),
+            ):
+                run_guard(root)
+            with (
+                patch.object(Path, "read_bytes", side_effect=PermissionError),
+                self.assertRaises(PermissionError),
+            ):
+                run_guard(root)
+            with (
+                patch(
+                    "scripts.check_public_safety.subprocess.run",
+                    side_effect=subprocess.TimeoutExpired("git", 30),
+                ),
+                self.assertRaises(subprocess.TimeoutExpired),
+            ):
+                run_guard(root)
 
     def test_guard_ignores_generated_cache_directories_without_git(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

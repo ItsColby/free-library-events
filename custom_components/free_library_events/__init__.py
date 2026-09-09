@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import mimetypes
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -66,6 +65,13 @@ from .runtime import LibraryConfigEntry
 from .webcal import async_register_webcal_view
 
 _LOGGER = logging.getLogger(__name__)
+
+_SMTP_IMAGE_CONTENT_TYPES = {
+    ".gif": "image/gif",
+    ".jpg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+}
 
 PLATFORMS: tuple[Platform, ...] = (
     Platform.BUTTON,
@@ -134,7 +140,9 @@ def _smtp_attachments(
                         f"{source_directory_id}/{relative_path.as_posix()}"
                     ),
                     "media_content_type": (
-                        mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+                        _SMTP_IMAGE_CONTENT_TYPES.get(
+                            path.suffix.lower(), "application/octet-stream"
+                        )
                     ),
                 },
                 "filename": path.name,
@@ -235,7 +243,7 @@ async def _async_render_digest(call: ServiceCall) -> ServiceResponse:
     accepted_owner = (dict(entry.data), dict(entry.options))
     config = entry_config(*accepted_owner)
     if call.data[ATTR_FORCE_REFRESH]:
-        await coordinator.async_request_refresh()
+        await coordinator.async_request_refresh_and_wait()
         if not coordinator.last_update_success:
             raise HomeAssistantError(
                 translation_domain=DOMAIN,
@@ -333,23 +341,24 @@ async def _async_render_digest(call: ServiceCall) -> ServiceResponse:
             )
             stored_images = None
         fallback_urls = set(download_batch.fallback_urls)
+        if stored_images is None:
+            fallback_urls.update(image.source_url for image in download_batch.images)
+        render_urls = {source_url: source_url for source_url in fallback_urls}
+        source_layouts: dict[str, str] = {}
         if stored_images is not None:
-            render_urls = {
-                **{source_url: source_url for source_url in fallback_urls},
-                **stored_images.source_url_to_cid,
-            }
-            image_url_overrides = {
-                event_identity(event): render_urls.get(event.image_url, "")
-                for event in included_events
-            }
-            image_layout_overrides = {
-                event_identity(event): (
-                    "hero"
-                    if stored_images.source_url_to_layout.get(event.image_url) == "hero"
-                    else "side"
-                )
-                for event in included_events
-            }
+            render_urls.update(stored_images.source_url_to_cid)
+            source_layouts = stored_images.source_url_to_layout
+        image_url_overrides = {
+            event_identity(event): render_urls.get(event.image_url, "")
+            for event in included_events
+        }
+        image_layout_overrides = {
+            event_identity(event): (
+                "hero" if source_layouts.get(event.image_url) == "hero" else "side"
+            )
+            for event in included_events
+        }
+        if stored_images is not None:
             embedded_image_paths = stored_images.paths
             run_directory = stored_images.run_directory
             if run_directory is not None:
@@ -363,18 +372,6 @@ async def _async_render_digest(call: ServiceCall) -> ServiceResponse:
                 image_expires_at = (
                     datetime.now(UTC) + timedelta(seconds=IMAGE_CACHE_TTL_SECONDS)
                 ).isoformat()
-        if stored_images is None:
-            fallback_urls.update(image.source_url for image in download_batch.images)
-        if image_url_overrides is None:
-            image_url_overrides = {
-                event_identity(event): (
-                    event.image_url if event.image_url in fallback_urls else ""
-                )
-                for event in included_events
-            }
-            image_layout_overrides = {
-                event_identity(event): "side" for event in included_events
-            }
     response = build_digest(
         child_name=config[CONF_CHILD_NAME],
         birth_date=birth_date,

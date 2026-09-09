@@ -311,6 +311,43 @@ class EmailImageTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(bundle.run_directory.exists())
             self.assertTrue(unmanaged.is_dir())
 
+    def test_short_lossless_webp_header_preserves_dimensions(self) -> None:
+        width, height = 7, 2
+        bits = (width - 1) | ((height - 1) << 14)
+        content = (
+            b"RIFF"
+            + (18).to_bytes(4, "little")
+            + b"WEBPVP8L"
+            + (5).to_bytes(4, "little")
+            + b"\x2f"
+            + bits.to_bytes(4, "little")
+            + b"\x00"
+        )
+        self.assertEqual(email_images._image_dimensions(content, ".webp"), (7, 2))
+        invalid = content[:20] + b"\x00" + content[21:]
+        self.assertIsNone(email_images._image_dimensions(invalid, ".webp"))
+
+    def test_storage_collision_preserves_the_existing_directory(self) -> None:
+        batch = email_images.ImageDownloadBatch(
+            images=(email_images.DownloadedImage("source", _PNG, ".png"),),
+            requested_count=1,
+            failure_count=0,
+            failure_examples=(),
+        )
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            with patch.object(email_images, "uuid4") as new_uuid:
+                new_uuid.return_value.hex = "a" * 32
+                existing = root / ("run-" + "a" * 32)
+                existing.mkdir()
+                retained_file = existing / "retain.txt"
+                retained_file.write_text("Existing data", encoding="utf-8")
+                with self.assertRaises(FileExistsError):
+                    email_images.store_downloaded_images(root, batch)
+                self.assertEqual(
+                    retained_file.read_text(encoding="utf-8"), "Existing data"
+                )
+
     def test_stale_cleanup_preserves_fresh_managed_run(self) -> None:
         batch = email_images.ImageDownloadBatch(
             images=(email_images.DownloadedImage("source", _PNG, ".png"),),

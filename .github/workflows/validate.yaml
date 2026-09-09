@@ -44,7 +44,7 @@ jobs:
         run: bash scripts/verify-release-local.sh minimum native
 
   home_assistant_current:
-    name: Home Assistant current-patch integration tests (Core 2026.8.2)
+    name: Home Assistant current integration tests (Core 2026.9.1)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:

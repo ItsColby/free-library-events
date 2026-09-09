@@ -53,8 +53,11 @@
   source-count, status, and error mapping is read-only. Home Assistant's
   config-entry-owned coordinator debouncer bounds overlapping refresh triggers
   to one running refresh plus one pending follow-up and shuts down scheduled
-  work on unload. Every completed base-source attempt also replaces one
-  immutable privacy-safe record containing the requested source keys,
+  work on unload. Forced digest renders and manual refreshes wait for a
+  completed attempt, including a refresh already in flight, with a ten-minute
+  upper bound. Cancelling one caller leaves shared source work intact; unloading
+  releases waiting callers with a translated failure. Every completed
+  base-source attempt also replaces one immutable privacy-safe record containing the requested source keys,
   allow-listed error categories, retryable count, completion time, and retry
   decision. That record remains distinct from the last successful normalized
   cache, so a complete source failure uses a translated update error without
@@ -62,82 +65,37 @@
   of a continuous failure streak has a retryable transport, rate-limit, or
   server failure, the update error requests one five-minute coordinator retry.
   A repeated failure returns to the configured interval; any partial or full
-  success resets the allowance. It adaptively expands at most twelve
+  success resets the allowance. Initial entry setup uses Core's setup retry
+  policy and never claims an expedited polling retry. It adaptively expands at
+  most twelve
   unresolved capped feeds per refresh. Current-age sources come first, followed
   by the numerically nearest official age windows, with branches distributed
   deterministically within each category. A minor uses Baby through Young
   Adult; an adult uses only the Adult, Senior, or overlapping Young Adult windows
   that apply; a forward source window crossing adulthood retains both sides. It
   fails the update only when every selected source fails.
-- `digest.py` is a deterministic, side-effect-free parser, age matcher, and
-  HTML/plain-text renderer. Explicit numeric ranges take precedence, followed
-  by matching official age-feed classifications and then explicit inclusive
-  text. Strong published wording can correct an overly narrow feed category;
-  generic family wording cannot. Age classification controls inclusion and
-  ordering. Publisher age categories render in one muted `Library age listing:`
-  line with the title, time, and location so publisher provenance remains clear.
-  Time and location use separate mobile-friendly lines; only the location label,
-  not its map pin, is linked, and no home-relative distance is exposed.
-  Presentation highlights render in
-  that same scan-first metadata area and are derived deterministically from the
-  RSS title, description, or explicit venue; title-redundant activity labels,
-  broader equivalents of specific take-home details, audience-redundant breadth
-  labels, and generic taxonomy are omitted. At most five highlights render, with
-  actionable cautions ahead of logistics and secondary topics; negated and
-  audience-qualified claims are excluded. Safe contextual RSS links, paragraph
-  boundaries, emphasis, and list structure are preserved through an allow-list
-  sanitizer. The concise subject avoids duplicating the date range, while the
-  header summarizes age matching and participating-library count. Presentation
-  tables, percentage line heights, a dynamic complementary hidden preheader,
-  a two-column touch-friendly branch-calendar fallback that stacks below 390
-  CSS pixels, and table-cell spacing for day, card, and button layout
-  improve compatibility across email rendering engines. Linked event images use
-  functional alternative text that identifies their official details page. By
-  default, email clients load event
-  images only from the publisher's HTTPS hosts on the default HTTPS port; the
-  renderer keeps the publisher's working dot-prefixed image paths and does not
-  resolve a blank image field to the feed URL. An explicit SMTP embedding option
-  deterministically downloads only the selected events' unique images through
-  Home Assistant's shared HTTP session, follows at most two HTTPS redirects that
-  remain on trusted publisher hosts and the default HTTPS port,
-  validates signatures and dimensions, and writes them to a random
-  integration-owned run under Home Assistant Local Media. It substitutes
-  basename-matched `cid:` sources and returns only images whose CIDs remain
-  referenced by the final budgeted HTML. The response exposes native
-  `smtp.send_message` media-source attachment objects plus legacy local paths
-  for rollback compatibility. It never calls an LLM. Each run expires after one hour. Scheduled,
-  pre-render stale, and startup cleanup remove owned run directories while
-  marker and name checks preserve all other files. Transient transport/server
-  failures, storage failures, and digest-level count/total-size limits may
-  retain the already trusted publisher URL as a remote fallback. Publisher
-  challenge and rate-limit responses do the same because browser-capable email
-  clients may still load those trusted URLs. Unsafe redirects, unsupported
-  content, true missing-image responses, and individually oversized files are
-  omitted. Landscape images use a full-width hero row;
-  square and portrait images use a centered, fluid poster row above the
-  scan-first metadata. The base table structure is stacked rather than relying
-  on a mobile media query, because some Gmail mobile render paths preserve the
-  desktop table while ignoring responsive rules. The poster grows to the card
-  width on responsive clients and is capped at 440 CSS pixels otherwise;
-  descriptions remain full width below. Explicit online events omit map links;
-  hybrid events
-  retain their physical destination and name the online option. Explicit
-  off-site venues or named/numbered rooms and floor locations refine the
-  map/calendar destination without inventing data, while an off-site summary
-  retains unlinked hosting-branch context. An end time is accepted only from an
-  explicit RSS description range that matches the published start or a
-  conservative whole-event duration statement; the digest and HA calendar both
-  use that same evidence. Recurring rows use an occurrence identity containing
-  source URL/title, branch, date, and start time across the digest and native HA
-  calendar so a shared series URL cannot collapse distinct dates. Response
-  metadata retains both simple publisher event IDs and exact occurrence IDs.
-  Display titles,
-  descriptions, calendar details/URLs, event count, and the final HTML byte size
-  have separate bounds. The renderer keeps chronological presentation, reserves
-  rich cards for nearest branches when a large result requires compaction, and
-  removes farthest compact overflow only when necessary to remain within 80,000
-  UTF-8 bytes. It visibly discloses any email-only omission. It does not call an
-  LLM.
+- `digest.py` owns deterministic, side-effect-free parsing, age classification,
+  and HTML/plain-text rendering. [Match modes](../README.md#match-modes) and
+  [Weekly email action](../README.md#weekly-email-action) define the visible
+  matching, highlight, time, venue, link, image, and omission contracts. Safe RSS
+  links, paragraph boundaries, emphasis, and lists pass through one allow-list
+  sanitizer; presentation highlights never change inclusion or source provenance.
+  The calendar and digest share occurrence identity (source URL/title, branch,
+  date, and start time), so a series URL cannot collapse distinct dates and
+  shortening a display title cannot change identity. Response metadata retains
+  both publisher event IDs and exact occurrence IDs.
+  Titles, descriptions, calendar details/URLs, event count, and final HTML bytes
+  have separate bounds. Budgeting reserves rich cards for nearer branches,
+  removes farthest compact overflow only when necessary, and preserves
+  chronological presentation. Both bodies disclose email-only omissions.
+  Email markup uses presentation tables, percentage line heights, table-cell
+  spacing, and a stacked base layout because some Gmail mobile paths ignore
+  responsive rules. Square/portrait posters grow to card width on responsive
+  clients and otherwise cap at 440 CSS pixels; descriptions use the full width.
+  The two-column branch-calendar fallback stacks below 390 CSS pixels. A concise
+  subject avoids repeating the date range, the header summarizes age and branch
+  count, and a complementary hidden preheader supports inbox previews. Linked
+  image alternative text identifies the official event details destination.
 - `calendar_data.py` projects normalized source rows into the single shared,
   deterministic age-filtered calendar model. `calendar.py` exposes those rows
   through Home Assistant's native calendar entity. `webcal.py` serializes the
@@ -145,7 +103,7 @@
   opt-in, token-protected, unauthenticated HTTP view for subscription clients
   that cannot send Home Assistant bearer authentication. The view never forces
   a source refresh. It serves equivalent `GET` and `HEAD` metadata plus
-  representation-derived `ETag` and coordinator-derived `Last-Modified`
+  representation-derived `ETag` and source/config-entry-derived `Last-Modified`
   validators; matching conditional requests return `304`. Disabled, invalid,
   and unloaded tokens fail closed as `404`.
 - `calendar.py`, `sensor.py`, and `button.py` expose the native user-facing
@@ -194,12 +152,22 @@
   the HTML budget is constrained; it never renders in the email. Home
   coordinates and calculated distances are not stored, logged, included in
   response metadata, or used to reorder the chronological email.
-- `email_images.py` owns the deterministic publisher-image download limits,
-  trusted redirect policy, dimension/orientation classification, CID filenames,
-  integration-owned temporary storage, and guarded cleanup. Remote-image
-  rendering remains the no-storage default so generic response consumers do not
-  receive unusable CID references.
-- `diagnostics.py` redacts the person's display name and birth date and exposes
+- `email_images.py` owns publisher-image downloads, trusted redirects,
+  signature/dimension validation, orientation, CID filenames, temporary storage,
+  and cleanup. The [SMTP embedding contract](../README.md#weekly-email-action)
+  specifies limits, expiry, and fallback versus omission behavior. Downloads use
+  Home Assistant's shared HTTP session and only the selected unique images.
+  Files live in random integration-owned runs under Local Media; returned
+  attachments include only CIDs referenced by the final budgeted HTML. Native
+  `smtp.send_message` media-source objects and legacy local paths share that
+  selection. Scheduled, pre-render stale, and startup cleanup use marker and
+  name checks to preserve unrelated files. A failed storage creation removes
+  only a directory created by that invocation, preserving an existing path on
+  collision. Remote-image rendering remains the no-storage default, so generic
+  response consumers do not receive unusable CID references.
+- `diagnostics.py` redacts the person's display name, birth date, and custom
+  calendar name. Invalid stored settings return a fixed `invalid_config`
+  category with no raw configuration or exception text. Diagnostics expose
   only bounded per-source counts, type-expansion evidence, ordering, coverage
   boundaries, and health. It labels the retained normalized cache separately
   from the latest completed base-source attempt, including compact totals,
@@ -278,11 +246,14 @@ page available outside the integration for schedule changes.
    actionlint with ShellCheck, zizmor auditor, Hassfest, and HACS validation.
    The Linux HA tests have two exact owners: `requirements-ha-test.txt` proves
    dependency closure at the 2026.8.0 supported minimum, while
-   `requirements-ha-current.txt` proves 2026.8.2 same-month patch compatibility.
-   The current-patch checker accepts only clean closure or the single
-   metadata-proven harness/Core exact-pin mismatch before running the complete
-   HA suite; it rejects cross-month or prerelease targets, additional conflicts,
-   skipped collection, and test failures.
+   `requirements-ha-current.txt` targets Core 2026.9.1 with a matching harness
+   and clean dependency closure. The current checker verifies exact installed
+   metadata and `pip check`. Its mismatch exception is limited to a single
+   metadata-proven harness/Core pin conflict within the minimum's same month;
+   cross-month conflicts, prereleases, other dependency conflicts, skipped
+   collection, and test failures are rejected. Such an exception proves only
+   patch compatibility. Both lanes execute every HA test module, and each native
+   lane uses an isolated temporary virtual environment.
 2. Compare the official RSS builder's age and event-type options with the local
    source taxonomy; the runtime builder route is browser-protected, so this is a
    release-time drift check rather than an unreliable polling dependency.
@@ -290,7 +261,7 @@ page available outside the integration for schedule changes.
    `vYYYY.M.D` tag, and release title before opening the release pull request.
 4. Require terminal pull-request success for **Unit tests and static
    validation**, **Home Assistant minimum integration tests (Core 2026.8.0)**,
-   **Home Assistant current-patch integration tests (Core 2026.8.2)**,
+   **Home Assistant current integration tests (Core 2026.9.1)**,
    **Hassfest**, **HACS**, the aggregate **Release gate**, and CodeQL's **Analyze
    (actions)**, **Analyze (python)**, and **CodeQL** checks.
 5. Merge through default-branch protection without bypass, using squash or

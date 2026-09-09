@@ -128,13 +128,16 @@ def _calendar_response(request: web.Request, token: str) -> web.Response:
         raise web.HTTPServiceUnavailable(headers={"Retry-After": "300"})
 
     config = entry_config(entry.data, entry.options)
+    last_modified = max(
+        _as_utc_second(coordinator.data.fetched_at),
+        _as_utc_second(entry.modified_at),
+    )
     body = render_icalendar(
         build_calendar_items(coordinator.data.events, config),
-        fetched_at=coordinator.data.fetched_at,
+        fetched_at=last_modified,
         refresh_seconds=int(config[CONF_SCAN_INTERVAL]),
         calendar_name=str(config[CONF_WEBCAL_NAME]),
     ).encode("utf-8")
-    last_modified = _as_utc_second(coordinator.data.fetched_at)
     etag = f'"{sha256(body).hexdigest()}"'
     cache_headers = {
         "Cache-Control": "private, max-age=300, must-revalidate",
@@ -157,7 +160,7 @@ def _calendar_response(request: web.Request, token: str) -> web.Response:
 
 
 def _as_utc_second(value: datetime) -> datetime:
-    """Normalize a coordinator timestamp for HTTP date comparisons."""
+    """Normalize a timestamp to UTC with the HTTP and iCalendar second precision."""
 
     if value.tzinfo is None:
         value = value.replace(tzinfo=UTC)
@@ -250,9 +253,7 @@ def render_icalendar(
 def _format_utc(value: datetime) -> str:
     """Format a datetime as an iCalendar UTC timestamp."""
 
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=UTC)
-    return value.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
+    return _as_utc_second(value).strftime("%Y%m%dT%H%M%SZ")
 
 
 def _format_duration(seconds: int) -> str:
