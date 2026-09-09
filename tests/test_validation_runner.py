@@ -65,6 +65,8 @@ class ValidationRunnerTests(unittest.TestCase):
             '  chmod +x "$(dirname "$0")/shellcheck"\n'
             'elif [[ "$*" == "-m pip check" ]]; then\n'
             '  exit "${PIP_CHECK_EXIT:-0}"\n'
+            'elif [[ "$*" == "-m unittest "* ]]; then\n'
+            '  exit "${UNITTEST_EXIT:-0}"\n'
             "fi\n",
         )
         self.executable("pytest", 'printf "pytest:%s\\n" "$*" >> "$TRACE"\n')
@@ -123,6 +125,26 @@ class ValidationRunnerTests(unittest.TestCase):
         self.assertEqual(str(self.repo), lines[0])
         self.assertTrue(Path(lines[1]).is_relative_to(self.scratch))
         self.assertEqual("shellcheck", Path(lines[1]).name)
+        self.assertEqual([], list(self.scratch.iterdir()))
+
+    def test_unit_failure_stops_before_later_modules_and_cleans_environments(
+        self,
+    ) -> None:
+        self.install_python_stand_in()
+        self.executable("zizmor", "exit 0\n")
+        self.executable(
+            "go",
+            'printf "#!/usr/bin/env bash\\nexit 0\\n" > "$GOBIN/actionlint"\n'
+            'chmod +x "$GOBIN/actionlint"\n',
+        )
+        self.env["UNITTEST_EXIT"] = "29"
+        result = self.run_lane("unit", "native")
+        self.assertEqual(29, result.returncode, result.stderr)
+        trace = self.trace.read_text(encoding="utf-8")
+        self.assertIn("test_digest.py", trace)
+        self.assertNotIn("test_metadata.py", trace)
+        self.assertNotIn("compileall", trace)
+        self.assertNotIn("Local validation passed", result.stdout)
         self.assertEqual([], list(self.scratch.iterdir()))
 
     def test_snapshot_includes_working_changes_and_cleans_after_failure(self) -> None:

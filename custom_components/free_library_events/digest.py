@@ -1444,8 +1444,7 @@ def _description_html(event: Event) -> str:
         label = html.escape(link.label)
         anchor = (
             f'<a href="{html.escape(link.url, quote=True)}" '
-            'style="color:#174ea6;text-decoration:underline;'
-            'text-decoration-color:#a8c7fa;text-underline-offset:3px">'
+            f"{_HTMLDescriptionSanitizer._LINK_STYLE}>"
             f"{label}</a>"
         )
         parts.append(anchor)
@@ -1800,23 +1799,18 @@ def _subject_week_range(start: date, end: date) -> str:
     return f"{start:%b} {start.day}{EN_DASH}{end:%b} {end.day}"
 
 
-def _source_notes(
+def _source_note(
     source_errors: Sequence[str],
     source_warnings: Sequence[str],
-) -> list[tuple[str, bool]]:
-    """Return consistent source-coverage disclosures for both email bodies."""
+) -> str:
+    """Return the shared source-coverage disclosure when listings may be missing."""
 
     if source_warnings or source_errors:
-        return [
-            (
-                (
-                    "Some library listings may be missing. "
-                    "Check the full branch calendars below."
-                ),
-                True,
-            )
-        ]
-    return []
+        return (
+            "Some library listings may be missing. "
+            "Check the full branch calendars below."
+        )
+    return ""
 
 
 def _calendar_placeholder_note(events: Sequence[Event], duration_minutes: int) -> str:
@@ -2002,10 +1996,9 @@ def _render_html(
 
     branch_links = _branch_calendar_links_html(branches)
     source_note_parts: list[str] = []
-    for note, is_error in _source_notes(source_errors, source_warnings):
-        color = ";color:#b3261e" if is_error else ""
+    if note := _source_note(source_errors, source_warnings):
         source_note_parts.append(
-            f'<p style="margin:8px 0 0{color}">{html.escape(note)}</p>'
+            f'<p style="margin:8px 0 0;color:#b3261e">{html.escape(note)}</p>'
         )
     if email_omitted_count:
         source_note_parts.append(
@@ -2178,11 +2171,8 @@ def _render_plain_text(
                     "",
                 ]
             )
-    plain_source_notes = [
-        note for note, _ in _source_notes(source_errors, source_warnings)
-    ]
-    if plain_source_notes:
-        lines.extend(plain_source_notes)
+    if source_note := _source_note(source_errors, source_warnings):
+        lines.append(source_note)
     if email_omitted_count:
         lines.extend(["", _email_omission_note(email_omitted_count)])
     lines.extend(["", "Full branch calendars:"])
@@ -2282,6 +2272,15 @@ def _render_budgeted_html(
             email_omitted_count=omitted_count,
         )
 
+    def full_card_delta(event: Event) -> int:
+        return len(
+            _render_event_card(event, duration_minutes=duration_minutes).encode("utf-8")
+        ) - len(
+            _render_event_card(
+                event, duration_minutes=duration_minutes, compact=True
+            ).encode("utf-8")
+        )
+
     compact_html = render(frozenset())
     while len(compact_html.encode("utf-8")) > MAX_DIGEST_HTML_BYTES and rendered_events:
         removed = priority.pop()
@@ -2291,20 +2290,7 @@ def _render_budgeted_html(
 
     html_bytes = len(compact_html.encode("utf-8"))
     if priority:
-        nearest = priority[0]
-        nearest_delta = len(
-            _render_event_card(
-                nearest,
-                duration_minutes=duration_minutes,
-                compact=False,
-            ).encode("utf-8")
-        ) - len(
-            _render_event_card(
-                nearest,
-                duration_minutes=duration_minutes,
-                compact=True,
-            ).encode("utf-8")
-        )
+        nearest_delta = full_card_delta(priority[0])
         while len(priority) > 1 and html_bytes + nearest_delta > MAX_DIGEST_HTML_BYTES:
             removed = priority.pop()
             rendered_events.remove(removed)
@@ -2315,17 +2301,7 @@ def _render_budgeted_html(
     full_ids: set[str] = set()
     for event in priority:
         identity = event_identity(event)
-        compact_card = _render_event_card(
-            event,
-            duration_minutes=duration_minutes,
-            compact=True,
-        )
-        full_card = _render_event_card(
-            event,
-            duration_minutes=duration_minutes,
-            compact=False,
-        )
-        delta = len(full_card.encode("utf-8")) - len(compact_card.encode("utf-8"))
+        delta = full_card_delta(event)
         if html_bytes + delta <= MAX_DIGEST_HTML_BYTES:
             full_ids.add(identity)
             html_bytes += delta

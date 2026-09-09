@@ -8,6 +8,7 @@ from typing import Any
 from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.core import HomeAssistant
 
+from .api import BranchFeed
 from .config import entry_config
 from .const import CONF_BIRTH_DATE, CONF_CHILD_NAME, CONF_WEBCAL_NAME
 from .coordinator import (
@@ -25,6 +26,29 @@ def _isoformat_optional(value: date | None) -> str | None:
     """Serialize an optional date without weakening diagnostics typing."""
 
     return value.isoformat() if value is not None else None
+
+
+def _feed_diagnostics(feed: BranchFeed | None) -> dict[str, object]:
+    """Project optional retained feed evidence with stable unavailable defaults."""
+
+    return {
+        "published_item_count": feed.source_count if feed else None,
+        "parsed_item_count": feed.parsed_count if feed else None,
+        "last_event_date": _isoformat_optional(feed.last_event_date) if feed else None,
+        "ordered": feed.ordered if feed else None,
+        "discovered_event_count": len(feed.events) if feed else None,
+        "type_feeds_queried": feed.type_shards_queried if feed else 0,
+        "type_feed_failures": list(feed.type_shard_failures) if feed else [],
+        "type_feed_blockers": [
+            type_shard_blocker_data(blocker) for blocker in feed.type_shard_blockers
+        ]
+        if feed
+        else [],
+        "base_prefix_recovered": feed.base_prefix_recovered if feed else None,
+        "expanded_through": _isoformat_optional(feed.expanded_through)
+        if feed
+        else None,
+    }
 
 
 async def async_get_config_entry_diagnostics(
@@ -75,43 +99,7 @@ async def async_get_config_entry_diagnostics(
         else None,
         "sources": {
             source_label(key): {
-                "published_item_count": source_statuses[key].source_count
-                if key in source_statuses
-                else None,
-                "parsed_item_count": source_statuses[key].parsed_count
-                if key in source_statuses
-                else None,
-                "last_event_date": _isoformat_optional(
-                    source_statuses[key].last_event_date
-                )
-                if key in source_statuses
-                else None,
-                "ordered": source_statuses[key].ordered
-                if key in source_statuses
-                else None,
-                "discovered_event_count": len(source_statuses[key].events)
-                if key in source_statuses
-                else None,
-                "type_feeds_queried": source_statuses[key].type_shards_queried
-                if key in source_statuses
-                else 0,
-                "type_feed_failures": list(source_statuses[key].type_shard_failures)
-                if key in source_statuses
-                else [],
-                "type_feed_blockers": [
-                    type_shard_blocker_data(blocker)
-                    for blocker in source_statuses[key].type_shard_blockers
-                ]
-                if key in source_statuses
-                else [],
-                "base_prefix_recovered": source_statuses[key].base_prefix_recovered
-                if key in source_statuses
-                else None,
-                "expanded_through": _isoformat_optional(
-                    source_statuses[key].expanded_through
-                )
-                if key in source_statuses
-                else None,
+                **_feed_diagnostics(source_statuses.get(key)),
                 "available": key not in source_errors,
                 "error_category": source_errors.get(key),
             }

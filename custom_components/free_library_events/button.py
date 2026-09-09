@@ -57,12 +57,11 @@ class LibraryRefreshButton(CoordinatorEntity[LibraryDataCoordinator], ButtonEnti
         try:
             await self.coordinator.async_request_refresh_and_wait()
         except UpdateFailed:
-            raise HomeAssistantError(
-                translation_domain=DOMAIN,
-                translation_key="manual_refresh_failed",
-            ) from None
-        if not self.coordinator.last_update_success:
-            raise HomeAssistantError(
-                translation_domain=DOMAIN,
-                translation_key="manual_refresh_failed",
-            )
+            pass
+        else:
+            if self.coordinator.last_update_success:
+                return
+        raise HomeAssistantError(
+            translation_domain=DOMAIN,
+            translation_key="manual_refresh_failed",
+        ) from None

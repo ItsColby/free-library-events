@@ -16,44 +16,25 @@ service is used at runtime.
 
 ## Features
 
-- Native **Settings > Devices & services** setup and options flow
-- One age-filtered Home Assistant calendar
-- Optional token-protected, dynamically generated iCalendar subscription feed
-- `Strict`, `Recommended`, and `Broad` age-match modes
-- Configurable person display name and birth date
-- Configurable branch selection, refresh interval, and placeholder duration
-- Manual refresh button and diagnostic status sensor
-- Official branch-and-age RSS queries for every category in the configured
-  person's current life-stage group, with duplicate consolidation
-- Coverage-aware operation that distinguishes source failures from the observed
-  ten-item boundary and adaptively expands unresolved feeds at or above that
-  boundary through official event-type filters
-- Redacted integration diagnostics
-- Response-only `free_library_events.render_digest` action returning:
-  - subject
-  - plain-text message
-  - responsive HTML email
-  - bounded generation and source-coverage metadata
-- Optional LLM-free SMTP image embedding with bounded publisher downloads,
-  notifier-ready CID attachments, and automatic temporary-file cleanup
-- Each included event uses an orientation-aware responsive card: landscape
-  artwork spans the card, while square/portrait artwork uses a centered poster
-  row above the full-width title, time, location, audience, and planning
-  highlights; the description and prefilled Google Calendar link follow below
-- Safe contextual links embedded in official RSS descriptions remain clickable;
-  non-HTTP links are discarded
-- An explicitly named off-site venue in published RSS text replaces the branch
-  as the map/calendar destination, while a specifically named room refines the
-  branch location; an off-site listing still names its hosting branch
-- Event images preserve their published aspect ratio rather than being cropped
-- A muted `Library age listing:` line shows every official age category, while
-  compact
-  highlights show only useful, nonredundant context proved by reliable RSS
-  wording: secondary activities, accessibility, participation, take-home
-  materials, weather or supply cautions, and registration. At most five are
-  shown, ordered as action needed, logistics, then secondary topics
-- Explicit online and hybrid wording changes location treatment without
-  turning incidental phrases such as “online play” into a virtual event
+- Native setup and options flow for the person's profile, branches, age matching,
+  refresh interval, and placeholder duration
+- One age-filtered Home Assistant calendar and an optional private iCalendar
+  subscription feed
+- `Strict`, `Recommended`, and `Broad` age-match modes with duplicate consolidation
+  and preserved official age classifications
+- Manual refresh, diagnostic status, and redacted downloadable diagnostics
+- Bounded RSS acquisition and adaptive event-type expansion with explicit source
+  failures and coverage limitations
+- Response-only `free_library_events.render_digest` action returning a subject,
+  plain text, responsive HTML, and bounded generation and coverage metadata
+- Contextual links, venue information, planning highlights, calendar links, and
+  uncropped artwork derived from the official feeds
+- Optional SMTP image embedding with bounded publisher downloads, CID
+  attachments, and automatic temporary-file cleanup
+
+See [Configuration](#configuration), [Calendar](#calendar),
+[Weekly email action](#weekly-email-action), and [Source limitations](#source-limitations)
+for the behavior and limits of each surface.
 
 ## Installation through HACS
 

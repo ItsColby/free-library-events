@@ -160,7 +160,7 @@ def _calendar_response(request: web.Request, token: str) -> web.Response:
 
 
 def _as_utc_second(value: datetime) -> datetime:
-    """Normalize a coordinator timestamp for HTTP date comparisons."""
+    """Normalize a timestamp to UTC with the HTTP and iCalendar second precision."""
 
     if value.tzinfo is None:
         value = value.replace(tzinfo=UTC)
@@ -253,9 +253,7 @@ def render_icalendar(
 def _format_utc(value: datetime) -> str:
     """Format a datetime as an iCalendar UTC timestamp."""
 
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=UTC)
-    return value.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
+    return _as_utc_second(value).strftime("%Y%m%dT%H%M%SZ")
 
 
 def _format_duration(seconds: int) -> str:

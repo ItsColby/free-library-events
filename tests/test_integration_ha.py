@@ -932,13 +932,8 @@ async def test_unchanged_status_projection_skips_state_write_and_source_io(
     entry = _entry()
     entry.add_to_hass(hass)
     fetch_mock = AsyncMock(
-        side_effect=lambda _branch, age_category, _coverage_end=None: BranchFeed(
-            events=(),
-            age_category=age_category,
-            source_count=0,
-            parsed_count=0,
-            last_event_date=None,
-            ordered=True,
+        side_effect=lambda _branch, age_category, _coverage_end=None: _empty_feed(
+            age_category
         )
     )
     monday = datetime(2026, 7, 20, 23, 59, tzinfo=LOCAL_TIME_ZONE)
@@ -993,13 +988,8 @@ async def test_status_projection_reschedules_for_runtime_timezone_change(
     entry = _entry()
     entry.add_to_hass(hass)
     fetch_mock = AsyncMock(
-        side_effect=lambda _branch, age_category, _coverage_end=None: BranchFeed(
-            events=(),
-            age_category=age_category,
-            source_count=0,
-            parsed_count=0,
-            last_event_date=None,
-            ordered=True,
+        side_effect=lambda _branch, age_category, _coverage_end=None: _empty_feed(
+            age_category
         )
     )
     scheduled: list[tuple[object, datetime, Mock]] = []
@@ -1061,13 +1051,8 @@ async def test_status_projection_reschedules_on_failure_recovery_and_unload(
     entry = _entry()
     entry.add_to_hass(hass)
     fetch_mock = AsyncMock(
-        side_effect=lambda _branch, age_category, _coverage_end=None: BranchFeed(
-            events=(),
-            age_category=age_category,
-            source_count=0,
-            parsed_count=0,
-            last_event_date=None,
-            ordered=True,
+        side_effect=lambda _branch, age_category, _coverage_end=None: _empty_feed(
+            age_category
         )
     )
     scheduled: list[tuple[object, datetime, Mock]] = []
@@ -1159,13 +1144,8 @@ async def test_status_publishes_each_consecutive_failure_attempt(
     entry = _entry()
     entry.add_to_hass(hass)
     fetch_mock = AsyncMock(
-        side_effect=lambda _branch, age_category, _coverage_end=None: BranchFeed(
-            events=(),
-            age_category=age_category,
-            source_count=0,
-            parsed_count=0,
-            last_event_date=None,
-            ordered=True,
+        side_effect=lambda _branch, age_category, _coverage_end=None: _empty_feed(
+            age_category
         )
     )
 
@@ -1219,14 +1199,7 @@ async def test_status_publishes_each_consecutive_failure_attempt(
         assert failed_button.state != STATE_UNAVAILABLE
 
         fetch_mock.side_effect = lambda _branch, age_category, _coverage_end=None: (
-            BranchFeed(
-                events=(),
-                age_category=age_category,
-                source_count=0,
-                parsed_count=0,
-                last_event_date=None,
-                ordered=True,
-            )
+            _empty_feed(age_category)
         )
         await coordinator.async_refresh()
         await hass.async_block_till_done()
@@ -1549,14 +1522,7 @@ async def test_render_digest_rejects_superseded_entry_during_refresh(
     entry.add_to_hass(hass)
 
     async def fetch_empty(_branch, age_category):
-        return BranchFeed(
-            events=(),
-            age_category=age_category,
-            source_count=0,
-            parsed_count=0,
-            last_event_date=None,
-            ordered=True,
-        )
+        return _empty_feed(age_category)
 
     with (
         patch(
@@ -2859,14 +2825,7 @@ async def test_client_propagates_type_shard_cancellation() -> None:
     async def fetch_single(_branch, age_category, event_type=None):
         if event_type == OFFICIAL_EVENT_TYPES[0]:
             raise asyncio.CancelledError
-        return BranchFeed(
-            events=(),
-            age_category=age_category,
-            source_count=0,
-            parsed_count=0,
-            last_event_date=None,
-            ordered=True,
-        )
+        return _empty_feed(age_category)
 
     client = LibraryClient(None)  # type: ignore[arg-type]
     client._async_fetch_single = AsyncMock(side_effect=fetch_single)
@@ -2939,14 +2898,7 @@ async def test_coordinator_recomputes_age_feeds_as_time_advances(
     entry = _entry()
 
     async def fetch_feed(_branch, age_category, _coverage_end=None):
-        return BranchFeed(
-            events=(),
-            age_category=age_category,
-            source_count=0,
-            parsed_count=0,
-            last_event_date=None,
-            ordered=True,
-        )
+        return _empty_feed(age_category)
 
     client = types.SimpleNamespace(async_fetch_feed=AsyncMock(side_effect=fetch_feed))
     coordinator = LibraryDataCoordinator(
@@ -3362,6 +3314,19 @@ async def test_coordinator_bounds_expedited_retry_and_exposes_current_attempt(
             )
         },
     }
+
+
+def _empty_feed(age_category: str | None) -> BranchFeed:
+    """Return a complete empty publisher response for the requested age feed."""
+
+    return BranchFeed(
+        events=(),
+        age_category=age_category,
+        source_count=0,
+        parsed_count=0,
+        last_event_date=None,
+        ordered=True,
+    )
 
 
 def _entry() -> MockConfigEntry:

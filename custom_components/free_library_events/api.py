@@ -58,18 +58,6 @@ SOURCE_ERROR_RESPONSE_TOO_LARGE = "response_too_large"
 SOURCE_ERROR_UNSAFE_REDIRECT = "unsafe_redirect"
 SOURCE_ERROR_EXPANSION_TIMEOUT = "expansion_timeout"
 SOURCE_ERROR_UNEXPECTED = "unexpected_failure"
-SOURCE_ERROR_CATEGORIES = frozenset(
-    {
-        SOURCE_ERROR_REQUEST_FAILED,
-        SOURCE_ERROR_INVALID_FEED,
-        SOURCE_ERROR_PARSE_FAILED,
-        SOURCE_ERROR_RESPONSE_TOO_LARGE,
-        SOURCE_ERROR_UNSAFE_REDIRECT,
-        SOURCE_ERROR_EXPANSION_TIMEOUT,
-        SOURCE_ERROR_UNEXPECTED,
-    }
-)
-
 SOURCE_ERROR_DESCRIPTIONS = {
     SOURCE_ERROR_REQUEST_FAILED: "library source request failed",
     SOURCE_ERROR_INVALID_FEED: "library source returned invalid event data",
@@ -79,6 +67,7 @@ SOURCE_ERROR_DESCRIPTIONS = {
     SOURCE_ERROR_EXPANSION_TIMEOUT: "library source expansion timed out",
     SOURCE_ERROR_UNEXPECTED: "unexpected source failure",
 }
+SOURCE_ERROR_CATEGORIES = frozenset(SOURCE_ERROR_DESCRIPTIONS)
 
 
 class LibraryApiError(Exception):
@@ -238,7 +227,7 @@ class LibraryClient:
 
         results = await asyncio.gather(
             *(
-                self._async_fetch_type_shard(branch, age_category, event_type)
+                self._async_fetch_single(branch, age_category, event_type)
                 for event_type in OFFICIAL_EVENT_TYPES
             ),
             return_exceptions=True,
@@ -299,16 +288,6 @@ class LibraryClient:
             base_prefix_recovered=base_prefix_recovered,
             expanded_through=coverage_end if expansion_proves_coverage else None,
         )
-
-    async def _async_fetch_type_shard(
-        self,
-        branch: Branch,
-        age_category: str,
-        event_type: str,
-    ) -> BranchFeed:
-        """Fetch one official publisher event-type shard."""
-
-        return await self._async_fetch_single(branch, age_category, event_type)
 
     async def _async_fetch_single(
         self,

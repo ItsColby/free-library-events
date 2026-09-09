@@ -87,35 +87,35 @@ run_actionlint() (
 run_unit() {
   run_actionlint
   run_python '
-    python -m pip install "ruff==0.16.2" "shellcheck-py==0.11.0.1" "zizmor==1.29.0" &&
-    shellcheck scripts/verify-release-local.sh &&
-    zizmor --strict-collection --persona auditor . &&
-    python -m ruff format --check custom_components tests scripts &&
-    python -m ruff check custom_components tests scripts &&
-    python -m unittest discover -s tests -p "test_digest.py" &&
-    python -m unittest discover -s tests -p "test_metadata.py" &&
-    python -m unittest discover -s tests -p "test_public_safety.py" &&
-    python -m unittest discover -s tests -p "test_ha_patch_compatibility.py" &&
-    python -m unittest discover -s tests -p "test_validation_runner.py" &&
-    python -m compileall -q custom_components/free_library_events tests scripts &&
+    python -m pip install "ruff==0.16.2" "shellcheck-py==0.11.0.1" "zizmor==1.29.0"
+    shellcheck scripts/verify-release-local.sh
+    zizmor --strict-collection --persona auditor .
+    python -m ruff format --check custom_components tests scripts
+    python -m ruff check custom_components tests scripts
+    python -m unittest discover -s tests -p "test_digest.py"
+    python -m unittest discover -s tests -p "test_metadata.py"
+    python -m unittest discover -s tests -p "test_public_safety.py"
+    python -m unittest discover -s tests -p "test_ha_patch_compatibility.py"
+    python -m unittest discover -s tests -p "test_validation_runner.py"
+    python -m compileall -q custom_components/free_library_events tests scripts
     python scripts/check_public_safety.py
   '
 }
 run_minimum() {
   run_python '
-    python -m pip install "pytest-homeassistant-custom-component==0.13.354" &&
-    python -m pip install --upgrade -r requirements-ha-test.txt &&
-    python -m pip install "mypy==2.3.0" &&
-    python -m pip check &&
-    python -m mypy --strict custom_components/free_library_events &&
+    python -m pip install "pytest-homeassistant-custom-component==0.13.354"
+    python -m pip install --upgrade -r requirements-ha-test.txt
+    python -m pip install "mypy==2.3.0"
+    python -m pip check
+    python -m mypy custom_components/free_library_events
     pytest tests/test_integration_ha.py tests/test_email_images.py tests/test_acquisition_ha.py -q
   '
 }
 run_current() {
   run_python '
-    python -m pip install "pytest-homeassistant-custom-component==0.13.364" &&
-    python -m pip install --upgrade -r requirements-ha-current.txt &&
-    python scripts/check_ha_patch_compatibility.py --minimum requirements-ha-test.txt --current requirements-ha-current.txt &&
+    python -m pip install "pytest-homeassistant-custom-component==0.13.364"
+    python -m pip install --upgrade -r requirements-ha-current.txt
+    python scripts/check_ha_patch_compatibility.py --minimum requirements-ha-test.txt --current requirements-ha-current.txt
     pytest tests/test_integration_ha.py tests/test_email_images.py tests/test_acquisition_ha.py -q
   '
 }
@@ -132,7 +132,6 @@ case "$mode" in
   minimum) run_minimum ;;
   current) run_current ;;
   release) run_release ;;
-  *) echo "Unknown mode: $mode" >&2; exit 2 ;;
 esac
 printf 'Local validation passed: %s (%s)\n' "$mode" "$backend"
 if [[ "$mode" == all || "$mode" == release ]]; then

@@ -559,6 +559,9 @@ class LibraryDataCoordinator(DataUpdateCoordinator[LibraryData]):
             for branch in self.branches
             for age_category in age_categories
         )
+        requested_source_keys = tuple(
+            source_key(branch, age_category) for branch, age_category in requests
+        )
         results = await asyncio.gather(
             *(
                 self._client.async_fetch_feed(branch, age_category)
@@ -569,8 +572,7 @@ class LibraryDataCoordinator(DataUpdateCoordinator[LibraryData]):
         statuses: dict[str, BranchFeed] = {}
         errors: dict[str, str] = {}
         retryable_failure_keys: set[str] = set()
-        for (branch, age_category), result in zip(requests, results, strict=True):
-            key = source_key(branch, age_category)
+        for key, result in zip(requested_source_keys, results, strict=True):
             if isinstance(result, asyncio.CancelledError):
                 raise result
             if isinstance(result, BaseException):
@@ -600,10 +602,7 @@ class LibraryDataCoordinator(DataUpdateCoordinator[LibraryData]):
             completed_at = dt_util.utcnow()
             self.last_attempt = RefreshAttempt(
                 completed_at=completed_at,
-                source_keys=tuple(
-                    source_key(branch, age_category)
-                    for branch, age_category in requests
-                ),
+                source_keys=requested_source_keys,
                 source_errors=errors,
                 retryable_failure_count=len(retryable_failure_keys),
                 expedited_retry_scheduled=schedule_expedited_retry,
@@ -616,10 +615,7 @@ class LibraryDataCoordinator(DataUpdateCoordinator[LibraryData]):
                 ),
             )
 
-        request_by_key = {
-            source_key(branch, age_category): (branch, age_category)
-            for branch, age_category in requests
-        }
+        request_by_key = dict(zip(requested_source_keys, requests, strict=True))
         expansion_keys = type_expansion_source_keys(
             statuses,
             self.birth_date,
@@ -674,9 +670,7 @@ class LibraryDataCoordinator(DataUpdateCoordinator[LibraryData]):
         self._complete_failure_streak = False
         self.last_attempt = RefreshAttempt(
             completed_at=completed_at,
-            source_keys=tuple(
-                source_key(branch, age_category) for branch, age_category in requests
-            ),
+            source_keys=requested_source_keys,
             source_errors=errors,
             retryable_failure_count=len(retryable_failure_keys),
             expedited_retry_scheduled=False,

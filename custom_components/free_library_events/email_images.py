@@ -208,16 +208,13 @@ async def _async_download_one(
                             )
                         current_url = redirected_url
                         continue
-                    if (
-                        response.status >= 500
-                        or response.status in REMOTE_FALLBACK_HTTP_STATUSES
-                    ):
-                        raise _ImageDownloadError(
-                            f"HTTP {response.status}", allow_remote_fallback=True
-                        )
                     if response.status != 200:
                         raise _ImageDownloadError(
-                            f"HTTP {response.status}", allow_remote_fallback=False
+                            f"HTTP {response.status}",
+                            allow_remote_fallback=(
+                                response.status >= 500
+                                or response.status in REMOTE_FALLBACK_HTTP_STATUSES
+                            ),
                         )
                     if (
                         response.content_length is not None
@@ -243,8 +240,6 @@ async def _async_download_one(
                 raise _ImageDownloadError(
                     "excessive image redirects", allow_remote_fallback=False
                 )
-    except _ImageDownloadError:
-        raise
     except TimeoutError, aiohttp.ClientError:
         raise _ImageDownloadError(
             "publisher image request failed", allow_remote_fallback=True
