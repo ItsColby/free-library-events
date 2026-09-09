@@ -63,10 +63,13 @@ run_python() (
   else
     podman run --rm -e HOME=/tmp/home -e PIP_DISABLE_PIP_VERSION_CHECK=1 \
       -e PIP_ROOT_USER_ACTION=ignore -e DEBIAN_FRONTEND=noninteractive \
+      -e PIP_CACHE_DIR=/pip-cache \
       -e PYTHONPYCACHEPREFIX=/tmp/pycache -e XDG_CACHE_HOME=/tmp/cache \
       -e RUFF_CACHE_DIR=/tmp/ruff-cache -e MYPY_CACHE_DIR=/tmp/mypy-cache \
       -e 'PYTEST_ADDOPTS=-p no:cacheprovider' \
-      -v "$repo_root:/workspace" -w /workspace "$python_image" bash -euo pipefail -c \
+      -v "$repo_root:/workspace:ro" -w /workspace \
+      --mount type=volume,source=free-library-events-validation-pip,target=/pip-cache \
+      "$python_image" bash -euo pipefail -c \
       'apt-get update -qq; apt-get install -y -qq --no-install-recommends git >/dev/null; eval "$1"' \
       local-validation "$1"
   fi
@@ -97,6 +100,7 @@ run_unit() {
     python -m unittest discover -s tests -p "test_public_safety.py"
     python -m unittest discover -s tests -p "test_ha_patch_compatibility.py"
     python -m unittest discover -s tests -p "test_validation_runner.py"
+    python -m unittest discover -s tests -p "test_parallel_validation.py"
     python -m compileall -q custom_components/free_library_events tests scripts
     python scripts/check_public_safety.py
   '
@@ -119,6 +123,22 @@ run_current() {
     pytest tests/test_integration_ha.py tests/test_email_images.py tests/test_acquisition_ha.py -q
   '
 }
+run_ha_matrix() {
+  if [[ "$backend" == native ]]; then
+    run_minimum
+    run_current
+  else
+    # Containers read one immutable payload; installed environments stay separate.
+    local minimum_pid current_pid minimum_status=0 current_status=0
+    run_minimum & minimum_pid=$!
+    run_current & current_pid=$!
+    # Always reap both lanes before the parent can remove the payload.
+    wait "$minimum_pid" || minimum_status=$?
+    wait "$current_pid" || current_status=$?
+    printf 'Home Assistant lanes: minimum=%s current=%s\n' "$minimum_status" "$current_status"
+    (( minimum_status == 0 && current_status == 0 ))
+  fi
+}
 run_release() {
   if [[ "$backend" == native ]]; then
     docker run --rm -v "$repo_root:/github/workspace:ro" "$hassfest_image"
@@ -127,7 +147,7 @@ run_release() {
   fi
 }
 case "$mode" in
-  all) run_unit; run_minimum; run_current; run_release ;;
+  all) run_unit; run_ha_matrix; run_release ;;
   unit) run_unit ;;
   minimum) run_minimum ;;
   current) run_current ;;
