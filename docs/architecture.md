@@ -53,8 +53,11 @@
   source-count, status, and error mapping is read-only. Home Assistant's
   config-entry-owned coordinator debouncer bounds overlapping refresh triggers
   to one running refresh plus one pending follow-up and shuts down scheduled
-  work on unload. Every completed base-source attempt also replaces one
-  immutable privacy-safe record containing the requested source keys,
+  work on unload. Forced digest renders and manual refreshes wait for a
+  completed attempt, including a refresh already in flight, with a ten-minute
+  upper bound. Cancelling one caller leaves shared source work intact; unloading
+  releases waiting callers with a translated failure. Every completed
+  base-source attempt also replaces one immutable privacy-safe record containing the requested source keys,
   allow-listed error categories, retryable count, completion time, and retry
   decision. That record remains distinct from the last successful normalized
   cache, so a complete source failure uses a translated update error without
@@ -62,7 +65,9 @@
   of a continuous failure streak has a retryable transport, rate-limit, or
   server failure, the update error requests one five-minute coordinator retry.
   A repeated failure returns to the configured interval; any partial or full
-  success resets the allowance. It adaptively expands at most twelve
+  success resets the allowance. Initial entry setup uses Core's setup retry
+  policy and never claims an expedited polling retry. It adaptively expands at
+  most twelve
   unresolved capped feeds per refresh. Current-age sources come first, followed
   by the numerically nearest official age windows, with branches distributed
   deterministically within each category. A minor uses Baby through Young
@@ -129,15 +134,15 @@
   conservative whole-event duration statement; the digest and HA calendar both
   use that same evidence. Recurring rows use an occurrence identity containing
   source URL/title, branch, date, and start time across the digest and native HA
-  calendar so a shared series URL cannot collapse distinct dates. Response
-  metadata retains both simple publisher event IDs and exact occurrence IDs.
+  calendar so a shared series URL cannot collapse distinct dates. Shortening a
+  display title never changes that identity. Response metadata retains both simple publisher event IDs and exact occurrence IDs.
   Display titles,
   descriptions, calendar details/URLs, event count, and the final HTML byte size
   have separate bounds. The renderer keeps chronological presentation, reserves
   rich cards for nearest branches when a large result requires compaction, and
   removes farthest compact overflow only when necessary to remain within 80,000
-  UTF-8 bytes. It visibly discloses any email-only omission. It does not call an
-  LLM.
+  UTF-8 bytes. Both the HTML and plain-text bodies disclose email-only omissions.
+  It does not call an LLM.
 - `calendar_data.py` projects normalized source rows into the single shared,
   deterministic age-filtered calendar model. `calendar.py` exposes those rows
   through Home Assistant's native calendar entity. `webcal.py` serializes the
@@ -145,7 +150,7 @@
   opt-in, token-protected, unauthenticated HTTP view for subscription clients
   that cannot send Home Assistant bearer authentication. The view never forces
   a source refresh. It serves equivalent `GET` and `HEAD` metadata plus
-  representation-derived `ETag` and coordinator-derived `Last-Modified`
+  representation-derived `ETag` and source/config-entry-derived `Last-Modified`
   validators; matching conditional requests return `304`. Disabled, invalid,
   and unloaded tokens fail closed as `404`.
 - `calendar.py`, `sensor.py`, and `button.py` expose the native user-facing
@@ -196,10 +201,14 @@
   response metadata, or used to reorder the chronological email.
 - `email_images.py` owns the deterministic publisher-image download limits,
   trusted redirect policy, dimension/orientation classification, CID filenames,
-  integration-owned temporary storage, and guarded cleanup. Remote-image
+  integration-owned temporary storage, and guarded cleanup. Failed storage
+  creation removes only a directory created by that invocation, preserving a
+  pre-existing path on collision. Remote-image
   rendering remains the no-storage default so generic response consumers do not
   receive unusable CID references.
-- `diagnostics.py` redacts the person's display name and birth date and exposes
+- `diagnostics.py` redacts the person's display name, birth date, and custom
+  calendar name. Invalid stored settings return a fixed `invalid_config`
+  category with no raw configuration or exception text. Diagnostics expose
   only bounded per-source counts, type-expansion evidence, ordering, coverage
   boundaries, and health. It labels the retained normalized cache separately
   from the latest completed base-source attempt, including compact totals,
@@ -278,11 +287,14 @@ page available outside the integration for schedule changes.
    actionlint with ShellCheck, zizmor auditor, Hassfest, and HACS validation.
    The Linux HA tests have two exact owners: `requirements-ha-test.txt` proves
    dependency closure at the 2026.8.0 supported minimum, while
-   `requirements-ha-current.txt` proves 2026.8.2 same-month patch compatibility.
-   The current-patch checker accepts only clean closure or the single
-   metadata-proven harness/Core exact-pin mismatch before running the complete
-   HA suite; it rejects cross-month or prerelease targets, additional conflicts,
-   skipped collection, and test failures.
+   `requirements-ha-current.txt` targets Core 2026.9.1 with a matching harness
+   and clean dependency closure. The current checker verifies exact installed
+   metadata and `pip check`. Its mismatch exception is limited to a single
+   metadata-proven harness/Core pin conflict within the minimum's same month;
+   cross-month conflicts, prereleases, other dependency conflicts, skipped
+   collection, and test failures are rejected. Such an exception proves only
+   patch compatibility. Both lanes execute every HA test module, and each native
+   lane uses an isolated temporary virtual environment.
 2. Compare the official RSS builder's age and event-type options with the local
    source taxonomy; the runtime builder route is browser-protected, so this is a
    release-time drift check rather than an unreliable polling dependency.
@@ -290,7 +302,7 @@ page available outside the integration for schedule changes.
    `vYYYY.M.D` tag, and release title before opening the release pull request.
 4. Require terminal pull-request success for **Unit tests and static
    validation**, **Home Assistant minimum integration tests (Core 2026.8.0)**,
-   **Home Assistant current-patch integration tests (Core 2026.8.2)**,
+   **Home Assistant current integration tests (Core 2026.9.1)**,
    **Hassfest**, **HACS**, the aggregate **Release gate**, and CodeQL's **Analyze
    (actions)**, **Analyze (python)**, and **CodeQL** checks.
 5. Merge through default-branch protection without bypass, using squash or

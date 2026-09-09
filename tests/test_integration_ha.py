@@ -9,6 +9,7 @@ import types
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, date, datetime, time, timedelta
+from email.utils import format_datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, PropertyMock, patch
 from zoneinfo import ZoneInfo
@@ -635,7 +636,7 @@ async def test_manual_refresh_button_remains_available_and_reports_result(
         date(2025, 1, 15),
         timedelta(hours=6),
     )
-    coordinator.async_request_refresh = AsyncMock()
+    coordinator.async_request_refresh_and_wait = AsyncMock()
     coordinator.last_update_success = False
     button = LibraryRefreshButton(coordinator)
 
@@ -646,13 +647,21 @@ async def test_manual_refresh_button_remains_available_and_reports_result(
 
     assert failure.value.translation_domain == DOMAIN
     assert failure.value.translation_key == "manual_refresh_failed"
-    assert coordinator.async_request_refresh.await_count == 1
+    assert coordinator.async_request_refresh_and_wait.await_count == 1
     assert button.available
 
     coordinator.last_update_success = True
     await button.async_press()
-    assert coordinator.async_request_refresh.await_count == 2
+    assert coordinator.async_request_refresh_and_wait.await_count == 2
     assert button.available
+
+    coordinator.async_request_refresh_and_wait.side_effect = UpdateFailed(
+        translation_domain=DOMAIN, translation_key="library_refresh_failed"
+    )
+    with pytest.raises(HomeAssistantError) as timeout_failure:
+        await button.async_press()
+    assert timeout_failure.value.translation_key == "manual_refresh_failed"
+    assert timeout_failure.value.__cause__ is None
 
 
 def test_normalize_config_enforces_non_ui_bounds() -> None:
@@ -660,6 +669,50 @@ def test_normalize_config_enforces_non_ui_bounds() -> None:
         normalize_config(USER_INPUT | {CONF_CALENDAR_DURATION: 5})
     with pytest.raises(ValueError, match="invalid_scan_interval"):
         normalize_config(USER_INPUT | {CONF_SCAN_INTERVAL: 30})
+
+
+@pytest.mark.parametrize(
+    ("key", "expected_error"),
+    (
+        (CONF_CALENDAR_DURATION, "invalid_calendar_duration"),
+        (CONF_SCAN_INTERVAL, "invalid_scan_interval"),
+    ),
+)
+@pytest.mark.parametrize("value", (None, True, float("inf"), float("nan")))
+def test_behavior_rejects_non_integral_values(
+    key: str, expected_error: str, value: object
+) -> None:
+    with pytest.raises(ValueError, match=expected_error):
+        normalize_options(BEHAVIOR_INPUT | {key: value})
+
+
+@pytest.mark.parametrize(
+    ("key", "value", "expected_error"),
+    (
+        (CONF_CALENDAR_DURATION, 60.5, "invalid_calendar_duration"),
+        (CONF_SCAN_INTERVAL, 900.5, "invalid_scan_interval"),
+    ),
+)
+def test_behavior_rejects_in_range_fractional_values(
+    key: str, value: float, expected_error: str
+) -> None:
+    with pytest.raises(ValueError, match=expected_error):
+        normalize_options(BEHAVIOR_INPUT | {key: value})
+
+
+@pytest.mark.parametrize("value", (900, 900.0, "900"))
+def test_behavior_accepts_integral_ui_and_legacy_values(value: object) -> None:
+    options = normalize_options(BEHAVIOR_INPUT | {CONF_SCAN_INTERVAL: value})
+    assert options[CONF_SCAN_INTERVAL] == 900
+    assert isinstance(options[CONF_SCAN_INTERVAL], int)
+
+
+def test_profile_rejects_datetime_birth_date_without_private_details() -> None:
+    with pytest.raises(TypeError, match=r"^invalid_birth_date$"):
+        normalize_profile(
+            PROFILE_INPUT
+            | {CONF_BIRTH_DATE: datetime(2025, 1, 15, tzinfo=LOCAL_TIME_ZONE)}
+        )
 
 
 def test_profile_and_webcal_validation_reject_unknown_or_unsafe_values() -> None:
@@ -1052,7 +1105,7 @@ async def test_status_projection_reschedules_on_failure_recovery_and_unload(
         failed_button = hass.states.get("button.free_library_events_refresh_events")
         assert failed_button is not None
         assert failed_button.state != STATE_UNAVAILABLE
-        coordinator.async_request_refresh = AsyncMock()
+        coordinator.async_request_refresh_and_wait = AsyncMock()
         with pytest.raises(HomeAssistantError) as failure:
             await hass.services.async_call(
                 "button",
@@ -1062,7 +1115,7 @@ async def test_status_projection_reschedules_on_failure_recovery_and_unload(
             )
         assert failure.value.translation_domain == DOMAIN
         assert failure.value.translation_key == "manual_refresh_failed"
-        assert coordinator.async_request_refresh.await_count == 1
+        assert coordinator.async_request_refresh_and_wait.await_count == 1
 
         failed = hass.states.get("sensor.free_library_events_status")
         assert failed is not None
@@ -1088,7 +1141,7 @@ async def test_status_projection_reschedules_on_failure_recovery_and_unload(
             {"entity_id": "button.free_library_events_refresh_events"},
             blocking=True,
         )
-        assert coordinator.async_request_refresh.await_count == 2
+        assert coordinator.async_request_refresh_and_wait.await_count == 2
         recovered_button = hass.states.get("button.free_library_events_refresh_events")
         assert recovered_button is not None
         assert recovered_button.state != STATE_UNAVAILABLE
@@ -1532,7 +1585,7 @@ async def test_render_digest_rejects_superseded_entry_during_refresh(
     with (
         patch.object(
             coordinator,
-            "async_request_refresh",
+            "async_request_refresh_and_wait",
             side_effect=refresh_while_entry_is_superseded,
         ),
         pytest.raises(HomeAssistantError) as failure,
@@ -1548,6 +1601,115 @@ async def test_render_digest_rejects_superseded_entry_during_refresh(
     assert failure.value.translation_domain == DOMAIN
     assert failure.value.translation_key == "settings_changed_during_render"
     assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_digest_and_button_wait_for_an_inflight_refresh(
+    hass: HomeAssistant,
+) -> None:
+    entry = _entry()
+    entry.add_to_hass(hass)
+    source_started = asyncio.Event()
+    release_source = asyncio.Event()
+    callers_started = asyncio.Event()
+    waiting_callers = 0
+    block_source = False
+
+    async def fetch_feed(branch, age_category):
+        events = ()
+        if block_source:
+            source_started.set()
+            await release_source.wait()
+            events = (
+                Event(
+                    title="Newly refreshed storytime",
+                    event_date=date(2026, 7, 22),
+                    start_time=time(10, 30),
+                    description="Stories and songs for babies with caregivers.",
+                    link=f"https://example.test/events/{branch.code}-refreshed",
+                    image_url="",
+                    branch=branch,
+                    age_categories=(age_category,),
+                ),
+            )
+        return BranchFeed(
+            events=events,
+            age_category=age_category,
+            source_count=len(events),
+            parsed_count=len(events),
+            last_event_date=events[0].event_date if events else None,
+            ordered=True,
+        )
+
+    with (
+        patch(
+            "custom_components.free_library_events.api.LibraryClient.async_fetch_feed",
+            side_effect=fetch_feed,
+        ),
+        patch(
+            "custom_components.free_library_events.sensor.async_track_point_in_time",
+            return_value=Mock(),
+        ),
+        patch(
+            "homeassistant.util.dt.now",
+            return_value=datetime(2026, 7, 17, 12, tzinfo=LOCAL_TIME_ZONE),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        coordinator = entry.runtime_data
+        prior_data = coordinator.data
+        wait_for_refresh = coordinator.async_request_refresh_and_wait
+
+        async def tracked_wait() -> None:
+            nonlocal waiting_callers
+            waiting_callers += 1
+            if waiting_callers == 2:
+                callers_started.set()
+            await wait_for_refresh()
+
+        block_source = True
+        refresh_task = asyncio.create_task(coordinator.async_refresh())
+        pending_tasks = [refresh_task]
+        try:
+            await source_started.wait()
+            with patch.object(
+                coordinator, "async_request_refresh_and_wait", side_effect=tracked_wait
+            ):
+                digest_task = asyncio.create_task(
+                    hass.services.async_call(
+                        DOMAIN,
+                        SERVICE_RENDER_DIGEST,
+                        {ATTR_FORCE_REFRESH: True},
+                        blocking=True,
+                        return_response=True,
+                    )
+                )
+                button_task = asyncio.create_task(
+                    hass.services.async_call(
+                        "button",
+                        "press",
+                        {"entity_id": "button.free_library_events_refresh_events"},
+                        blocking=True,
+                    )
+                )
+                pending_tasks.extend((digest_task, button_task))
+                await callers_started.wait()
+                assert not digest_task.done()
+                assert not button_task.done()
+                release_source.set()
+                await asyncio.gather(*pending_tasks)
+            response = digest_task.result()
+            assert response is not None
+            assert response["metadata"]["included_count"] == 4
+            assert "Newly refreshed storytime" in response["html"]
+            assert coordinator.data is not prior_data
+        finally:
+            release_source.set()
+            for task in pending_tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*pending_tasks, return_exceptions=True)
+            assert await hass.config_entries.async_unload(entry.entry_id)
 
 
 def test_stored_cid_images_match_home_assistant_smtp_mime_contract(
@@ -1806,6 +1968,29 @@ async def test_webcal_view_is_token_gated_dynamic_and_unloads(
     assert token not in repr(diagnostics)
     assert CONF_WEBCAL_TOKEN not in repr(diagnostics)
 
+    coordinator = entry.runtime_data
+    assert coordinator.data is not None
+    changed_at = max(entry.modified_at, coordinator.data.fetched_at) + timedelta(
+        seconds=2
+    )
+    with patch("homeassistant.config_entries.utcnow", return_value=changed_at):
+        hass.config_entries.async_update_entry(
+            entry,
+            options={**entry.options, CONF_WEBCAL_NAME: "Renamed Library Events"},
+        )
+    response = await client.get(
+        WEBCAL_PATH.format(token=token),
+        headers={"If-Modified-Since": first_last_modified},
+    )
+    assert response.status == 200
+    assert response.headers["ETag"] != first_etag
+    assert response.headers["Last-Modified"] == format_datetime(
+        changed_at.replace(microsecond=0), usegmt=True
+    )
+    renamed_body = await response.text()
+    assert "X-WR-CALNAME:Renamed Library Events" in renamed_body
+    assert f"DTSTAMP:{changed_at:%Y%m%dT%H%M%SZ}" in renamed_body
+
     added_event = Event(
         title="Newly fetched event",
         event_date=date(2026, 7, 23),
@@ -1821,13 +2006,15 @@ async def test_webcal_view_is_token_gated_dynamic_and_unloads(
     coordinator.data = replace(
         coordinator.data,
         events=(*coordinator.data.events, added_event),
-        fetched_at=datetime(2026, 7, 19, 17, 0, tzinfo=ZoneInfo("UTC")),
+        fetched_at=changed_at + timedelta(minutes=1),
     )
 
     response = await client.get(WEBCAL_PATH.format(token=token))
     assert response.status == 200
     assert response.headers["ETag"] != first_etag
-    assert response.headers["Last-Modified"] == "Sun, 19 Jul 2026 17:00:00 GMT"
+    assert response.headers["Last-Modified"] == format_datetime(
+        (changed_at + timedelta(minutes=1)).replace(microsecond=0), usegmt=True
+    )
     assert "Newly fetched event" in await response.text()
 
     hass.config_entries.async_update_entry(

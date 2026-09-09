@@ -128,13 +128,16 @@ def _calendar_response(request: web.Request, token: str) -> web.Response:
         raise web.HTTPServiceUnavailable(headers={"Retry-After": "300"})
 
     config = entry_config(entry.data, entry.options)
+    last_modified = max(
+        _as_utc_second(coordinator.data.fetched_at),
+        _as_utc_second(entry.modified_at),
+    )
     body = render_icalendar(
         build_calendar_items(coordinator.data.events, config),
-        fetched_at=coordinator.data.fetched_at,
+        fetched_at=last_modified,
         refresh_seconds=int(config[CONF_SCAN_INTERVAL]),
         calendar_name=str(config[CONF_WEBCAL_NAME]),
     ).encode("utf-8")
-    last_modified = _as_utc_second(coordinator.data.fetched_at)
     etag = f'"{sha256(body).hexdigest()}"'
     cache_headers = {
         "Cache-Control": "private, max-age=300, must-revalidate",

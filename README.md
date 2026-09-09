@@ -297,7 +297,8 @@ actions:
 The automation or script calling the action owns its schedule, recipient, and
 email notifier. This integration deliberately does not store email addresses
 or send mail directly. Leave `embed_images` false for non-SMTP notifiers or any
-caller that does not pass the returned `images` list; the default HTML continues
+caller that does not pass the returned attachments or legacy image paths;
+the default HTML continues
 to use the publisher's HTTPS image URLs and creates no local files.
 
 ## Diagnostics and failures
@@ -315,7 +316,10 @@ The status sensor reports:
 
 The coordinator polls the feeds every six hours by default; matching and timing
 options allow a cadence from 15 minutes through 24 hours. `render_digest`
-requests an immediate refresh by default. Separately, the status sensor
+requests a refresh by default and waits for a completed attempt. The manual
+refresh button uses the same completion boundary, including when a refresh is
+already running. A wait is bounded to ten minutes and fails if the integration
+unloads. Separately, the status sensor
 reevaluates its cached next-week counts and coverage once at Tuesday local
 midnight, when the Monday digest window advances. That local projection does
 not request the feeds again and produces no state write when the visible status
@@ -334,10 +338,13 @@ coordinator schedules one five-minute retry only when every source failed with
 a retryable timeout, connection, rate-limit, or server response. If that retry
 also fails, normal configured polling resumes; a successful or partially
 successful refresh resets the one-retry allowance. Deterministic feed,
-parsing, redirect-safety, response-size, and non-transient HTTP failures never
-enter the accelerated retry path.
+parsing, TLS certificate, redirect-safety, response-size, and non-transient
+HTTP failures never enter the accelerated retry path. Initial setup uses Home Assistant's separate
+setup retry policy.
 
-Diagnostics redact the person's display name and birth date. They include
+Diagnostics redact the person's display name, birth date, and custom calendar
+name. Invalid stored settings produce a bounded configuration error rather than
+preventing a diagnostic download. Diagnostics include
 per-branch and age-category published/parsed counts, ordering and
 coverage-boundary evidence, adaptive type-feed request/failure counts,
 structured type-feed coverage blockers, base-prefix recovery, discovered-event
@@ -419,74 +426,61 @@ must be removed or updated separately.
 
 ## Development and validation
 
-For focused digest checks without Home Assistant or containers, run:
+Use the product-owned runner for all checks; it never publishes or installs the
+integration. On Windows, it requires the `Ubuntu-24.04` WSL2 distribution and
+rootless Podman:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-release-local.ps1
+# Select one lane while iterating:
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-release-local.ps1 -Mode current
+```
+
+On Linux, use `bash scripts/verify-release-local.sh all container` with rootless
+Podman. Both entry points work from any directory and validate a temporary
+snapshot of tracked and nonignored new files, including uncommitted changes.
+The source checkout stays untouched. Container images are pinned by digest.
+`unit`, `minimum`, `current`, and `release` select individual lanes; `release`
+runs only Hassfest, so use `all` for the full local gate.
+
+The hosted unit and Home Assistant jobs use the same runner with the `native`
+backend. That backend requires Python 3.14 on Linux and Go for actionlint; its
+`release` lane requires Docker. Each Python lane creates and removes its own
+virtual environment, including with `all native`, so one lane cannot satisfy
+or contaminate another lane's dependencies.
+
+The supported-minimum lane targets Core 2026.8.0 with harness 0.13.354; the
+current lane targets Core 2026.9.1 with harness 0.13.364. Both must pass
+`python -m pip check` after their final dependency installation. The current
+checker also verifies installed Core and harness metadata. It can accept a
+single metadata-proven harness/Core conflict only for a forward patch within
+the minimum's same year/month; a cross-month conflict, prerelease, additional
+conflict, failed collection, or failed test is rejected. Any use of that
+exception proves patch compatibility rather than dependency closure.
+
+For dependency-light digest checks without Home Assistant or containers:
 
 ```powershell
 python -m unittest discover -s tests -p "test_digest.py"
 ```
 
-Run `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-release-local.ps1`
-before publishing a release candidate. It uses the `Ubuntu-24.04` WSL2
-distribution and rootless Podman to run the same local-tree unit,
-minimum/current Home Assistant, and Hassfest validation classes as the hosted
-workflow. Images are pinned by digest. HACS validation reads a pushed repository
-through GitHub's API, so the hosted HACS job remains the independent public
-metadata and release gate rather than receiving a local GitHub credential. The
-hosted unit and Home Assistant jobs call this same script in `native` mode, so
-future validation changes have one product-owned command surface.
+All HA test modules import their dependencies directly; missing supported APIs
+fail collection. Linux is required for the real harness. Windows compatibility
+shims are not a supported validation path.
 
-Home Assistant 2026.8.0 or newer is required. Python 3.14 and Linux are required
-for the Home Assistant integration-test environments. The supported-minimum
-lane is dependency-closed at Core 2026.8.0, matching the published 0.13.354
-custom-component harness. A separate exact-current lane targets Core 2026.8.2.
-Its bounded checker accepts either a clean environment or only the single
-metadata-proven harness/Core exact-pin mismatch before the complete HA tests
-run. That second lane proves same-month patch compatibility, not dependency
-closure; cross-month, prerelease, additional-conflict, collection-failure, and
-test-failure cases remain hard failures.
-The HA integration-test module imports its Core and harness dependencies
-directly, so a missing supported API fails collection instead of silently
-skipping the integration suite.
+The unit lane owns Ruff, actionlint, ShellCheck, zizmor, dependency-light tests,
+compile checks, metadata and whitespace validation, and public-source privacy
+checks. The minimum lane also runs strict mypy. Exact tool versions and commands
+live in `scripts/verify-release-local.sh`.
 
-```powershell
-python -m pip install "ruff==0.16.2" "mypy==2.3.0" "shellcheck-py==0.11.0.1" "zizmor==1.29.0"
-python -m pip install --upgrade -r requirements-ha-test.txt
-python -m pip check
-python -m ruff format --check custom_components tests scripts
-python -m ruff check custom_components tests scripts
-python -m mypy --strict custom_components/free_library_events
-$env:GH_TOKEN = gh auth token
-if (-not $env:GH_TOKEN) { throw "GitHub CLI authentication required" }
-try {
-  zizmor --strict-collection --persona auditor .
-  if ($LASTEXITCODE -ne 0) { throw "zizmor audit failed" }
-} finally {
-  Remove-Item Env:GH_TOKEN
-}
-python -m unittest discover -s tests -p "test_digest.py"
-python -m unittest discover -s tests -p "test_metadata.py"
-python -m unittest discover -s tests -p "test_public_safety.py"
-python -m unittest discover -s tests -p "test_ha_patch_compatibility.py"
-python -m compileall -q custom_components\free_library_events tests scripts
-python scripts\check_public_safety.py
-python -c "import json, pathlib; [json.loads(pathlib.Path(path).read_text(encoding='utf-8')) for path in ['custom_components/free_library_events/icons.json','custom_components/free_library_events/manifest.json','custom_components/free_library_events/translations/en.json','hacs.json']]"
-docker run --rm -v "${PWD}:/work" -w /work python:3.14-slim bash -lc "python -m pip install --upgrade pip && python -m pip install pytest-homeassistant-custom-component==0.13.354 && python -m pip install --upgrade -r requirements-ha-test.txt && python -m pip check && pytest tests/test_integration_ha.py tests/test_email_images.py -q"
-docker run --rm -v "${PWD}:/work" -w /work python:3.14-slim bash -lc "python -m pip install --upgrade pip && python -m pip install pytest-homeassistant-custom-component==0.13.354 && python -m pip install --upgrade -r requirements-ha-current.txt && python scripts/check_ha_patch_compatibility.py --minimum requirements-ha-test.txt --current requirements-ha-current.txt && pytest tests/test_integration_ha.py tests/test_email_images.py -q"
-```
-
-The protected GitHub workflow pins every third-party Action to a full commit
-SHA and runs the local tier, exact-pinned Ruff, mypy, actionlint, ShellCheck,
-zizmor auditor, dependency-closed minimum-Core and bounded current-patch Home
-Assistant lanes, Hassfest, and the HACS Action. It reports the resolved
-static-analysis tool versions. The stable **Release gate** succeeds only when
-every required job succeeds. Dependabot proposes weekly GitHub Actions updates
-after a seven-day stability and supply-chain cooldown. Python dependency pins
-move manually with the product's supported Core and harness contracts. A
-release additionally waits for CodeQL analysis of the
-exact commit and inspects open alerts because a
-successful analysis workflow does not imply zero findings. See
-[`docs/architecture.md`](docs/architecture.md) for ownership and release
-boundaries.
+HACS validation reads a pushed repository through GitHub's API, so its hosted
+job remains a separate public metadata gate. The stable **Release gate** requires
+every hosted validation job to succeed. Third-party Actions use immutable commit
+pins; Dependabot proposes weekly updates after a seven-day cooldown. Python
+pins move with the supported Core and harness contracts. Releases also require
+CodeQL analysis of the exact commit and review of open alerts, since a successful
+analysis does not mean zero findings. See [`docs/architecture.md`](docs/architecture.md)
+for ownership and release requirements.
 
 ## License
 

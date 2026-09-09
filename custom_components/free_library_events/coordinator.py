@@ -52,6 +52,7 @@ MAX_TYPE_EXPANSIONS_PER_REFRESH = 12
 TYPE_EXPANSION_TIMEOUT_SECONDS = 90
 MAX_TYPE_FAILURE_EXAMPLES = 3
 EXPEDITED_RETRY_SECONDS = 5 * 60
+REQUEST_REFRESH_TIMEOUT_SECONDS = 10 * 60
 
 
 def type_shard_blocker_data(blocker: TypeShardBlocker) -> dict[str, object]:
@@ -472,9 +473,62 @@ class LibraryDataCoordinator(DataUpdateCoordinator[LibraryData]):
         self.branches = tuple(branches)
         self.birth_date = birth_date
         self.last_attempt: RefreshAttempt | None = None
-        self._expedited_retry_used = False
+        self._complete_failure_streak = False
+        self._setup_refresh_in_progress = False
         self._notify_consecutive_failure_attempt = False
         self._attempt_listeners: set[Callable[[], None]] = set()
+        self._refresh_completion: asyncio.Future[None] | None = None
+
+    async def async_config_entry_first_refresh(self) -> None:
+        """Leave setup retries with Core, which ignores coordinator retry_after."""
+
+        self._setup_refresh_in_progress = True
+        try:
+            await super().async_config_entry_first_refresh()
+        finally:
+            self._setup_refresh_in_progress = False
+
+    async def async_request_refresh_and_wait(self) -> None:
+        """Wait for a completed attempt, including an already running refresh."""
+
+        if self._shutdown_requested:
+            raise UpdateFailed(
+                translation_domain=DOMAIN,
+                translation_key="library_refresh_failed",
+            )
+        if self._refresh_completion is None:
+            self._refresh_completion = self.hass.loop.create_future()
+        completion = self._refresh_completion
+        # Scheduling through Core keeps its concurrency/cooldown behavior and
+        # prevents a cancelled caller from cancelling the shared source refresh.
+        self._debounced_refresh.async_schedule_call()
+        try:
+            async with asyncio.timeout(REQUEST_REFRESH_TIMEOUT_SECONDS):
+                await asyncio.shield(completion)
+        except TimeoutError:
+            raise UpdateFailed(
+                translation_domain=DOMAIN,
+                translation_key="library_refresh_failed",
+            ) from None
+        if self._shutdown_requested:
+            raise UpdateFailed(
+                translation_domain=DOMAIN,
+                translation_key="library_refresh_failed",
+            )
+
+    async def async_shutdown(self) -> None:
+        """Stop native scheduled work and release waiting response consumers."""
+
+        await super().async_shutdown()
+        self._async_resolve_refresh_completion()
+
+    @callback
+    def _async_resolve_refresh_completion(self) -> None:
+        """Release one shared completion signal without retaining any callers."""
+
+        if self._refresh_completion is not None:
+            self._refresh_completion.set_result(None)
+            self._refresh_completion = None
 
     @callback
     def async_add_attempt_listener(
@@ -538,10 +592,11 @@ class LibraryDataCoordinator(DataUpdateCoordinator[LibraryData]):
             self._notify_consecutive_failure_attempt = not self.last_update_success
             all_failures_retryable = len(retryable_failure_keys) == len(requests)
             schedule_expedited_retry = (
-                all_failures_retryable and not self._expedited_retry_used
+                all_failures_retryable
+                and not self._complete_failure_streak
+                and not self._setup_refresh_in_progress
             )
-            if schedule_expedited_retry:
-                self._expedited_retry_used = True
+            self._complete_failure_streak = True
             completed_at = dt_util.utcnow()
             self.last_attempt = RefreshAttempt(
                 completed_at=completed_at,
@@ -616,7 +671,7 @@ class LibraryDataCoordinator(DataUpdateCoordinator[LibraryData]):
             if branch.code in successful_branches
         }
         completed_at = dt_util.utcnow()
-        self._expedited_retry_used = False
+        self._complete_failure_streak = False
         self.last_attempt = RefreshAttempt(
             completed_at=completed_at,
             source_keys=tuple(
@@ -639,6 +694,7 @@ class LibraryDataCoordinator(DataUpdateCoordinator[LibraryData]):
         """Publish current attempt evidence after a consecutive failure."""
 
         super()._async_refresh_finished()
+        self._async_resolve_refresh_completion()
         if not self._notify_consecutive_failure_attempt:
             return
         self._notify_consecutive_failure_attempt = False

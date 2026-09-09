@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import mimetypes
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -66,6 +65,13 @@ from .runtime import LibraryConfigEntry
 from .webcal import async_register_webcal_view
 
 _LOGGER = logging.getLogger(__name__)
+
+_SMTP_IMAGE_CONTENT_TYPES = {
+    ".gif": "image/gif",
+    ".jpg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+}
 
 PLATFORMS: tuple[Platform, ...] = (
     Platform.BUTTON,
@@ -134,7 +140,9 @@ def _smtp_attachments(
                         f"{source_directory_id}/{relative_path.as_posix()}"
                     ),
                     "media_content_type": (
-                        mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+                        _SMTP_IMAGE_CONTENT_TYPES.get(
+                            path.suffix.lower(), "application/octet-stream"
+                        )
                     ),
                 },
                 "filename": path.name,
@@ -235,7 +243,7 @@ async def _async_render_digest(call: ServiceCall) -> ServiceResponse:
     accepted_owner = (dict(entry.data), dict(entry.options))
     config = entry_config(*accepted_owner)
     if call.data[ATTR_FORCE_REFRESH]:
-        await coordinator.async_request_refresh()
+        await coordinator.async_request_refresh_and_wait()
         if not coordinator.last_update_success:
             raise HomeAssistantError(
                 translation_domain=DOMAIN,

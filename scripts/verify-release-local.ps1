@@ -6,13 +6,13 @@ param(
 $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $wslInput = $repoRoot -replace "\\", "/"
-$linuxRoot = (& wsl.exe -d Ubuntu-24.04 -- wslpath -a -u $wslInput).Trim()
+$linuxRoot = ((& wsl.exe -d Ubuntu-24.04 -- wslpath -a -u $wslInput) -join "`n").Trim()
 if ($LASTEXITCODE -ne 0 -or -not $linuxRoot) { throw "Could not map the repository into Ubuntu-24.04." }
 
-$gitDir = (& git -C $repoRoot rev-parse --path-format=absolute --git-dir).Trim()
+$gitDir = ((& git -C $repoRoot rev-parse --path-format=absolute --git-dir) -join "`n").Trim()
 if ($LASTEXITCODE -ne 0 -or -not $gitDir) { throw "Could not resolve the repository Git directory." }
 $wslGitInput = $gitDir -replace "\\", "/"
-$linuxGitDir = (& wsl.exe -d Ubuntu-24.04 -- wslpath -a -u $wslGitInput).Trim()
+$linuxGitDir = ((& wsl.exe -d Ubuntu-24.04 -- wslpath -a -u $wslGitInput) -join "`n").Trim()
 if ($LASTEXITCODE -ne 0 -or -not $linuxGitDir) { throw "Could not map the repository Git directory into Ubuntu-24.04." }
 
 & wsl.exe -d Ubuntu-24.04 -- bash "$linuxRoot/scripts/verify-release-local.sh" $Mode container $linuxGitDir

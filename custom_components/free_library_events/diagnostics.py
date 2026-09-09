@@ -9,7 +9,7 @@ from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.core import HomeAssistant
 
 from .config import entry_config
-from .const import CONF_BIRTH_DATE, CONF_CHILD_NAME
+from .const import CONF_BIRTH_DATE, CONF_CHILD_NAME, CONF_WEBCAL_NAME
 from .coordinator import (
     LibraryDataCoordinator,
     coordinator_error_category,
@@ -18,7 +18,7 @@ from .coordinator import (
 )
 from .runtime import LibraryConfigEntry
 
-TO_REDACT = {CONF_CHILD_NAME, CONF_BIRTH_DATE}
+TO_REDACT = {CONF_CHILD_NAME, CONF_BIRTH_DATE, CONF_WEBCAL_NAME}
 
 
 def _isoformat_optional(value: date | None) -> str | None:
@@ -39,8 +39,13 @@ async def async_get_config_entry_diagnostics(
     last_attempt = getattr(coordinator, "last_attempt", None)
     source_statuses = data.source_statuses if data else {}
     source_errors = data.source_errors if data else {}
+    try:
+        config = entry_config(entry.data, entry.options)
+    except TypeError, ValueError:
+        config = None
     diagnostics = {
-        "config": entry_config(entry.data, entry.options),
+        "config": config,
+        "config_error_category": "invalid_config" if config is None else None,
         "coordinator": {
             "last_update_success": coordinator.last_update_success
             if coordinator

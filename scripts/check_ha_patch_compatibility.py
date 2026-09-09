@@ -1,4 +1,4 @@
-"""Validate the bounded same-month Home Assistant patch-forward test lane."""
+"""Validate the exact current Home Assistant lane and bounded patch exceptions."""
 
 from __future__ import annotations
 
@@ -11,15 +11,17 @@ from pathlib import Path
 
 HARNESS_DISTRIBUTION = "pytest-homeassistant-custom-component"
 CORE_DISTRIBUTION = "homeassistant"
-VERSION_RE = re.compile(r"^(\d{4})\.(\d{1,2})\.(\d+)$")
+VERSION_RE = re.compile(r"^([0-9]{4})\.([1-9]|1[0-2])\.(0|[1-9][0-9]*)$")
 CORE_REQUIREMENT_RE = re.compile(
-    r"^\s*homeassistant\s*==\s*(\d{4}\.\d{1,2}\.\d+)\s*(?:;.*)?$",
+    r"^\s*homeassistant\s*==\s*([0-9]{4}\.[0-9]{1,2}\.[0-9]+)\s*$",
     re.IGNORECASE,
 )
 
+CORE_NAME_RE = re.compile(r"^\s*homeassistant(?=[^A-Za-z0-9_.-]|$)", re.IGNORECASE)
+
 
 class CompatibilityError(ValueError):
-    """Raised when the environment is outside the bounded patch contract."""
+    """Raised when the environment is outside the current-version compatibility contract."""
 
 
 def exact_core_pin(path: Path) -> str:
@@ -33,6 +35,10 @@ def exact_core_pin(path: Path) -> str:
         match = CORE_REQUIREMENT_RE.fullmatch(content)
         if match is not None:
             pins.append(match.group(1))
+        elif CORE_NAME_RE.match(content):
+            raise CompatibilityError(
+                f"{path.name} must use an unconditional stable exact Home Assistant pin"
+            )
     if len(pins) != 1:
         raise CompatibilityError(
             f"{path.name} must contain exactly one Home Assistant pin"
@@ -49,10 +55,7 @@ def stable_version(value: str) -> tuple[int, int, int]:
         raise CompatibilityError(
             f"Home Assistant version is not a stable exact pin: {value}"
         )
-    version = tuple(int(part) for part in match.groups())
-    if not 1 <= version[1] <= 12:
-        raise CompatibilityError(f"Home Assistant month is invalid: {value}")
-    return version
+    return tuple(int(part) for part in match.groups())
 
 
 def validate_patch_window(minimum: str, current: str) -> None:
@@ -74,6 +77,11 @@ def harness_core_pin(requirements: list[str] | None) -> str:
         match = CORE_REQUIREMENT_RE.fullmatch(requirement)
         if match is not None:
             matches.append(match.group(1))
+        elif CORE_NAME_RE.match(requirement):
+            raise CompatibilityError(
+                "the installed harness must use an unconditional stable exact "
+                "Home Assistant requirement"
+            )
     if len(matches) != 1:
         raise CompatibilityError(
             "the installed harness must declare exactly one exact Home Assistant "
@@ -86,6 +94,7 @@ def harness_core_pin(requirements: list[str] | None) -> str:
 def validate_harness_window(minimum: str, harness: str, current: str) -> None:
     """Keep the harness Core pin within the supported same-month patch window."""
 
+    validate_patch_window(minimum, current)
     minimum_version = stable_version(minimum)
     harness_version = stable_version(harness)
     current_version = stable_version(current)
@@ -110,6 +119,10 @@ def validate_pip_check(
     """Accept closure or the single metadata-proven harness/Core mismatch."""
 
     if returncode == 0:
+        if harness_core != current_core:
+            raise CompatibilityError(
+                "pip check reported closure despite the harness/Core pin mismatch"
+            )
         return "dependency-closed"
     lines = [line.strip() for line in output.splitlines() if line.strip()]
     expected = re.compile(
@@ -118,7 +131,12 @@ def validate_pip_check(
         rf"homeassistant {re.escape(current_core)}\.$",
         re.IGNORECASE,
     )
-    if len(lines) == 1 and expected.fullmatch(lines[0]):
+    if (
+        returncode == 1
+        and harness_core != current_core
+        and len(lines) == 1
+        and expected.fullmatch(lines[0])
+    ):
         return "single-known-harness-core-mismatch"
     raise CompatibilityError("pip check reported an unexpected dependency conflict")
 
@@ -128,7 +146,8 @@ def run(minimum_path: Path, current_path: Path) -> str:
 
     minimum_core = exact_core_pin(minimum_path)
     current_core = exact_core_pin(current_path)
-    validate_patch_window(minimum_core, current_core)
+    if stable_version(current_core) <= stable_version(minimum_core):
+        raise CompatibilityError("current Core must be later than minimum Core")
 
     installed_core = metadata.version(CORE_DISTRIBUTION)
     if installed_core != current_core:
@@ -140,13 +159,15 @@ def run(minimum_path: Path, current_path: Path) -> str:
     harness = metadata.distribution(HARNESS_DISTRIBUTION)
     harness_version = harness.version
     required_core = harness_core_pin(harness.requires)
-    validate_harness_window(minimum_core, required_core, current_core)
+    if required_core != current_core:
+        validate_harness_window(minimum_core, required_core, current_core)
 
     result = subprocess.run(
         [sys.executable, "-m", "pip", "check"],
         check=False,
         capture_output=True,
         text=True,
+        timeout=60,
     )
     return validate_pip_check(
         result.returncode,
@@ -166,8 +187,10 @@ def main() -> int:
         result = run(args.minimum, args.current)
     except (
         CompatibilityError,
-        FileNotFoundError,
+        OSError,
+        UnicodeError,
         metadata.PackageNotFoundError,
+        subprocess.TimeoutExpired,
     ) as exc:
         print(f"Home Assistant patch compatibility failed: {exc}", file=sys.stderr)
         return 1

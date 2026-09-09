@@ -116,13 +116,13 @@ def _image_dimensions(content: bytes, extension: str) -> tuple[int, int] | None:
             int.from_bytes(content[6:8], "little"),
             int.from_bytes(content[8:10], "little"),
         )
-    if extension == ".webp" and len(content) >= 30:
-        if content[12:16] == b"VP8X":
+    if extension == ".webp" and len(content) >= 25:
+        if content[12:16] == b"VP8X" and len(content) >= 30:
             return _valid_dimensions(
                 1 + int.from_bytes(content[24:27], "little"),
                 1 + int.from_bytes(content[27:30], "little"),
             )
-        if content[12:16] == b"VP8L" and len(content) >= 25:
+        if content[12:16] == b"VP8L" and content[20] == 0x2F:
             bits = int.from_bytes(content[21:25], "little")
             return _valid_dimensions((bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1)
         marker = content.find(b"\x9d\x01\x2a")
@@ -333,8 +333,10 @@ def store_downloaded_images(
     paths: list[str] = []
     source_url_to_cid: dict[str, str] = {}
     source_url_to_layout: dict[str, str] = {}
+    # Claim a fresh directory before rollback can remove anything. A name
+    # collision or failed mkdir must never remove a pre-existing directory.
+    run_directory.mkdir(parents=True)
     try:
-        run_directory.mkdir(parents=True)
         (run_directory / _MANAGED_MARKER).write_text(
             datetime.now(UTC).isoformat(), encoding="utf-8"
         )

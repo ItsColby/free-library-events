@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
+import stat
 import subprocess
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -158,47 +161,89 @@ def _is_word_char(char: str) -> bool:
     return char.isalnum() or char == "_"
 
 
+class PublicSafetyError(ValueError):
+    """Raised when repository content cannot be inventoried safely."""
+
+
+def _raise_walk_error(error: OSError) -> None:
+    raise error
+
+
+def _archive_files(root: Path) -> list[Path]:
+    """Inventory source archives without traversing generated directories."""
+
+    paths = []
+    for directory, directory_names, filenames in root.walk(on_error=_raise_walk_error):
+        descend_into = []
+        for name in directory_names:
+            if name in IGNORED_DIRECTORY_NAMES or name.endswith(".egg-info"):
+                continue
+            candidate = directory / name
+            if candidate.is_junction():
+                paths.append(candidate)
+            else:
+                descend_into.append(name)
+        directory_names[:] = descend_into
+        paths.extend(directory / name for name in filenames)
+    return paths
+
+
+def _path_present(path: Path) -> bool:
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return False
+    return True
+
+
 def _candidate_files(root: Path = ROOT) -> list[Path]:
-    top_level = subprocess.run(
-        ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
-        check=False,
-        capture_output=True,
-    )
-    is_repository_root = (
-        top_level.returncode == 0
-        and Path(top_level.stdout.decode("utf-8").strip()).resolve() == root.resolve()
-    )
-    tracked = (
-        subprocess.run(
-            [
-                "git",
-                "-C",
-                str(root),
-                "ls-files",
-                "-z",
-                "--cached",
-                "--others",
-                "--exclude-standard",
-            ],
+    if not root.is_dir():
+        raise PublicSafetyError("source root must be an existing directory")
+    git_marker = root / ".git"
+    has_git_marker = _path_present(git_marker)
+    try:
+        top_level = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
             check=False,
             capture_output=True,
+            timeout=30,
         )
-        if is_repository_root
-        else None
-    )
-    if tracked is not None and tracked.returncode == 0:
-        paths = [
-            root / raw.decode("utf-8") for raw in tracked.stdout.split(b"\0") if raw
-        ]
-    else:
-        paths = [
-            path
-            for path in root.rglob("*")
-            if not IGNORED_DIRECTORY_NAMES.intersection(path.parts)
-            and not any(part.endswith(".egg-info") for part in path.parts)
-        ]
+    except FileNotFoundError:
+        if has_git_marker:
+            raise PublicSafetyError(
+                "Git is required to inventory this checkout"
+            ) from None
+        return sorted(_archive_files(root))
 
-    return sorted(path for path in paths if path.is_file() and not path.is_symlink())
+    is_repository_root = (
+        top_level.returncode == 0
+        and Path(os.fsdecode(top_level.stdout).strip()).resolve() == root.resolve()
+    )
+    if not is_repository_root:
+        if has_git_marker:
+            raise PublicSafetyError("Git could not identify the checkout root")
+        return sorted(_archive_files(root))
+
+    tracked = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(root),
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+        ],
+        check=False,
+        capture_output=True,
+        timeout=30,
+    )
+    if tracked.returncode != 0:
+        raise PublicSafetyError("Git could not inventory repository files")
+    paths = {root / os.fsdecode(raw) for raw in tracked.stdout.split(b"\0") if raw}
+    # Cached entries deleted from the current source tree are no longer content.
+    return sorted(path for path in paths if _path_present(path))
 
 
 def _text_failures(text: str) -> set[str]:
@@ -216,11 +261,24 @@ def _text_failures(text: str) -> set[str]:
 
 
 def run_guard(root: Path = ROOT) -> tuple[int, list[str]]:
+    root = root.resolve()
     files = _candidate_files(root)
     failures: set[str] = set()
     for path in files:
         relative = path.relative_to(root)
         relative_posix = relative.as_posix()
+        for label in _text_failures(relative_posix):
+            failures.add(f"{relative}: {label} in file name")
+        if any(
+            candidate.is_symlink() or candidate.is_junction()
+            for candidate in (path, *path.parents)
+            if candidate != root and root in candidate.parents
+        ):
+            failures.add(f"{relative}: unreviewed symbolic link or junction")
+            continue
+        if not stat.S_ISREG(path.stat().st_mode):
+            failures.add(f"{relative}: unsupported file type")
+            continue
         raw = path.read_bytes()
         is_binary = b"\0" in raw
         try:
@@ -240,7 +298,11 @@ def run_guard(root: Path = ROOT) -> tuple[int, list[str]]:
 
 
 def main() -> int:
-    file_count, failures = run_guard()
+    try:
+        file_count, failures = run_guard()
+    except (PublicSafetyError, OSError, subprocess.TimeoutExpired) as exc:
+        print(f"Public safety guard could not complete: {exc}", file=sys.stderr)
+        return 1
     if failures:
         raise SystemExit("Public safety guard failed:\n" + "\n".join(failures))
     print(f"Public safety guard passed for {file_count} repository files.")

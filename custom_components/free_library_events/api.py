@@ -113,6 +113,8 @@ def source_error_description(category: str) -> str:
 def _is_retryable_request_error(error: BaseException) -> bool:
     """Return whether another bounded attempt can plausibly recover."""
 
+    if isinstance(error, aiohttp.ClientSSLError | aiohttp.ServerFingerprintMismatch):
+        return False
     if isinstance(error, TimeoutError | aiohttp.ClientConnectionError):
         return True
     return bool(
@@ -203,7 +205,10 @@ class LibraryClient:
                     location = response.headers.get("Location", "")
                     if not location or redirect_count == MAX_RSS_REDIRECTS:
                         raise LibraryApiError(SOURCE_ERROR_UNSAFE_REDIRECT)
-                    current_url = urllib.parse.urljoin(current_url, location)
+                    try:
+                        current_url = urllib.parse.urljoin(current_url, location)
+                    except ValueError:
+                        raise LibraryApiError(SOURCE_ERROR_UNSAFE_REDIRECT) from None
                     continue
                 response.raise_for_status()
                 try:

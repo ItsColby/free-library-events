@@ -6,6 +6,7 @@ import unittest
 from datetime import date
 from itertools import permutations
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "custom_components" / "free_library_events" / "digest.py"
@@ -1152,6 +1153,46 @@ class DigestTests(unittest.TestCase):
         )
         self.assertEqual(digest.classify_event(event, date(2025, 1, 15)), "best")
 
+    def test_age_matching_requires_age_evidence_and_bounds_source_numbers(self) -> None:
+        event = digest.Event(
+            title="Library program",
+            event_date=date(2026, 7, 20),
+            start_time=digest.time(10),
+            description="",
+            link="",
+            image_url="",
+            branch=digest.BRANCHES["CEN"],
+            age_categories=("Baby",),
+        )
+        for description in (
+            "Finish a craft in under 1 hour.",
+            "Ages " + "9" * 5000 + " to 12.",
+            "For children from birth through " + "9" * 5000 + " years.",
+            "Under " + "9" * 5000 + " years.",
+        ):
+            with self.subTest(description=description[:60]):
+                self.assertEqual(
+                    digest.classify_event(
+                        digest.replace(event, description=description),
+                        date(2025, 1, 15),
+                    ),
+                    "best",
+                )
+        for description in (
+            "Children under 1 are welcome.",
+            "For people under age 1.",
+            "For under 12 months.",
+            "Finish in under 1 hour. Children under 1 are welcome.",
+        ):
+            with self.subTest(description=description):
+                self.assertEqual(
+                    digest.classify_event(
+                        digest.replace(event, description=description),
+                        date(2025, 1, 15),
+                    ),
+                    "exclude",
+                )
+
     def test_recommended_matching_is_deterministic(self) -> None:
         cases = [
             ("Baby Storytime", "For babies and toddlers with caregivers.", "best"),
@@ -1823,6 +1864,134 @@ class DigestTests(unittest.TestCase):
             {label for _kind, label in digest._event_chip_specs(american_spelling)},
         )
 
+    def test_highlights_do_not_assert_explicitly_unavailable_features(self) -> None:
+        event = digest.Event(
+            title="Community program",
+            event_date=date(2026, 7, 20),
+            start_time=digest.time(10),
+            link="",
+            image_url="",
+            branch=digest.BRANCHES["CEN"],
+            description=(
+                "No ASL interpretation will be available. This event is not "
+                "sensory-friendly or bilingual. No drop-ins are welcome. "
+                "It will not be outdoors. No crafts or music program. "
+                "Caregiver participation is not required."
+            ),
+        )
+        labels = {label for _kind, label in digest._event_chip_specs(event)}
+        for excluded in (
+            "ASL interpreted",
+            "Sensory-friendly",
+            "Drop-in",
+            "Outdoors",
+            "Crafts",
+            "Caregiver participation",
+            "Bilingual",
+            "Music",
+        ):
+            self.assertNotIn(excluded, labels)
+        for description, excluded in (
+            ("ASL interpretation will not be available.", "ASL interpreted"),
+            ("ASL interpretation is unavailable.", "ASL interpreted"),
+            ("ASL interpretation will be unavailable.", "ASL interpreted"),
+            ("Drop-ins will not be welcome.", "Drop-in"),
+            ("Crafts will not be offered.", "Crafts"),
+            ("ASL interpretation isn't available.", "ASL interpreted"),
+            ("Drop-ins won't be welcome.", "Drop-in"),
+            ("This event isn't sensory-friendly or bilingual.", "Sensory-friendly"),
+            ("This event isn't sensory-friendly or bilingual.", "Bilingual"),
+        ):
+            with self.subTest(description=description):
+                self.assertNotIn(
+                    excluded,
+                    {
+                        label
+                        for _kind, label in digest._event_chip_specs(
+                            digest.replace(event, description=description)
+                        )
+                    },
+                )
+        positive = digest.replace(
+            event, description="No crafts. ASL interpretation is available."
+        )
+        self.assertIn(
+            "ASL interpreted",
+            {label for _kind, label in digest._event_chip_specs(positive)},
+        )
+
+    def test_highlight_claim_grammar_matrix_preserves_positive_evidence(self) -> None:
+        pattern = r"\bASL interpretation\b"
+        predicates = (
+            "available",
+            "provided",
+            "required",
+            "offered",
+            "welcome",
+            "included",
+            "planned",
+        )
+        negative_auxiliaries = (
+            "not",
+            "is not",
+            "are not",
+            "was not",
+            "were not",
+            "will not be",
+            "has not been",
+            "have not been",
+            "isn't",
+            "aren't",
+            "wasn't",
+            "weren't",
+            "won't be",
+            "hasn't been",
+            "haven't been",
+            "cannot be",
+            "can't be",
+        )
+        positive_auxiliaries = (
+            "",
+            "is",
+            "are",
+            "was",
+            "were",
+            "will be",
+            "has been",
+            "have been",
+        )
+        cases = [
+            (f"ASL interpretation {auxiliary} {predicate}.", False)
+            for auxiliary in negative_auxiliaries
+            for predicate in predicates
+        ]
+        cases.extend(
+            (f"ASL interpretation {auxiliary} unavailable.", False)
+            for auxiliary in positive_auxiliaries
+        )
+        cases.extend(
+            (f"ASL interpretation {auxiliary} {predicate}.", True)
+            for auxiliary in positive_auxiliaries
+            for predicate in predicates
+        )
+        cases.extend(
+            (
+                ("No ASL interpretation.", False),
+                ("We will not provide ASL interpretation.", False),
+                ("There won't be any ASL interpretation.", False),
+                ("No crafts. ASL interpretation is available.", True),
+                ("No crafts or music; ASL interpretation will be provided.", True),
+                ("ASL interpretation is not unavailable.", True),
+            )
+        )
+        for description, expected in cases:
+            for apostrophe in ("'", "\N{RIGHT SINGLE QUOTATION MARK}"):
+                text = description.replace("'", apostrophe)
+                with self.subTest(description=text, expected=expected):
+                    self.assertEqual(
+                        digest._has_positive_claim(pattern, text), expected
+                    )
+
     def test_online_and_hybrid_events_do_not_get_misleading_map_links(self) -> None:
         online = digest.Event(
             title="Virtual family workshop",
@@ -2013,6 +2182,52 @@ class DigestTests(unittest.TestCase):
             digest.MAX_CALENDAR_URL_LENGTH,
         )
 
+    def test_final_html_budget_includes_photo_preheader_changes(self) -> None:
+        events = [
+            digest.Event(
+                title=f"Baby activity {index}",
+                event_date=date(2026, 7, 20),
+                start_time=digest.time(10 + index),
+                description="A fun activity.",
+                link=f"https://example.test/{index}",
+                image_url="https://libwww.freelibrary.org/images/test.png",
+                branch=digest.BRANCHES["CEN"],
+                age_categories=("Baby",),
+            )
+            for index in range(3)
+        ]
+        arguments = {
+            "child_name": "Avery",
+            "birth_date": date(2025, 11, 1),
+            "week_start": date(2026, 7, 20),
+            "week_end": date(2026, 7, 26),
+            "branches": (digest.BRANCHES["CEN"],),
+            "duration_minutes": 60,
+            "source_errors": (),
+            "source_warnings": (),
+        }
+        compact = digest._render_html(events, **arguments, full_event_ids=frozenset())
+        first_card_delta = len(
+            digest._render_event_card(events[0], duration_minutes=60).encode("utf-8")
+        ) - len(
+            digest._render_event_card(
+                events[0], duration_minutes=60, compact=True
+            ).encode("utf-8")
+        )
+        budget = len(compact.encode("utf-8")) + first_card_delta
+        with patch.object(digest, "MAX_DIGEST_HTML_BYTES", budget):
+            rendered, kept, full_ids, omitted = digest._render_budgeted_html(
+                events,
+                **arguments,
+                distance_by_branch_code={},
+                initially_omitted_count=0,
+            )
+        self.assertLessEqual(len(rendered.encode("utf-8")), budget)
+        self.assertEqual(kept, events)
+        self.assertEqual(omitted, 0)
+        self.assertEqual(full_ids, frozenset())
+        self.assertNotIn("with photos", rendered)
+
     def test_mobile_layout_keeps_every_card_rich_when_the_html_budget_allows(
         self,
     ) -> None:
@@ -2105,6 +2320,89 @@ class DigestTests(unittest.TestCase):
             metadata["included_count"],
         )
         self.assertIn("additional matched activities were omitted", payload["html"])
+        self.assertIn("additional matched activities were omitted", payload["message"])
+        self.assertNotIn("Every match stays listed", payload["html"])
+
+    def test_nested_description_lists_preserve_their_parent_item(self) -> None:
+        rendered = digest._description_render_html(
+            "<ul><li>First<ul><li>Nested</li></ul>Tail</li><li>Second</li></ul>",
+            "",
+        )
+        root = digest.ET.fromstring(rendered)
+        self.assertEqual(root.tag, "ul")
+        self.assertEqual([item.text for item in root], ["First", "Second"])
+        self.assertEqual(root[0][0].tag, "ul")
+        self.assertEqual(root[0][0][0].text, "Nested")
+        self.assertEqual(root[0][0].tail, "Tail")
+
+    def test_pre_birth_rows_are_excluded_without_breaking_matching(self) -> None:
+        event = digest.Event(
+            title="Baby storytime",
+            event_date=date(2026, 7, 20),
+            start_time=digest.time(10),
+            description="For babies with caregivers.",
+            link="",
+            image_url="",
+            branch=digest.BRANCHES["CEN"],
+            age_categories=("Baby",),
+        )
+        self.assertEqual(digest.classify_event(event, date(2026, 7, 21)), "exclude")
+        self.assertEqual(
+            digest.matching_events(
+                [event],
+                date(2026, 7, 21),
+                "Recommended",
+                date(2026, 7, 20),
+                date(2026, 7, 26),
+            ),
+            [],
+        )
+
+    def test_display_truncation_preserves_distinct_fallback_occurrence_ids(
+        self,
+    ) -> None:
+        prefix = "A long baby activity title " * 12
+        events = [
+            digest.Event(
+                title=prefix + suffix,
+                event_date=date(2026, 7, 20),
+                start_time=digest.time(10),
+                description="For babies and caregivers.",
+                link="",
+                image_url="",
+                branch=digest.BRANCHES["CEN"],
+                age_categories=("Baby",),
+            )
+            for suffix in ("First occurrence", "Second occurrence")
+        ]
+        self.assertNotEqual(
+            digest.event_identity(events[0]), digest.event_identity(events[1])
+        )
+        self.assertEqual(
+            digest.event_identity(digest._display_event(events[0])),
+            digest.event_identity(events[0]),
+        )
+        with patch.object(digest, "MAX_EMAIL_EVENTS", 1):
+            payload = digest.build_digest(
+                child_name="Avery",
+                birth_date=date(2025, 11, 1),
+                filter_mode="Recommended",
+                duration_minutes=60,
+                selected_branches=(digest.BRANCHES["CEN"],),
+                reference_date=date(2026, 7, 19),
+                events=events,
+                source_counts={"CEN": 2},
+            )
+        metadata = payload["metadata"]
+        self.assertEqual(metadata["included_count"], 2)
+        self.assertEqual(metadata["email_omitted_count"], 1)
+        self.assertEqual(metadata["full_card_count"], 1)
+        self.assertEqual(payload["html"].count('class="event-title"'), 1)
+        self.assertEqual(
+            metadata["full_card_event_ids"], [digest.event_identity(events[0])]
+        )
+        self.assertIn("1 additional matched activity was omitted", payload["message"])
+        self.assertNotIn("Every match stays listed", payload["html"])
 
     def test_dynamic_icons_use_words_instead_of_substrings(self) -> None:
         event = digest.Event(

@@ -79,17 +79,46 @@ class HomeAssistantMetadataTests(unittest.TestCase):
         for state in expected_states:
             self.assertIn(f'"{state}"', sensor_text)
 
-    def test_workflow_validates_every_integration_json_file(self) -> None:
-        release_runner = (ROOT / "scripts/verify-release-local.sh").read_text(
-            encoding="utf-8"
-        )
-        integration_json = {
-            path.relative_to(ROOT).as_posix() for path in INTEGRATION.rglob("*.json")
-        }
+    def test_every_integration_json_file_is_valid(self) -> None:
+        paths = [*INTEGRATION.rglob("*.json"), ROOT / "hacs.json"]
+        for path in paths:
+            with self.subTest(path=path.relative_to(ROOT)):
+                self.assertIsInstance(_json_file(path), dict)
 
-        for path in integration_json:
-            with self.subTest(path=path):
-                self.assertIn(f'"{path}"', release_runner)
+    def test_maintained_text_has_no_trailing_whitespace(self) -> None:
+        suffixes = {".json", ".md", ".py", ".ps1", ".sh", ".txt", ".yaml", ".yml"}
+        paths = [
+            path
+            for name in ("custom_components", "tests", ".github", "scripts", "docs")
+            for path in (ROOT / name).rglob("*")
+            if path.is_file()
+            and "__pycache__" not in path.parts
+            and path.suffix in suffixes
+        ]
+        paths.extend(
+            ROOT / name
+            for name in (
+                "LICENSE",
+                "README.md",
+                "RELEASE_NOTES.md",
+                "hacs.json",
+                "pyproject.toml",
+                "pytest.ini",
+                "requirements-ha-test.txt",
+                "requirements-ha-current.txt",
+                ".gitattributes",
+                ".gitignore",
+            )
+        )
+        failures = [
+            f"{path.relative_to(ROOT)}:{line}"
+            for path in paths
+            for line, text in enumerate(
+                path.read_text(encoding="utf-8").splitlines(), 1
+            )
+            if text.endswith((" ", "\t"))
+        ]
+        self.assertEqual([], failures)
 
     def test_ha_test_module_fails_closed_when_the_harness_is_unavailable(self) -> None:
         integration_tests = (ROOT / "tests/test_integration_ha.py").read_text(

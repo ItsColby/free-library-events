@@ -338,10 +338,18 @@ class _HTMLDescriptionSanitizer(HTMLParser):
             self.parts.append(f"<{tag}{self._LIST}>")
         elif tag == "li":
             self._close_open_paragraph()
-            open_item_index = next(
+            list_index = next(
                 (
                     index
                     for index in range(len(self._stack) - 1, -1, -1)
+                    if self._stack[index][1] in {"ul", "ol"}
+                ),
+                -1,
+            )
+            open_item_index = next(
+                (
+                    index
+                    for index in range(len(self._stack) - 1, list_index, -1)
                     if self._stack[index][1] == "li"
                 ),
                 -1,
@@ -1005,24 +1013,27 @@ def event_is_active(event: Event) -> bool:
 
 
 AGE_RANGE_RE = re.compile(
-    r"\bages?\s*(?P<low>\d+)\s*"
+    r"\bages?\s*(?P<low>\d{1,3})\s*"
     r"(?P<low_unit>months?|mos?|years?|yrs?)?\s*"
-    r"(?:-|\u2013|to|through)\s*(?P<high>\d+)\s*"
+    r"(?:-|\u2013|to|through)\s*(?P<high>\d{1,3})\s*"
     r"(?P<high_unit>months?|mos?|years?|yrs?)?\b",
     re.IGNORECASE,
 )
 NEWBORN_RANGE_RE = re.compile(
     r"\b(?:children\s+from\s+)?(?:newborns?|birth)\s*"
-    r"(?:-|\u2013|to|through)\s*(?:age\s*)?(?P<high>\d+)\s*"
+    r"(?:-|\u2013|to|through)\s*(?:age\s*)?(?P<high>\d{1,3})\s*"
     r"(?P<high_unit>months?|mos?|years?|yrs?)?\b",
     re.IGNORECASE,
 )
 AGE_AND_UNDER_RE = re.compile(
-    r"\b(?:ages?\s*)?(\d+)\s*(months?|mos?|years?|yrs?)?\s+and under\b",
+    r"\b(?:ages?\s*)?(\d{1,3})\s*(months?|mos?|years?|yrs?)?\s+and under\b",
     re.IGNORECASE,
 )
 UNDER_AGE_RE = re.compile(
-    r"\bunder\s+(\d+)\s*(months?|mos?|years?|yrs?)?\b", re.IGNORECASE
+    r"\b(?:(?P<context>ages?|children|kids|babies|toddlers|people)\s+)?"
+    r"under\s+(?P<age_prefix>age\s+)?(?P<value>\d{1,3})\s*"
+    r"(?P<unit>months?|mos?|years?|yrs?)?\b",
+    re.IGNORECASE,
 )
 
 
@@ -1080,10 +1091,11 @@ def _explicit_age_fit(text: str, child_months: float) -> FitRank | None:
             return "best"
         return "exclude"
 
-    match = UNDER_AGE_RE.search(text)
-    if match:
-        upper_value = int(match.group(1))
-        upper_unit = match.group(2)
+    for match in UNDER_AGE_RE.finditer(text):
+        upper_unit = match.group("unit")
+        if not (upper_unit or match.group("context") or match.group("age_prefix")):
+            continue
+        upper_value = int(match.group("value"))
         upper = _to_months(upper_value, upper_unit)
         if child_months < upper:
             if _is_broad_years_only_upper_limit(upper_value, upper_unit, child_months):
@@ -1096,16 +1108,19 @@ def _explicit_age_fit(text: str, child_months: float) -> FitRank | None:
 def classify_event(event: Event, birth_date: date) -> FitRank:
     """Classify an event using only deterministic published-text rules."""
 
+    if event.event_date < birth_date:
+        return "exclude"
     text = f"{event.title} {event.description}".lower()
     child_months = age_in_months(birth_date, event.event_date)
     explicit = _explicit_age_fit(text, child_months)
     if explicit is not None:
         return explicit
 
-    if event.age_categories:
-        for category, minimum, maximum in AGE_CATEGORY_WINDOWS:
-            if category in event.age_categories and minimum <= child_months < maximum:
-                return "best"
+    if any(
+        category in event.age_categories and minimum <= child_months < maximum
+        for category, minimum, maximum in AGE_CATEGORY_WINDOWS
+    ):
+        return "best"
 
     baby_terms = ("baby", "babies", "infant", "lap sit", "lap-sit")
     toddler_terms = ("toddler", "toddlers", "twos")
@@ -1459,13 +1474,54 @@ def _description_paragraphs_html(event: Event) -> str:
     return "".join(rendered)
 
 
+_NEGATED_CLAIM_END_RE = re.compile(
+    r"^\s*(?:"
+    r"(?:not|(?:is|are|was|were)\s+not|"
+    r"(?:isn|aren|wasn|weren)['\u2019]t|"
+    r"(?:will not|won['\u2019]t|cannot|can['\u2019]t)\s+be|"
+    r"(?:has|have)\s+not\s+been|(?:hasn|haven)['\u2019]t\s+been)\s+"
+    r"(?:available|provided|required|offered|welcome|included|planned)|"
+    r"(?:(?:is|are|was|were|will be|has been|have been)\s+)?unavailable)\b",
+    re.IGNORECASE,
+)
+
+
+def _has_positive_claim(pattern: str, text: str) -> bool:
+    """Match a published highlight unless its own phrase is explicitly negated."""
+
+    for match in re.finditer(pattern, text, re.IGNORECASE):
+        before = text[max(0, match.start() - 60) : match.start()]
+        after = text[match.end() : match.end() + 60]
+        if (
+            re.search(
+                r"\b(?:no|not|without|never|cannot|"
+                r"(?:isn|aren|wasn|weren|won|can)['\u2019]t)\s+"
+                r"(?:(?:an?|any|be|being|have|having|for|offer(?:ing)?|"
+                r"provid(?:e|ing))\s+){0,3}$",
+                before,
+                re.IGNORECASE,
+            )
+            or re.search(
+                r"\b(?:no|not|without|never|cannot|"
+                r"(?:isn|aren|wasn|weren|won|can)['\u2019]t)\b[^.;!?\n]{0,45}"
+                r"\b(?:or|nor)\s+(?:an?\s+)?$",
+                before,
+                re.IGNORECASE,
+            )
+            or _NEGATED_CLAIM_END_RE.match(after)
+        ):
+            continue
+        return True
+    return False
+
+
 def _logistics_chip_specs(
     event: Event, searchable: str
 ) -> tuple[list[tuple[str, str]], bool]:
     """Return logistics chips and whether the event is a take-home craft."""
 
     logistics_chips: list[tuple[str, str]] = []
-    if re.search(r"\b(?:outdoor|outdoors|outside)\b", searchable, re.IGNORECASE) or (
+    if _has_positive_claim(r"\b(?:outdoor|outdoors|outside)\b", searchable) or (
         event.venue
         and re.search(
             r"\b(?:park|square|playground|garden)\b",
@@ -1474,23 +1530,19 @@ def _logistics_chip_specs(
         )
     ):
         logistics_chips.append(("logistics", "Outdoors"))
-    take_home_craft = re.search(
-        r"\b(?:to-go|take[ -]home)\s+(?:a\s+)?craft\b",
-        searchable,
-        re.IGNORECASE,
+    take_home_craft = _has_positive_claim(
+        r"\b(?:to-go|take[ -]home)\s+(?:a\s+)?craft\b", searchable
     )
     if take_home_craft:
         logistics_chips.append(("logistics", "Take-home craft"))
-    if re.search(r"\bsiblings? (?:are )?welcome\b", searchable, re.IGNORECASE):
+    if _has_positive_claim(r"\bsiblings? (?:are )?welcome\b", searchable):
         logistics_chips.append(("logistics", "Siblings welcome"))
-    if re.search(
-        r"\b(?:kids|children) of all ages\b|\beven the littlest\b",
-        searchable,
-        re.IGNORECASE,
+    if _has_positive_claim(
+        r"\b(?:kids|children) of all ages\b|\beven the littlest\b", searchable
     ):
         logistics_chips.append(("logistics", "All ages welcome"))
     elif (
-        re.search(r"\brange of ages\b", searchable, re.IGNORECASE)
+        _has_positive_claim(r"\brange of ages\b", searchable)
         and len(set(event.age_categories)) <= 1
     ):
         logistics_chips.append(("logistics", "Broad ages"))
@@ -1508,7 +1560,7 @@ def _logistics_chip_specs(
     )
     if aac_board_provided and not aac_board_negated:
         logistics_chips.append(("logistics", "AAC board provided"))
-    return logistics_chips, take_home_craft is not None
+    return logistics_chips, take_home_craft
 
 
 def _event_chip_specs(event: Event) -> tuple[tuple[str, str], ...]:
@@ -1534,7 +1586,7 @@ def _event_chip_specs(event: Event) -> tuple[tuple[str, str], ...]:
         (r"\bAAC\b", r"\bAAC\b", "AAC"),
     )
     for source_pattern, title_pattern, label in activity_rules:
-        if re.search(source_pattern, searchable, re.IGNORECASE) and not re.search(
+        if _has_positive_claim(source_pattern, searchable) and not re.search(
             title_pattern, event.title, re.IGNORECASE
         ):
             topic_chips.append(("topic", label))
@@ -1600,9 +1652,7 @@ def _event_chip_specs(event: Event) -> tuple[tuple[str, str], ...]:
     ):
         action_chips.append(("action", "Registration required"))
 
-    if re.search(
-        r"\b(?:drop[ -]?in|walk[ -]?ins? welcome)\b", searchable, re.IGNORECASE
-    ):
+    if _has_positive_claim(r"\b(?:drop[ -]?ins?|walk[ -]?ins? welcome)\b", searchable):
         logistics_chips.append(("logistics", "Drop-in"))
     if re.search(
         r"\b(?:materials?|supplies) (?:are |will be )?provided\b",
@@ -1615,23 +1665,21 @@ def _event_chip_specs(event: Event) -> tuple[tuple[str, str], ...]:
         re.IGNORECASE,
     ):
         logistics_chips.append(("logistics", "Materials provided"))
-    if re.search(
+    if _has_positive_claim(
         r"\b(?:caregiver|parent|adult) (?:participation|participates?|joins?)\b|"
         r"\bwith (?:a |their )?(?:caregiver|parent|adult)\b",
         searchable,
-        re.IGNORECASE,
     ):
         logistics_chips.append(("logistics", "Caregiver participation"))
-    if re.search(r"\bsensory[ -]friendly\b", searchable, re.IGNORECASE):
+    if _has_positive_claim(r"\bsensory[ -]friendly\b", searchable):
         logistics_chips.append(("logistics", "Sensory-friendly"))
-    if re.search(
-        r"\bASL (?:interpretation|interpreter|interpreted)\b", searchable, re.IGNORECASE
+    if _has_positive_claim(
+        r"\bASL (?:interpretation|interpreter|interpreted)\b", searchable
     ):
         logistics_chips.append(("logistics", "ASL interpreted"))
-    if re.search(
+    if _has_positive_claim(
         r"\bbilingual\b|\b(?:English|Spanish)\s*(?:and|/)\s*(?:English|Spanish)\b",
         searchable,
-        re.IGNORECASE,
     ):
         logistics_chips.append(("logistics", "Bilingual"))
 
@@ -1787,6 +1835,16 @@ def _calendar_placeholder_note(events: Sequence[Event], duration_minutes: int) -
     )
 
 
+def _email_omission_note(omitted_count: int) -> str:
+    """Disclose email-only omissions identically in either body format."""
+
+    return (
+        f"{omitted_count} additional matched "
+        f"activit{'y was' if omitted_count == 1 else 'ies were'} omitted "
+        "to keep this email reliable. See the full calendars below."
+    )
+
+
 def _render_event_card(
     event: Event,
     *,
@@ -1928,7 +1986,9 @@ def _render_html(
             f"{branch_preposition} {event_branch_count} {library_noun}."
         )
         if len(full_event_ids) < len(events):
-            intro += " Nearby activities include more detail; every match stays listed."
+            intro += " Nearby activities include more detail."
+            if not email_omitted_count:
+                intro += " Every match stays listed."
     else:
         intro = (
             f"No clearly age-matched activities were published for {child_name}, "
@@ -1950,9 +2010,7 @@ def _render_html(
     if email_omitted_count:
         source_note_parts.append(
             '<p style="margin:8px 0 0;color:#5f6368">'
-            f"{email_omitted_count} additional matched "
-            f"activit{'y was' if email_omitted_count == 1 else 'ies were'} omitted "
-            "to keep this email reliable. See the full calendars below.</p>"
+            f"{_email_omission_note(email_omitted_count)}</p>"
         )
     source_note = "".join(source_note_parts)
     calendar_note_text = _calendar_placeholder_note(events, duration_minutes)
@@ -1971,7 +2029,10 @@ def _render_html(
         event_branch_count = len({event.branch.code for event in events})
         library_noun = "library" if event_branch_count == 1 else "libraries"
         preheader_features = []
-        if any(event.image_url for event in events):
+        if any(
+            event.image_url and event_identity(event) in full_event_ids
+            for event in events
+        ):
             preheader_features.append("photos")
         if any(event.age_categories for event in events):
             preheader_features.append("age notes")
@@ -2064,6 +2125,7 @@ def _render_plain_text(
     duration_minutes: int,
     source_errors: Sequence[str],
     source_warnings: Sequence[str],
+    email_omitted_count: int = 0,
 ) -> str:
     lines = [
         f"LIBRARY FUN FOR {child_name.upper()}",
@@ -2085,7 +2147,10 @@ def _render_plain_text(
                 location_line += f": {directions}"
             lines.extend(
                 [
-                    f"{format_event_time(event)} | {event.title}",
+                    (
+                        f"{format_event_time(event)} | "
+                        f"{_bounded_text(event.title, MAX_DISPLAY_TITLE_LENGTH)}"
+                    ),
                     location_line,
                     *(
                         [
@@ -2118,6 +2183,8 @@ def _render_plain_text(
     ]
     if plain_source_notes:
         lines.extend(plain_source_notes)
+    if email_omitted_count:
+        lines.extend(["", _email_omission_note(email_omitted_count)])
     lines.extend(["", "Full branch calendars:"])
     lines.extend(f"- {branch.name}: {branch.calendar_url}" for branch in branches)
     calendar_note = _calendar_placeholder_note(events, duration_minutes)
@@ -2159,12 +2226,10 @@ def select_digest_events(
 def _display_event(event: Event) -> Event:
     """Return an email-bounded event while preserving source data upstream."""
 
-    title = _bounded_text(event.title, MAX_DISPLAY_TITLE_LENGTH)
     description = _bounded_text(event.description, MAX_CARD_DESCRIPTION_CHARS)
     truncated = description != " ".join(event.description.split())
     return replace(
         event,
-        title=title,
         description=description,
         description_html="" if truncated else event.description_html,
         description_truncated=truncated,
@@ -2267,6 +2332,17 @@ def _render_budgeted_html(
 
     frozen_ids = frozenset(full_ids)
     rendered = render(frozen_ids)
+    # Card deltas cannot account for every shared header change (for example,
+    # adding the first photo). Enforce the contract on the final representation.
+    while full_ids and len(rendered.encode("utf-8")) > MAX_DIGEST_HTML_BYTES:
+        farthest_full = next(
+            event_identity(event)
+            for event in reversed(priority)
+            if event_identity(event) in full_ids
+        )
+        full_ids.remove(farthest_full)
+        frozen_ids = frozenset(full_ids)
+        rendered = render(frozen_ids)
     return rendered, rendered_events, frozen_ids, omitted_count
 
 
@@ -2372,6 +2448,7 @@ def build_digest(
             duration_minutes=duration_minutes,
             source_errors=source_errors,
             source_warnings=source_warnings,
+            email_omitted_count=email_omitted_count,
         ),
         "html": rendered_html,
         "metadata": {

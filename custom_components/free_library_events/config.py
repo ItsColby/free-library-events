@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
 import voluptuous as vol
@@ -85,6 +85,8 @@ def normalize_profile(values: Mapping[str, Any]) -> dict[str, Any]:
         raise ValueError("birth_date_required")
     child_name = normalize_child_name(config[CONF_CHILD_NAME])
     birth_value = config[CONF_BIRTH_DATE]
+    if isinstance(birth_value, datetime):
+        raise TypeError("invalid_birth_date")
     try:
         birth_date = (
             birth_value
@@ -118,14 +120,12 @@ def normalize_options(values: Mapping[str, Any]) -> dict[str, Any]:
         **dict(values),
     }
     filter_mode = str(config[CONF_FILTER_MODE])
-    try:
-        calendar_duration = int(config[CONF_CALENDAR_DURATION])
-    except TypeError, ValueError:
-        raise ValueError("invalid_calendar_duration") from None
-    try:
-        scan_interval = int(config[CONF_SCAN_INTERVAL])
-    except TypeError, ValueError:
-        raise ValueError("invalid_scan_interval") from None
+    calendar_duration = _normalize_integer(
+        config[CONF_CALENDAR_DURATION], "invalid_calendar_duration"
+    )
+    scan_interval = _normalize_integer(
+        config[CONF_SCAN_INTERVAL], "invalid_scan_interval"
+    )
     try:
         publish_webcal = cv.boolean(config[CONF_PUBLISH_WEBCAL])
     except TypeError, ValueError, vol.Invalid:
@@ -154,6 +154,21 @@ def normalize_options(values: Mapping[str, Any]) -> dict[str, Any]:
     if publish_webcal and isinstance(token, str) and token:
         options[CONF_WEBCAL_TOKEN] = token
     return options
+
+
+def _normalize_integer(value: object, error: str) -> int:
+    """Accept whole UI numbers and legacy strings without truncating fractions."""
+
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float, str))
+        or (isinstance(value, float) and not value.is_integer())
+    ):
+        raise ValueError(error)
+    try:
+        return int(value)
+    except ValueError, OverflowError:
+        raise ValueError(error) from None
 
 
 def normalize_config(values: Mapping[str, Any]) -> dict[str, Any]:
