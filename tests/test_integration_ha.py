@@ -12,6 +12,7 @@ from dataclasses import replace
 from datetime import UTC, date, datetime, time, timedelta
 from email.utils import format_datetime
 from pathlib import Path
+from typing import Literal
 from unittest.mock import AsyncMock, Mock, PropertyMock, patch
 from zoneinfo import ZoneInfo
 
@@ -1389,6 +1390,7 @@ async def test_setup_entities_action_and_redacted_diagnostics(
     calendar_state = hass.states.get("calendar.free_library_events_calendar")
     assert calendar_state is not None
     assert "Avery" not in calendar_state.attributes["description"]
+    assert "Library age listing: Baby" in calendar_state.attributes["description"]
     assert "Official details:" in calendar_state.attributes["description"]
     assert (
         "Related: Early literacy: https://example.test/literacy"
@@ -1944,6 +1946,104 @@ def test_calendar_keeps_recurring_series_occurrences_distinct() -> None:
     assert rendered[0].uid != rendered[1].uid
 
 
+@pytest.mark.parametrize(
+    ("venue", "modality", "categories", "expected_location", "expected_context"),
+    (
+        (
+            "Maple Square Park",
+            "in_person",
+            ("Toddler", "Baby", "Baby"),
+            "Maple Square Park, Philadelphia, PA",
+            "Library age listing: Baby · Toddler\n\nHosted by Independence Library",
+        ),
+        (
+            "Maple Square Park",
+            "hybrid",
+            ("Baby",),
+            "Maple Square Park, Philadelphia, PA (hybrid)",
+            "Library age listing: Baby\n\nHosted by Independence Library",
+        ),
+        (
+            "Maple Square Park",
+            "online",
+            ("Baby",),
+            "Online",
+            "Library age listing: Baby",
+        ),
+        (
+            "",
+            "in_person",
+            (),
+            "Independence Library, 18 South 7th Street, Philadelphia, PA 19106-2314",
+            "",
+        ),
+    ),
+)
+def test_calendar_and_webcal_preserve_publisher_context_without_changing_location(
+    venue: str,
+    modality: Literal["in_person", "online", "hybrid"],
+    categories: tuple[str, ...],
+    expected_location: str,
+    expected_context: str,
+) -> None:
+    event = Event(
+        title="Family Storytime",
+        event_date=date(2026, 7, 22),
+        start_time=time(10, 30),
+        description="Stories and songs for babies with caregivers.",
+        link="https://example.test/events/family-storytime",
+        image_url="",
+        branch=BRANCHES["IND"],
+        age_categories=categories,
+        end_at=datetime.combine(date(2026, 7, 22), time(11, 15)),
+        venue=venue,
+        modality=modality,
+    )
+    profile = USER_INPUT | {CONF_BIRTH_DATE: "2025-11-15"}
+    items = build_calendar_items((event,), profile)
+    calendar = LibraryCalendar.__new__(LibraryCalendar)
+    calendar._entry = types.SimpleNamespace(data=profile, options={})
+    calendar.coordinator = types.SimpleNamespace(
+        data=types.SimpleNamespace(events=(event,))
+    )
+    ha_items = calendar._calendar_events()
+    rendered = render_icalendar(
+        items,
+        fetched_at=datetime(2026, 7, 19, 16, 15, tzinfo=UTC),
+        refresh_seconds=21600,
+    )
+    unfolded = rendered.replace("\r\n ", "")
+
+    expected_description = "\n\n".join(
+        part
+        for part in (
+            event.description,
+            expected_context,
+            "Official details: https://example.test/events/family-storytime",
+        )
+        if part
+    )
+    assert len(items) == len(ha_items) == 1
+    assert ha_items[0].description == expected_description
+    assert items[0].description == expected_description
+    assert ha_items[0].location == items[0].location == expected_location
+    assert (
+        ha_items[0].uid
+        == items[0].uid
+        == ("https://example.test/events/family-storytime:IND:2026-07-22:10:30:00")
+    )
+    assert (
+        "DESCRIPTION:" + expected_description.replace("\n", "\\n") + "\r\n"
+    ) in unfolded
+    assert ("LOCATION:" + expected_location.replace(",", "\\,") + "\r\n") in unfolded
+    assert (
+        "UID:https://example.test/events/family-storytime:IND:2026-07-22:10:30:00"
+        "@free-library-events.home-assistant\r\n"
+    ) in unfolded
+    assert profile[CONF_CHILD_NAME] not in unfolded
+    assert profile[CONF_BIRTH_DATE] not in unfolded
+
+
 async def test_webcal_urls_disclose_internal_only_scope(hass: HomeAssistant) -> None:
     hass.config.external_url = None
     hass.config.internal_url = "http://ha.internal.test:8123"
@@ -2063,6 +2163,7 @@ async def test_webcal_view_is_token_gated_dynamic_and_unloads(
     first_last_modified = response.headers["Last-Modified"]
     first_length = response.headers["Content-Length"]
     assert "Storytime" in first_body
+    assert "Library age listing: Baby" in first_body.replace("\r\n ", "")
     assert "X-WR-CALNAME:Neighborhood Library Events" in first_body
     assert USER_INPUT[CONF_CHILD_NAME] not in first_body
 

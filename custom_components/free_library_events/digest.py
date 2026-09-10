@@ -679,7 +679,8 @@ _VENUE_SUFFIX = (
 )
 _VENUE_NAME = rf"[A-Z][A-Za-z0-9&' .-]{{1,70}}?(?:{_VENUE_SUFFIX})"
 _TITLE_VENUE_RE = re.compile(
-    rf"\bat\s+(?P<venue>{_VENUE_NAME})\s*[!?.]*$",
+    # Use the last location lead-in, not language text such as "in Spanish at".
+    rf".*\b(?:at|in)\s+(?P<venue>{_VENUE_NAME})\s*[!?.]*$",
     re.IGNORECASE,
 )
 _DESCRIPTION_VENUE_RES = (
@@ -688,7 +689,10 @@ _DESCRIPTION_VENUE_RES = (
         re.IGNORECASE,
     ),
     re.compile(rf"\bjoin us in\s+(?P<venue>{_VENUE_NAME})\b", re.IGNORECASE),
-    re.compile(rf"\bmeet us at\s+(?P<venue>{_VENUE_NAME})\b", re.IGNORECASE),
+    re.compile(
+        rf"\b(?:meet us|let['\u2019]s meet) at\s+(?P<venue>{_VENUE_NAME})\b",
+        re.IGNORECASE,
+    ),
     re.compile(rf"\blocated at\s+(?P<venue>{_VENUE_NAME})\b", re.IGNORECASE),
 )
 _ROOM_RES = (
@@ -714,10 +718,9 @@ def explicit_venue(title: str, description: str) -> str:
     ):
         return venue
     for pattern in _DESCRIPTION_VENUE_RES:
-        if (match := pattern.search(description)) and (
-            venue := _named_venue(match.group("venue"))
-        ):
-            return venue
+        for match in pattern.finditer(description):
+            if venue := _named_venue(match.group("venue")):
+                return venue
     return ""
 
 
@@ -1119,6 +1122,42 @@ def _explicit_age_fit(text: str, child_months: float) -> FitRank | None:
     return None
 
 
+_BABY_TERM = r"(?:bab(?:y|ies)|infants?)"
+_BABY_AUDIENCE_CONTINUATION = (
+    r"(?=\s*(?:$|[.,;:!?)]|(?:and|or|with|who|to|from|under|up to|ages?|aged|"
+    r"can|may|will|enjoys?|loves?|explores?|learns?|plays?)\b))"
+)
+_BABY_PROGRAM = (
+    r"(?:story[ -]?(?:time|hour)|music|play(?:time|group)|rhymes?|bounce|yoga|"
+    r"massage|sign(?:ing| language)|program|event|session|class|stories|songs|activities)"
+)
+_BABY_AUDIENCE_SUBJECT = (
+    rf"(?:(?:your\s+)?{_BABY_TERM}(?:\s*(?:&|and|with|/)\s*"
+    r"(?:(?:their|a)\s+)?(?:caregivers?|parents?|toddlers?))?"
+    rf"|(?:caregivers?|parents?|toddlers?)\s*(?:&|and|with|/)\s*{_BABY_TERM})"
+)
+_BABY_AUDIENCE_RE = re.compile(
+    # Anchor age inference to a program, eligibility statement or invitation.
+    # Topic phrases such as "care for babies" or "their infants" are not enough.
+    rf"\b{_BABY_TERM}(?:\s*(?:&|and|/)\s*toddlers?)?[ -]+{_BABY_PROGRAM}\b"
+    r"|\b(?:baby\s*(?:&|and)\s*me|read,?\s+baby,?\s+read|lap[ -]sit)\b"
+    rf"|(?:^|[.!?]\s+)(?:(?:(?:this|the|a|our)\s+)?{_BABY_PROGRAM}"
+    rf"(?:\s+(?:(?:and|&)\s+)?{_BABY_PROGRAM})*\s+(?:(?:is|are)\s+)?)?"
+    r"(?:(?:designed|intended|suitable|appropriate|recommended|perfect)\s+)?"
+    rf"for\s+{_BABY_TERM}{_BABY_AUDIENCE_CONTINUATION}"
+    rf"|(?:^|[.!?]\s+){_BABY_AUDIENCE_SUBJECT}\s+"
+    r"(?:(?:(?:are|is)\s+)?welcome|(?:can|may)\s+(?:attend|join|participate|enjoy))\b"
+    rf"|(?:^|[.!?]\s+)(?:bring|join us with)\s+(?:your\s+)?{_BABY_TERM}"
+    rf"{_BABY_AUDIENCE_CONTINUATION}",
+    re.MULTILINE,
+)
+_TODDLER_AUDIENCE_RE = re.compile(r"\b(?:toddlers?|twos)\b")
+_PRESCHOOL_AUDIENCE_RE = re.compile(r"\bpre-?school(?:ers?)?\b")
+_SCHOOL_AGE_AUDIENCE_RE = re.compile(r"\bschool[ -]aged?\b")
+_TEEN_AUDIENCE_RE = re.compile(r"\bteen(?:s|age(?:rs?)?)?\b")
+_ADULT_AUDIENCE_RE = re.compile(r"\badults?\b")
+
+
 def classify_event(event: Event, birth_date: date) -> FitRank:
     """Classify an event using only deterministic published-text rules."""
 
@@ -1136,22 +1175,24 @@ def classify_event(event: Event, birth_date: date) -> FitRank:
     ):
         return "best"
 
-    baby_terms = ("baby", "babies", "infant", "lap sit", "lap-sit")
-    toddler_terms = ("toddler", "toddlers", "twos")
-    preschool_terms = ("preschool", "pre-school")
-    school_age_terms = ("school age", "school-age")
-    teen_terms = ("teen", "teens")
-    adult_terms = ("adult", "adults")
+    baby_audience = bool(
+        _BABY_AUDIENCE_RE.search(f"{event.title}\n{event.description}".lower())
+    )
+    toddler_audience = bool(_TODDLER_AUDIENCE_RE.search(text))
+    preschool_audience = bool(_PRESCHOOL_AUDIENCE_RE.search(text))
+    school_age_audience = bool(_SCHOOL_AGE_AUDIENCE_RE.search(text))
+    teen_audience = bool(_TEEN_AUDIENCE_RE.search(text))
+    adult_audience = bool(_ADULT_AUDIENCE_RE.search(text))
 
-    if child_months < 36 and any(term in text for term in baby_terms):
+    if child_months < 36 and baby_audience:
         return "best"
-    if 9 <= child_months < 48 and any(term in text for term in toddler_terms):
+    if 9 <= child_months < 48 and toddler_audience:
         return "best"
-    if 30 <= child_months < 72 and any(term in text for term in preschool_terms):
+    if 30 <= child_months < 72 and preschool_audience:
         return "best"
-    if 60 <= child_months < 156 and any(term in text for term in school_age_terms):
+    if 60 <= child_months < 156 and school_age_audience:
         return "best"
-    if 144 <= child_months < 228 and any(term in text for term in teen_terms):
+    if 144 <= child_months < 228 and teen_audience:
         return "best"
 
     if child_months < 36 and any(
@@ -1195,15 +1236,16 @@ def classify_event(event: Event, birth_date: date) -> FitRank:
     if event.age_categories:
         return "exclude"
 
-    category_terms = (
-        baby_terms
-        + toddler_terms
-        + preschool_terms
-        + school_age_terms
-        + teen_terms
-        + adult_terms
-    )
-    if any(term in text for term in category_terms):
+    if any(
+        (
+            baby_audience,
+            toddler_audience,
+            preschool_audience,
+            school_age_audience,
+            teen_audience,
+            adult_audience,
+        )
+    ):
         return "exclude"
 
     if child_months < 216 and any(
@@ -1727,7 +1769,7 @@ def _event_chips_html(event: Event) -> str:
     )
 
 
-def _event_age_categories(event: Event) -> tuple[str, ...]:
+def event_age_categories(event: Event) -> tuple[str, ...]:
     """Return every published age category in stable display order."""
 
     return tuple(
@@ -1741,7 +1783,7 @@ def _event_age_categories(event: Event) -> tuple[str, ...]:
 
 
 def _event_audience_html(event: Event) -> str:
-    categories = _event_age_categories(event)
+    categories = event_age_categories(event)
     if not categories:
         return ""
     audience = f" {MIDDLE_DOT} ".join(html.escape(category) for category in categories)
@@ -2156,7 +2198,7 @@ def _render_plain_text(
         lines.extend([f"{event_date:%A, %B} {event_date.day}".upper(), ""])
         for event in day_items:
             chip_labels = [label for _kind, label in _event_chip_specs(event)]
-            age_categories = _event_age_categories(event)
+            age_categories = event_age_categories(event)
             directions = event_directions_url(event)
             location_line = event_location_summary(event)
             if directions:

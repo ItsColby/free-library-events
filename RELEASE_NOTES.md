@@ -1,3 +1,20 @@
+# Free Library Events v2026.9.10.1
+
+## Fixed
+
+- Require audience or program context for baby and infant wording, and match
+  age-group terms as whole words. Incidental animal references and unrelated
+  words no longer create strong age matches.
+- Recognize explicitly named venues after title wording such as “in” and
+  description wording such as “let's meet at,” so off-site directions and
+  calendar locations use the published venue.
+
+## Improved
+
+- Include publisher age listings and off-site hosting libraries in the shared
+  Home Assistant calendar and subscription descriptions, preserving event
+  identity, locations, and profile privacy.
+
 # Free Library Events v2026.9.10
 
 ## Fixed
