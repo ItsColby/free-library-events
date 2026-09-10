@@ -16,6 +16,7 @@ from .digest import (
     TIMEZONE,
     Event,
     classify_event,
+    event_age_categories,
     event_calendar_location,
     event_details_url,
     event_identity,
@@ -66,11 +67,15 @@ def build_calendar_items(
                 f"{duration} minutes as a fallback; check the official listing for its duration."
             )
         details_url = event_details_url(event)
-        description_parts = [
-            event.description,
-            *related_link_lines(event),
-            f"Official details: {details_url}",
-        ]
+        description_parts = [event.description]
+        categories = event_age_categories(event)
+        if categories:
+            description_parts.append(f"Library age listing: {' · '.join(categories)}")
+        if event.venue and event.modality != "online":
+            description_parts.append(f"Hosted by {event.branch.name}")
+        description_parts.extend(
+            [*related_link_lines(event), f"Official details: {details_url}"]
+        )
         if end_note:
             description_parts.append(end_note)
         items.append(

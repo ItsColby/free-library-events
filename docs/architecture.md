@@ -100,6 +100,8 @@ Display truncation is downstream of this identity. Shortened email copy must not
 
 Matching is deterministic and evaluates age **on the event date**. It first considers explicit numeric age wording, then matching publisher categories and specific audience wording, followed by explicit inclusive language. A nonmatching publisher category blocks generic family-oriented inference, while explicit inclusive wording can support a match. Events before the birth date are excluded.
 
+Age-group words match whole words. Baby and infant wording must describe an audience or a recognizable program, so incidental animal references and unrelated words do not supply age evidence. Publisher categories and explicit numeric age ranges retain their precedence.
+
 The publisher supplies category names; the numeric windows below are local interpretation rules, not publisher guarantees. Lower bounds are inclusive and upper bounds exclusive.
 
 | Category | Local window in months |

@@ -30,7 +30,7 @@ The integration creates **Calendar**, **Status**, and **Refresh events** entitie
 
 The Home Assistant calendar shows matching occurrences available in the latest cache. It is read-only and can include dates beyond the digest week; the feeds determine how far ahead it can see. Repeated events on different dates remain separate occurrences.
 
-Event times use Philadelphia's `America/New_York` time zone. A recognized source end time is preserved. Otherwise, the configured fallback duration supplies the end and the description identifies it as a placeholder. The event description also links to official details. A one-hour entry is therefore not evidence of a published one-hour program.
+Event times use Philadelphia's `America/New_York` time zone. A recognized source end time is preserved. Otherwise, the configured fallback duration supplies the end and the description identifies it as a placeholder. Descriptions retain the publisher's age listing, identify the hosting library for an explicitly named off-site venue, and link to official details. A one-hour entry is therefore not evidence of a published one-hour program.
 
 The digest's Google Calendar links open a prefilled event form; an event is copied into that calendar only after you save it. That copy does not track later source updates. Use the subscription below to let a calendar app reread the integration's cache.
 
