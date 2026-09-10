@@ -219,6 +219,127 @@ class DigestTests(unittest.TestCase):
             "exclude",
         )
 
+    def test_incidental_baby_references_do_not_override_publisher_age(self) -> None:
+        base = digest.Event(
+            title="Nature Club",
+            event_date=date(2026, 9, 17),
+            start_time=digest.time(15, 30),
+            description="",
+            link="https://example.test/nature-club",
+            image_url="",
+            branch=digest.BRANCHES["PCI"],
+            age_categories=("School Age",),
+        )
+        for description in (
+            "Watch eggs hatch into baby chicks.",
+            "Learn how animal babies develop.",
+            "Watch infant gorillas with the nature club.",
+            "Learn to care for baby chicks.",
+            "Bring your baby chicks to the nature club.",
+            "Learn about gorillas and their infants in the rainforest.",
+            "Observe gorillas caring for their infants.",
+            "Learn how animals care for babies.",
+            "Meet animal babies and their parents.",
+            "Stories about how animals care for babies.",
+            "Make blankets for infants.",
+            "Babysitting stories and an infantry exhibit.",
+        ):
+            with self.subTest(description=description):
+                event = digest.replace(base, description=description)
+                fit = digest.classify_event(event, date(2025, 11, 17))
+                self.assertEqual(fit, "exclude")
+                for mode in digest.FILTER_MODES:
+                    self.assertFalse(digest.include_fit(fit, mode))
+                self.assertEqual(
+                    digest.classify_event(event, date(2018, 9, 17)), "best"
+                )
+                self.assertEqual(
+                    digest.classify_event(
+                        digest.replace(event, age_categories=("Baby",)),
+                        date(2025, 11, 17),
+                    ),
+                    "best",
+                )
+
+    def test_baby_audience_and_program_wording_remains_strong_evidence(self) -> None:
+        base = digest.Event(
+            title="Community Program",
+            event_date=date(2026, 9, 17),
+            start_time=digest.time(10),
+            description="",
+            link="https://example.test/community-program",
+            image_url="",
+            branch=digest.BRANCHES["PCI"],
+            age_categories=("School Age",),
+        )
+        cases = (
+            ("Baby Storytime", "Stories and songs."),
+            ("Baby Music", "Songs and fingerplays."),
+            ("Read, Baby, Read", "Stories and songs."),
+            ("Infant Playtime", "Sensory activities."),
+            ("Baby & Toddler Storytime", "Stories and songs."),
+            ("Infant/Toddler Storytime", "Stories and songs."),
+            ("Baby and Me", "Stories and songs."),
+            ("Lap-sit Storytime", "Stories and songs."),
+            ("Community Program", "Stories for babies and caregivers."),
+            ("Community Program", "Stories and songs for infants."),
+            ("Community Program", "A program for infants."),
+            ("Community Program", "A music program for babies and caregivers."),
+            ("Community Program", "This program is intended for babies."),
+            ("Community Program", "Designed for babies and their caregivers."),
+            ("Community Program", "For babies and toddlers with caregivers."),
+            ("Community Program", "Babies are welcome!"),
+            ("Community Program", "Infants can attend."),
+            ("Community Program", "Your baby can enjoy stories."),
+            ("Community Program", "Infants and their caregivers can join us."),
+            ("Community Program", "Parents with babies can join us."),
+            ("Community Program", "Bring your baby to this program."),
+            ("Community Program", "Join us with your infant."),
+        )
+        for title, description in cases:
+            with self.subTest(title=title, description=description):
+                event = digest.replace(base, title=title, description=description)
+                self.assertEqual(
+                    digest.classify_event(event, date(2025, 11, 17)), "best"
+                )
+
+    def test_age_group_words_do_not_match_unrelated_substrings(self) -> None:
+        base = digest.Event(
+            title="Family Crafts",
+            event_date=date(2026, 9, 17),
+            start_time=digest.time(10),
+            description="",
+            link="https://example.test/family-crafts",
+            image_url="",
+            branch=digest.BRANCHES["PCI"],
+        )
+        cases = (
+            ("A babysitting story.", date(2025, 11, 17)),
+            ("An infantry exhibit.", date(2025, 11, 17)),
+            ("Work as a twosome.", date(2024, 9, 17)),
+            ("Try fifteen crafts.", date(2012, 9, 17)),
+            ("A novel about adulthood.", date(2025, 11, 17)),
+        )
+        for description, birth_date in cases:
+            with self.subTest(description=description):
+                event = digest.replace(base, description=description)
+                self.assertEqual(digest.classify_event(event, birth_date), "broad")
+
+        audience_cases = (
+            ("For toddlers.", date(2024, 9, 17)),
+            ("For preschoolers.", date(2022, 9, 17)),
+            ("For pre-school children.", date(2022, 9, 17)),
+            ("For school-age children.", date(2018, 9, 17)),
+            ("For school aged children.", date(2018, 9, 17)),
+            ("For teens.", date(2012, 9, 17)),
+            ("For teenagers.", date(2012, 9, 17)),
+            ("For teenage children.", date(2012, 9, 17)),
+        )
+        for description, birth_date in audience_cases:
+            with self.subTest(description=description):
+                event = digest.replace(base, description=description)
+                self.assertEqual(digest.classify_event(event, birth_date), "best")
+
     def test_merge_events_preserves_all_official_age_categories(self) -> None:
         base = digest.Event(
             title="Baby & Toddler Storytime!",
@@ -963,6 +1084,31 @@ class DigestTests(unittest.TestCase):
                 "Join us in Rittenhouse Square by the Goat Statue for this program!",
                 "Rittenhouse Square",
             ),
+            (
+                "Storytime in Birch Grove Park",
+                "Outdoor stories and songs.",
+                "Birch Grove Park",
+            ),
+            (
+                "Storytime in Spanish at Birch Grove Park",
+                "Outdoor stories and songs.",
+                "Birch Grove Park",
+            ),
+            (
+                "Outdoor Storytime",
+                "Let's meet at Hawthorn Square for stories and songs.",
+                "Hawthorn Square",
+            ),
+            (
+                "Outdoor Storytime",
+                "Let\u2019s meet at Meadow Garden for stories and songs.",
+                "Meadow Garden",
+            ),
+            (
+                "Outdoor Storytime",
+                "Let's meet at the park. Let's meet at Hawthorn Square this week.",
+                "Hawthorn Square",
+            ),
         )
         for title, description, expected in cases:
             with self.subTest(title=title):
@@ -979,6 +1125,18 @@ class DigestTests(unittest.TestCase):
                 )
                 self.assertEqual(event.venue, expected)
                 self.assertEqual(digest.event_location_name(event), expected)
+                self.assertEqual(
+                    digest.event_calendar_location(event),
+                    f"{expected}, Philadelphia, PA",
+                )
+                calendar_query = digest.urllib.parse.parse_qs(
+                    digest.urllib.parse.urlsplit(
+                        digest.google_calendar_url(event, 60)
+                    ).query
+                )
+                self.assertEqual(
+                    calendar_query["location"], [f"{expected}, Philadelphia, PA"]
+                )
                 self.assertEqual(
                     digest.event_location_summary(event),
                     f"{expected} {digest.MIDDLE_DOT} Hosted by Parkway Central Library",
@@ -1020,6 +1178,16 @@ class DigestTests(unittest.TestCase):
             digest.explicit_venue("Storytime at The Park", "Join us in The Park."),
             "",
         )
+        for title, description in (
+            ("Storytime in The Park", "Let's meet at the park."),
+            ("Storytime in Our Garden", "Let\u2019s meet at our garden."),
+            ("Storytime in Spanish at The Park", "Stories and songs."),
+            ("Storytime in English in the park", "Stories and songs."),
+            ("Storytime in a playground", "Let's meet at A Playground."),
+            ("Storytime in the library", "Stories in the Children's Room."),
+        ):
+            with self.subTest(title=title, description=description):
+                self.assertEqual(digest.explicit_venue(title, description), "")
 
     def test_age_on_event_date(self) -> None:
         self.assertEqual(digest.age_on(date(2025, 1, 15), date(2026, 7, 24)), (1, 6, 9))
