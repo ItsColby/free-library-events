@@ -1374,8 +1374,8 @@ def google_calendar_url(
     details += f"\n\nOfficial event details: {event_details_url(event)}"
     if event.end_at is None:
         details += (
-            "\n\nThe library did not publish an end time. "
-            f"The {duration_minutes}-minute duration is a calendar placeholder."
+            "\n\nNo end time was recognized in the feed data. "
+            f"This calendar entry uses a {duration_minutes}-minute placeholder."
         )
     parameters = {
         "action": "TEMPLATE",
@@ -1807,8 +1807,8 @@ def _source_note(
 
     if source_warnings or source_errors:
         return (
-            "Some library listings may be missing. "
-            "Check the full branch calendars below."
+            "Some feed requests failed or may be incomplete. "
+            "Browse the official branch calendars below."
         )
     return ""
 
@@ -1820,12 +1820,12 @@ def _calendar_placeholder_note(events: Sequence[Event], duration_minutes: int) -
     if not missing_count:
         return ""
     if missing_count == len(events):
-        opening = "The library did not publish end times for these activities"
+        opening = "No end times were recognized in the feed data for these activities"
     else:
-        opening = "Some end times are not published"
+        opening = "Some feed entries have no recognized end time"
     return (
-        f"{opening}; Google Calendar uses a {duration_minutes}-minute "
-        "placeholder for those activities."
+        f"{opening}; their Google Calendar links use a {duration_minutes}-minute "
+        "placeholder duration."
     )
 
 
@@ -1834,8 +1834,8 @@ def _email_omission_note(omitted_count: int) -> str:
 
     return (
         f"{omitted_count} additional matched "
-        f"activit{'y was' if omitted_count == 1 else 'ies were'} omitted "
-        "to keep this email reliable. See the full calendars below."
+        f"activit{'y was' if omitted_count == 1 else 'ies were'} left out "
+        "to keep this email within its size limits. Browse the branch calendars below."
     )
 
 
@@ -1897,8 +1897,8 @@ def _render_event_card(
     if event.description_truncated:
         shortened_note = (
             '<p style="margin:8px 0 0;color:#5f6368;font-size:13px;line-height:150%">'
-            f'Description shortened for email. <a href="{event_url}" '
-            'style="color:#174ea6">View the complete official listing</a>.</p>'
+            f'This email includes an excerpt. <a href="{event_url}" '
+            'style="color:#174ea6">Open the official listing</a>.</p>'
         )
     body = f"""
       <tr>
@@ -1976,22 +1976,22 @@ def _render_html(
         library_noun = "library" if event_branch_count == 1 else "libraries"
         branch_preposition = "at" if event_branch_count == 1 else "across"
         intro = (
-            f"{len(events)} {activity_noun} selected for {child_name}’s age "  # noqa: RUF001
+            f"{len(events)} {activity_noun} matched for {child_name} "
             f"{branch_preposition} {event_branch_count} {library_noun}."
         )
         if len(full_event_ids) < len(events):
-            intro += " Nearby activities include more detail."
+            intro += " Some listings have less detail to fit this email."
             if not email_omitted_count:
-                intro += " Every match stays listed."
+                intro += " All matched activities are included."
     else:
         intro = (
-            f"No clearly age-matched activities were published for {child_name}, "
-            f"who is {format_age(birth_date, week_start)} old, this week."
+            f"No activities are shown for {child_name}, "
+            f"age {format_age(birth_date, week_start)}, this week."
         )
         body = (
             '<div style="padding:20px;background:#ffffff;border:1px solid #e3e7ee;'
-            'border-radius:14px;color:#3c4043">Nothing suitable was found in the published feeds. '
-            "The full branch calendars are linked below.</div>"
+            'border-radius:14px;color:#3c4043">This digest has no activities to show. '
+            "Check the official branch calendars for listings outside this selection.</div>"
         )
 
     branch_links = _branch_calendar_links_html(branches)
@@ -2046,8 +2046,8 @@ def _render_html(
         )
     else:
         preheader = (
-            "No clearly age-matched activities were published; "
-            "check the full branch calendars."
+            "No activities are included in this digest. "
+            "Browse the official branch calendars."
         )
 
     return f"""<!doctype html>
@@ -2097,8 +2097,8 @@ html,body {{color-scheme:only light}}
       <tr><td class="email-content" style="padding:22px 0">{body}</td></tr>
       <tr><td class="email-footer" style="padding:18px 20px;background:#ffffff;border-radius:12px;color:#5f6368;font-size:13px;line-height:155%">
         {source_note}
-        <strong style="color:#3c4043">Browse full branch calendars:</strong> {branch_links}
-        <p style="margin:8px 0 0">Library schedules can change, so check the official event page before leaving.</p>
+        <strong style="color:#3c4043">Official branch calendars:</strong> {branch_links}
+        <p style="margin:8px 0 0">Matches use local age rules. Check official listings for current times, eligibility, and registration.</p>
         {calendar_note}
       </td></tr>
     </table>
@@ -2124,11 +2124,11 @@ def _render_plain_text(
         f"LIBRARY FUN FOR {child_name.upper()}",
         _format_week_range(week_start, week_end),
         "",
-        f"Selected for {child_name}, who is {format_age(birth_date, week_start)} old.",
+        f"Age-based selection for {child_name}, age {format_age(birth_date, week_start)}.",
         "",
     ]
     if not events:
-        lines.extend(["No clearly age-matched events were found.", ""])
+        lines.extend(["No activities are included in this digest.", ""])
     for event_date, day_items in groupby(events, key=lambda event: event.event_date):
         lines.extend([f"{event_date:%A, %B} {event_date.day}".upper(), ""])
         for event in day_items:
@@ -2175,7 +2175,7 @@ def _render_plain_text(
         lines.append(source_note)
     if email_omitted_count:
         lines.extend(["", _email_omission_note(email_omitted_count)])
-    lines.extend(["", "Full branch calendars:"])
+    lines.extend(["", "Official branch calendars:"])
     lines.extend(f"- {branch.name}: {branch.calendar_url}" for branch in branches)
     calendar_note = _calendar_placeholder_note(events, duration_minutes)
     if calendar_note:
@@ -2183,7 +2183,10 @@ def _render_plain_text(
     lines.extend(
         [
             "",
-            "Library schedules can change, so check the official event page before leaving.",
+            (
+                "Matches use local age rules. Check official listings for current times, "
+                "eligibility, and registration."
+            ),
         ]
     )
     return "\n".join(lines)
