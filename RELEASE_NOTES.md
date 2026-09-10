@@ -1,3 +1,14 @@
+# Free Library Events v2026.9.10.2
+
+## Fixed
+
+- Keep weather-dependent venue alternatives conditional in email, Google
+  Calendar links, the Home Assistant calendar, and subscriptions. Show the
+  hosting library and published alternatives without asserting a fixed room
+  or offering misleading directions.
+- Preserve normal directions for fixed venues with cancellation-only weather
+  warnings. Event identity, audience matching, and published times are unchanged.
+
 # Free Library Events v2026.9.10.1
 
 ## Fixed

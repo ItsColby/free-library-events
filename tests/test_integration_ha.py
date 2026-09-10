@@ -2055,6 +2055,144 @@ async def test_webcal_urls_disclose_internal_only_scope(hass: HomeAssistant) -> 
     assert urls.external_url_configured is False
 
 
+@pytest.mark.parametrize(
+    ("venue", "modality", "weather_permitting", "expected_location", "has_note"),
+    (
+        (
+            "",
+            "in_person",
+            False,
+            "Location depends on weather; check the official listing",
+            True,
+        ),
+        (
+            "Shakespeare Park",
+            "in_person",
+            False,
+            "Location depends on weather; check the official listing",
+            True,
+        ),
+        ("", "online", False, "Online", False),
+        (
+            "Shakespeare Park",
+            "in_person",
+            True,
+            "Shakespeare Park, Philadelphia, PA",
+            False,
+        ),
+    ),
+)
+async def test_native_calendars_explain_conditional_venue_without_changing_occurrence(
+    hass: HomeAssistant,
+    hass_client_no_auth: ClientSessionGenerator,
+    venue: str,
+    modality: Literal["in_person", "online", "hybrid"],
+    weather_permitting: bool,
+    expected_location: str,
+    has_note: bool,
+) -> None:
+    # Published event 174699: both alternatives must survive calendar projection.
+    description = (
+        "Join Miss Mary for stories, songs, rhymes, and bounces! Stay for playtime "
+        "immediately following storytime! Intended for our friends ages 2 and under "
+        "and their caregivers.\n\nCooler weather? We'll have storytime in the auditorium "
+        "on the ground floor! Warmer weather? We'll be in Shakespeare Park, "
+        "across the street from the library!"
+    )
+    if weather_permitting:
+        description = (
+            "Stories and songs for babies in Shakespeare Park, weather permitting."
+        )
+    event = Event(
+        title="Baby & Toddler Storytime!",
+        event_date=date(2026, 9, 28),
+        start_time=time(10, 30),
+        description=description,
+        link="https://libwww.freelibrary.org/calendar/event/174699",
+        image_url="",
+        branch=BRANCHES["CEN"],
+        age_categories=("Baby", "Toddler"),
+        venue=venue,
+        room="" if weather_permitting else "ground floor",
+        modality=modality,
+    )
+    profile = USER_INPUT | {CONF_BIRTH_DATE: "2025-11-15", CONF_BRANCHES: ["CEN"]}
+    token = "synthetic-conditional-location-token"
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Free Library Events",
+        unique_id=DOMAIN,
+        data=profile,
+        options={CONF_PUBLISH_WEBCAL: True, CONF_WEBCAL_TOKEN: token},
+    )
+    entry.add_to_hass(hass)
+
+    async def fetch_feed(_branch, age_category, _coverage_end=None):
+        if age_category not in {"Baby", "Toddler"}:
+            return _empty_feed(age_category)
+        return BranchFeed(
+            events=(replace(event, age_categories=(age_category,)),),
+            age_category=age_category,
+            source_count=1,
+            parsed_count=1,
+            last_event_date=event.event_date,
+            ordered=True,
+        )
+
+    with (
+        patch(
+            "custom_components.free_library_events.api.LibraryClient.async_fetch_feed",
+            side_effect=fetch_feed,
+        ),
+        patch(
+            "homeassistant.util.dt.now",
+            return_value=datetime(2026, 9, 21, 12, tzinfo=LOCAL_TIME_ZONE),
+        ),
+        patch(
+            "custom_components.free_library_events.sensor.async_track_point_in_time",
+            return_value=Mock(),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    state = hass.states.get("calendar.free_library_events_calendar")
+    assert state is not None
+    assert state.attributes["location"] == expected_location
+    native_description = state.attributes["description"]
+    assert native_description.startswith(description + "\n\n")
+    assert "Library age listing: Baby · Toddler" in native_description
+    note = "Location depends on weather; check the official listing before traveling."
+    assert (note in native_description) is has_note
+    expected_host_count = int(bool(venue or has_note) and modality != "online")
+    assert (
+        native_description.count("Hosted by Parkway Central Library")
+        == expected_host_count
+    )
+    item = build_calendar_items((event,), profile)[0]
+    assert item.description == native_description
+    assert (
+        item.uid
+        == "https://libwww.freelibrary.org/calendar/event/174699:CEN:2026-09-28:10:30:00"
+    )
+    assert item.start == datetime(2026, 9, 28, 10, 30, tzinfo=LOCAL_TIME_ZONE)
+    assert item.end == item.start + timedelta(minutes=60)
+
+    client = await hass_client_no_auth()
+    response = await client.get(WEBCAL_PATH.format(token=token))
+    assert response.status == 200
+    unfolded = (await response.text()).replace("\r\n ", "")
+    escaped_description = (
+        native_description.replace("\n", "\\n").replace(";", "\\;").replace(",", "\\,")
+    )
+    assert f"DESCRIPTION:{escaped_description}\r\n" in unfolded
+    escaped_location = expected_location.replace(";", "\\;").replace(",", "\\,")
+    assert f"LOCATION:{escaped_location}\r\n" in unfolded
+    assert f"UID:{item.uid}@free-library-events.home-assistant\r\n" in unfolded
+    assert profile[CONF_CHILD_NAME] not in unfolded
+    assert profile[CONF_BIRTH_DATE] not in unfolded
+
+
 def test_webcal_serializes_current_filtered_events_as_rfc5545() -> None:
     event = Event(
         title="Stories, Songs; and Café Fun",
