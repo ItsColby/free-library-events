@@ -25,8 +25,8 @@
 
 ## Validation
 
-- 122 unit tests and 134 Home Assistant tests plus two subtests passed on each
-  supported Core lane: 2026.8.0 and 2026.9.1.
+- 122 unit tests passed. Each supported Core lane, 2026.8.0 and 2026.9.1, passed
+  134 Home Assistant tests plus two subtests.
 - Dependency checks, strict typing, Ruff, ShellCheck, actionlint, Zizmor,
   public-content checks, and Hassfest passed.
 - Live publisher review confirmed all 19 event types, seven age categories,
