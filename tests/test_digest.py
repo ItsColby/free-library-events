@@ -1327,6 +1327,8 @@ class DigestTests(unittest.TestCase):
         for description in (
             "In inclement weather, the program will move indoors.",
             "In bad weather, our storytime will be held in the auditorium.",
+            "If it rains, the event will move indoors.",
+            "In case of rain, we will meet in the auditorium.",
             "The event may move indoors because of the weather.",
             "The event could move indoors because of the weather.",
             "We meet regardless of weather, but in bad weather we'll move indoors.",
@@ -1340,6 +1342,10 @@ class DigestTests(unittest.TestCase):
                 event = digest.replace(base, description=description)
                 self.assertTrue(digest.event_location_note(event))
                 self.assertEqual(digest.event_directions_url(event), "")
+                self.assertEqual(
+                    digest.event_calendar_location(event),
+                    "Location depends on weather; check the official listing",
+                )
                 self.assertNotIn(
                     "Weather affects location",
                     {label for _kind, label in digest._event_chip_specs(event)},
@@ -1356,6 +1362,12 @@ class DigestTests(unittest.TestCase):
             "We will not move indoors because of the weather.",
             "In inclement weather, the program will not be held indoors.",
             "We will meet indoors regardless of the weather.",
+            "Rain or shine, we will meet in Bluebird Park.",
+            "If it rains, the event will be canceled.",
+            "In case of rain, the event will be canceled.",
+            "If it rains, the event will not move indoors.",
+            "In case of rain, we will not meet in the auditorium.",
+            "If it rains, frogs will move indoors.",
             "The event moved to Bluebird Park because of the weather.",
             "The event will move to Bluebird Park because of the weather.",
             "Learn how frogs move indoors during cooler weather.",

@@ -1334,7 +1334,8 @@ _WEATHER_LOCATION_CONDITION_RE = re.compile(
     r"\b(?:cooler|warmer) weather\b|"
     r"\b(?:if|when|in(?: case of)?|during)\s+(?:the\s+)?"
     r"(?:(?:unfavorable|inclement|bad|rainy|cold|hot|wet)\s+)?weather\b|"
-    r"\b(?:depending on|based on) (?:the )?weather\b",
+    r"\b(?:depending on|based on) (?:the )?weather\b|"
+    r"\bif it rains\b|\bin case of rain\b",
     re.IGNORECASE,
 )
 _WEATHER_LOCATION_SUBJECT = (
@@ -1367,11 +1368,11 @@ def event_location_note(event: Event) -> str:
         f"{event.title}\n{event.description}",
         flags=re.IGNORECASE,
     ):
-        if not re.search(r"\bweather\b", clause, re.IGNORECASE) or re.search(
-            r"\bregardless of (?:the )?weather\b", clause, re.IGNORECASE
-        ):
-            continue
         conditional_weather = _WEATHER_LOCATION_CONDITION_RE.search(clause)
+        if not (
+            conditional_weather or re.search(r"\bweather\b", clause, re.IGNORECASE)
+        ) or re.search(r"\bregardless of (?:the )?weather\b", clause, re.IGNORECASE):
+            continue
         if (
             conditional_weather
             and _has_positive_claim(_WEATHER_LOCATION_SETTING, clause)
