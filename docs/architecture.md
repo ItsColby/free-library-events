@@ -82,6 +82,8 @@ The parser requires an RSS document with exactly one channel, so XML error or ch
 
 Ordinary event and description links must be bounded HTTP(S) URLs without embedded credentials. Automatically loaded images have the narrower publisher-hosted HTTPS boundary. Source HTML is sanitized rather than copied into email as executable markup. Venue and modality evidence also controls calendar locations and directions links so an online event does not acquire an invented physical destination.
 
+Published weather-dependent venue alternatives produce an explicit conditional location label and retain the hosting library and source wording across email and calendar projections. Directions are omitted while the destination is conditional. Cancellation-only weather warnings at a fixed venue retain its normal directions.
+
 ### Occurrence identity
 
 The identity is:

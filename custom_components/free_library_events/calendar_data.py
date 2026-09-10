@@ -21,6 +21,7 @@ from .digest import (
     event_details_url,
     event_identity,
     event_is_active,
+    event_location_note,
     include_fit,
     related_link_lines,
 )
@@ -71,7 +72,10 @@ def build_calendar_items(
         categories = event_age_categories(event)
         if categories:
             description_parts.append(f"Library age listing: {' · '.join(categories)}")
-        if event.venue and event.modality != "online":
+        location_note = event_location_note(event)
+        if location_note:
+            description_parts.append(location_note)
+        if (event.venue or location_note) and event.modality != "online":
             description_parts.append(f"Hosted by {event.branch.name}")
         description_parts.extend(
             [*related_link_lines(event), f"Official details: {details_url}"]
