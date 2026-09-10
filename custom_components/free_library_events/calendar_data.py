@@ -62,8 +62,8 @@ def build_calendar_items(
         else:
             end = start + timedelta(minutes=duration)
             end_note = (
-                "No end time was recognized in the feed data; "
-                f"this calendar entry uses a {duration}-minute placeholder."
+                "No end time was found in the parsed feed. This calendar entry uses "
+                f"{duration} minutes as a fallback; check the official listing for its duration."
             )
         details_url = event_details_url(event)
         description_parts = [

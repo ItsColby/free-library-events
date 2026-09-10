@@ -1355,9 +1355,7 @@ class DigestTests(unittest.TestCase):
         self.assertIn('class="event-day-spacer"', payload["html"])
         self.assertNotIn('<div style="margin:0 0 24px">', payload["html"])
         self.assertIn(
-            "No end times were recognized in the feed data for these activities; "
-            "their Google Calendar links use a "
-            "60-minute placeholder duration.",
+            "No end time was found in the fetched data for these events. Their Google Calendar links use a 60-minute fallback duration; check the listing before saving.",
             payload["html"],
         )
         self.assertIn(
@@ -1366,7 +1364,7 @@ class DigestTests(unittest.TestCase):
         )
         self.assertNotIn("4 age-matched library activities for Avery", payload["html"])
         self.assertIn(
-            "4 activities matched for Avery across 4 libraries.",
+            "4 activities selected for Avery across 4 libraries.",
             payload["html"],
         )
         self.assertNotIn("Listed for:", payload["html"])
@@ -1521,13 +1519,11 @@ class DigestTests(unittest.TestCase):
 
         self.assertEqual(
             digest._calendar_placeholder_note([event], 60),
-            "No end times were recognized in the feed data for these activities; "
-            "their Google Calendar links use a 60-minute placeholder duration.",
+            "No end time was found in the fetched data for these events. Their Google Calendar links use a 60-minute fallback duration; check the listing before saving.",
         )
         self.assertEqual(
             digest._calendar_placeholder_note([event, with_end], 60),
-            "Some feed entries have no recognized end time; their Google Calendar links use a 60-minute "
-            "placeholder duration.",
+            "No end time was found in the fetched data for some events. Their Google Calendar links use a 60-minute fallback duration; check the listing before saving.",
         )
         self.assertEqual(digest._calendar_placeholder_note([with_end], 60), "")
 
@@ -1555,8 +1551,7 @@ class DigestTests(unittest.TestCase):
 
         for body in (payload["message"], payload["html"]):
             self.assertIn(
-                "Some feed requests failed or may be incomplete. Browse the official branch "
-                "calendars below.",
+                "Some feed requests failed or have unresolved coverage limits. Use the official branch calendars to check for other events.",
                 body,
             )
             self.assertNotIn(
@@ -1566,11 +1561,15 @@ class DigestTests(unittest.TestCase):
             self.assertNotIn("could not load: Parkway Central Library", body)
             self.assertNotIn("Charles Santore Library — School Age", body)
         self.assertLess(
-            payload["html"].index("Some feed requests failed or may be incomplete."),
+            payload["html"].index(
+                "Some feed requests failed or have unresolved coverage limits."
+            ),
             payload["html"].index("Official branch calendars:"),
         )
         self.assertLess(
-            payload["message"].index("Some feed requests failed or may be incomplete."),
+            payload["message"].index(
+                "Some feed requests failed or have unresolved coverage limits."
+            ),
             payload["message"].index("Official branch calendars:"),
         )
         self.assertEqual(
@@ -1613,7 +1612,7 @@ class DigestTests(unittest.TestCase):
 
         card = payload["html"]
         self.assertIn(
-            "1 activity matched for Avery at 1 library.",
+            "1 activity selected for Avery at 1 library.",
             card,
         )
         self.assertNotIn("event was checked", card)
@@ -1636,7 +1635,7 @@ class DigestTests(unittest.TestCase):
         self.assertNotIn(">Event details</a>", card)
         self.assertNotIn(">Other calendars</a>", card)
         self.assertNotIn("calendar placeholder", digest.google_calendar_url(event, 60))
-        self.assertNotIn("No end time was recognized", card)
+        self.assertNotIn("No end time was found", card)
 
         message = payload["message"]
         self.assertIn(
@@ -1708,8 +1707,7 @@ class DigestTests(unittest.TestCase):
         self.assertIn("LIBRARY FUN FOR MORGAN", payload["message"])
         self.assertIn("Library fun for Morgan", payload["html"])
         self.assertIn(
-            "No activities are included in this digest. "
-            "Browse the official branch calendars.",
+            "No matching entries in this digest. The official branch calendars can help you check for other events.",
             payload["html"],
         )
 
@@ -2319,9 +2317,9 @@ class DigestTests(unittest.TestCase):
             + metadata["email_omitted_count"],
             metadata["included_count"],
         )
-        self.assertIn("additional matched activities were left out", payload["html"])
-        self.assertIn("additional matched activities were left out", payload["message"])
-        self.assertNotIn("All matched activities are included", payload["html"])
+        self.assertIn("matched activities were omitted", payload["html"])
+        self.assertIn("matched activities were omitted", payload["message"])
+        self.assertNotIn("Every matched event is included", payload["html"])
 
     def test_nested_description_lists_preserve_their_parent_item(self) -> None:
         rendered = digest._description_render_html(
@@ -2401,8 +2399,8 @@ class DigestTests(unittest.TestCase):
         self.assertEqual(
             metadata["full_card_event_ids"], [digest.event_identity(events[0])]
         )
-        self.assertIn("1 additional matched activity was left out", payload["message"])
-        self.assertNotIn("All matched activities are included", payload["html"])
+        self.assertIn("1 matched activity was omitted", payload["message"])
+        self.assertNotIn("Every matched event is included", payload["html"])
 
     def test_dynamic_icons_use_words_instead_of_substrings(self) -> None:
         event = digest.Event(

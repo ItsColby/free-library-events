@@ -1,17 +1,31 @@
 render_digest:
   name: Render weekly digest
-  description: Return an age-matched weekly digest with email content and source-coverage metadata. This action does not send email or schedule delivery.
+  description: >-
+    Builds subject, message, html, and metadata for a Monday–Sunday event digest. On
+    Mondays it uses the week starting that day; otherwise it uses the coming week. Pass
+    the response to a notification action to send it.
+
   fields:
     force_refresh:
       name: Refresh first
-      description: Wait for a completed feed refresh before rendering. If all source requests fail, the action fails. Turn off to use cached data, which may be stale. Partial results include coverage metadata.
+      description: >-
+        Request a feed refresh before rendering (default: on). If that refresh fails,
+        the action returns an error. Turn this off to use the existing cache, which may
+        be older; rendering still requires fetched data.
+
       required: false
       default: true
       selector:
         boolean:
     embed_images:
       name: Embed event images
-      description: Download supported event images and return temporary image paths plus SMTP attachments when Local Media is configured. Cleanup is scheduled after one hour; send the digest before then.
+      description: >-
+        Download event images for inline email use and add images and attachments to the
+        response (default: off). Modern SMTP attachments require Local Media; without
+        it, the attachments list is empty. Pass the matching response fields to your
+        notification action. Cleanup is scheduled after one hour, so send promptly. Some
+        images may remain remote or be omitted; display depends on the email client.
+
       required: false
       default: false
       selector:

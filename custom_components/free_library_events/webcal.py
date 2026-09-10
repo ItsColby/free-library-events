@@ -91,13 +91,13 @@ def webcal_status(hass: HomeAssistant, enabled: bool, token: object) -> str:
     try:
         urls = webcal_subscription_urls(hass, token)
     except NoURLAvailableError:
-        return "On; set a Home Assistant URL to obtain a subscription address"
+        return "On, but no Home Assistant address is available to build the subscription URL."
     scope = (
-        "external or cloud address"
+        "external or cloud Home Assistant address"
         if urls.external_url_configured
-        else "internal address"
+        else "internal Home Assistant address"
     )
-    return f"On ({scope}): {urls.webcal_url}"
+    return f"On — using an {scope}: {urls.webcal_url}"
 
 
 class FreeLibraryEventsCalendarFeedView(HomeAssistantView):
