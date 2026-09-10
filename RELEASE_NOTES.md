@@ -23,6 +23,15 @@
   and preserve their shared input until active lanes finish after a handled
   interruption.
 
+## Validation
+
+- 122 unit tests and 134 Home Assistant tests plus two subtests passed on each
+  supported Core lane: 2026.8.0 and 2026.9.1.
+- Dependency checks, strict typing, Ruff, ShellCheck, actionlint, Zizmor,
+  public-content checks, and Hassfest passed.
+- Live publisher review confirmed all 19 event types, seven age categories,
+  and four supported branch identifiers and names.
+
 # Free Library Events v2026.9.8
 
 ## Fixed
