@@ -11,7 +11,8 @@
 - Unload partially forwarded platforms when setup fails or is cancelled, so a
   retry does not retain old entities, listeners, or timers.
 - Keep temporary-image expiry registration running when a digest caller cancels
-  during file storage.
+  during file storage, and tolerate an image directory disappearing during
+  concurrent expiry and stale-file cleanup.
 
 ## Documentation and development
 

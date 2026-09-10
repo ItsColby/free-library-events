@@ -1657,7 +1657,9 @@ async def test_cancelled_image_storage_retains_its_expiry_cleanup(
         ),
         patch(
             "custom_components.free_library_events.store_downloaded_images",
-            side_effect=delayed_store,
+            # The HA fixture executes Mock executor targets inline; retain a
+            # real function so storage can still be running when we cancel.
+            new=delayed_store,
         ),
         patch("custom_components.free_library_events.async_call_later") as schedule,
     ):
