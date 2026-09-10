@@ -1,246 +1,214 @@
-# Development and releases
+# Changing and validating the integration
 
-Use [architecture.md](architecture.md) for runtime ownership and invariants, and
-[usage.md](usage.md) for the user contract. This guide owns contributor setup,
-validation, and the release sequence. The commands below run from the repository
-root and do not install the integration into Home Assistant or publish a release.
+A contribution needs evidence for the behavior it changes and for the environment
+in which that behavior runs. This guide explains how to choose that evidence,
+reproduce it locally, and carry it into a release. For the data model and runtime
+boundaries, read [Architecture](architecture.md); for caller behavior and examples,
+read the [user guide](usage.md).
 
-## Source owners
+## Start with the affected contract
 
-| Concern | Owner |
+| Change | Implementation and evidence to inspect together |
 | --- | --- |
-| Runtime code, configuration flow, actions, translations, and icons | [`custom_components/free_library_events`](../custom_components/free_library_events) |
-| Integration version and runtime metadata | [`manifest.json`](../custom_components/free_library_events/manifest.json) |
-| HACS distribution minimum | [`hacs.json`](../hacs.json) |
-| Exact supported Core environments | [`requirements-ha-test.txt`](../requirements-ha-test.txt) and [`requirements-ha-current.txt`](../requirements-ha-current.txt) |
-| Tool and harness pins, container digests, and executable checks | [`verify-release-local.sh`](../scripts/verify-release-local.sh) |
-| Formatting, lint, typing, and pytest settings | [`pyproject.toml`](../pyproject.toml) |
-| Hosted jobs and aggregate gate | [`validate.yaml`](../.github/workflows/validate.yaml) |
-| Historical release changes and evidence | [`RELEASE_NOTES.md`](../RELEASE_NOTES.md) |
+| Settings or entry lifecycle | `config.py`, `config_flow.py`, `__init__.py`; config-flow, migration, reload, and unload cases in `test_integration_ha.py` |
+| RSS requests, taxonomy, or source coverage | `api.py`, `coordinator.py`; `test_acquisition_ha.py` and acquisition cases in `test_integration_ha.py` |
+| Parsing, matching, deduplication, or email presentation | `digest.py`; `test_digest.py`, plus HA action tests for response orchestration |
+| Calendar or subscription behavior | `calendar_data.py`, `calendar.py`, `webcal.py`; native calendar and HTTP cases in `test_integration_ha.py` |
+| Image download, attachment, or cleanup behavior | `email_images.py`, `__init__.py`; `test_email_images.py` and digest-action cases in `test_integration_ha.py` |
+| Help text or public metadata | `translations/en.json`, `services.yaml`, `icons.json`, `manifest.json`, `hacs.json`; `test_metadata.py` and affected flow/render tests |
+| Validation itself | `scripts/`, `.github/workflows/validate.yaml`, requirements files, and `pyproject.toml`; runner, parallel-lane, compatibility, and public-safety tests |
 
-Change the implementation and its direct consumers together. Preserve stored
-configuration keys, entity identity, and action response fields unless the
-change includes an explicit compatibility or migration contract. User-visible
-text belongs in the integration's translation and action metadata, with examples
-and explanations in the usage guide.
+Python modules are under `custom_components/free_library_events/`; tests are
+under `tests/`. Keep identity, settings storage, action-response fields, and their
+consumers aligned. A changed schema or unique ID needs a migration or explicit
+compatibility decision, not just updated descriptions. Use public synthetic test
+inputs. Household recipients, profiles, subscription tokens, deployment routes,
+and operational records belong outside this repository.
 
-Before each release, compare the publisher's RSS builder options with the
-local age and event-type taxonomy, even when acquisition code is unchanged.
-The runtime uses RSS, not protected publisher
-event pages or ICS endpoints; a browser-only source inspection is separate from
-the automated test suite. Adding a branch requires public metadata, feed and
-parsing checks, deterministic tests, and documentation. Keep household schedules,
-recipients, deployment addresses, and operational evidence outside this public
-repository.
+To support another branch, extend the public registry in `digest.py` and verify
+that its feeds parse correctly. Include deterministic coverage for the addition
+and update the supported-branch documentation before treating it as supported.
 
-## Run validation locally
+## Run the checks for the selected work
 
-The default container backend requires Linux, Bash, Git, standard shell tools,
-rootless Podman, and network access to fetch pinned images and dependencies.
-It supplies Python and validation tools inside the containers.
-
-```bash
-bash scripts/verify-release-local.sh all container
-```
-
-On Windows, the PowerShell entry point uses the `Ubuntu-24.04` WSL distribution
-with rootless Podman installed there. It maps both the source directory and its
-actual Git directory into WSL, including linked worktrees.
+The normal local entry point is the repository's container runner. From the
+repository root on Windows:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-release-local.ps1
 ```
 
-Select an individual lane while iterating:
+It requires the `Ubuntu-24.04` WSL distribution with rootless Podman, Bash, Git,
+and access to the image registries and package sources. The wrapper resolves
+both the worktree and its Git directory before invoking Linux validation.
+
+On Linux with rootless Podman:
 
 ```bash
-bash scripts/verify-release-local.sh unit container
-bash scripts/verify-release-local.sh minimum container
-bash scripts/verify-release-local.sh current container
-bash scripts/verify-release-local.sh release container
+bash scripts/verify-release-local.sh all container
 ```
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-release-local.ps1 -Mode current
-```
+Either script can also be invoked by path from another directory. Bash defaults
+to `all container`; `--help` prints its argument contract. The PowerShell wrapper
+accepts `-Mode` and always uses containers.
 
-Both entry points locate the source relative to the script, so they also work
-when invoked by path from another directory. `all` and `container` are the Bash
-defaults. `--help` prints the supported arguments.
-
-| Lane | Checks |
+| Mode | Work performed |
 | --- | --- |
-| `unit` | actionlint with ShellCheck; shell-script ShellCheck; zizmor with the auditor persona and strict collection; Ruff formatting and lint; dependency-light unit tests; compile checks; JSON, metadata, translation, icon, and whitespace contracts; public-source guard |
-| `minimum` | Exact minimum Core and harness installation, dependency closure, strict mypy, and all three HA test modules |
-| `current` | Exact current Core and harness installation, installed-metadata and dependency validation, and all three HA test modules |
-| `release` | Hassfest only |
-| `all` | Unit/static checks, both HA support lanes, then Hassfest |
+| `unit` | actionlint with ShellCheck, shell-script ShellCheck, zizmor, Ruff format/lint, six dependency-light test modules, compile checks, and public-content validation |
+| `minimum` | Minimum Core environment, dependency check, strict mypy, and the complete HA test surface |
+| `current` | Current Core environment, metadata/dependency compatibility check, and the complete HA test surface |
+| `release` | Hassfest |
+| `all` | `unit`, both HA modes, then Hassfest |
 
-The dependency-light suite covers digest behavior, metadata, public safety,
-the patch-compatibility checker, and validation orchestration. The HA lanes each
-run [`test_integration_ha.py`](../tests/test_integration_ha.py),
-[`test_email_images.py`](../tests/test_email_images.py), and
-[`test_acquisition_ha.py`](../tests/test_acquisition_ha.py). These cover real Core
-integration behavior, image preparation and cleanup, acquisition failures, and
-recovery. Missing supported dependencies or APIs fail collection; a test run
-with skipped or uncollected HA modules does not establish HA compatibility.
+For example, use `-Mode unit` on Windows or replace `all` with `unit` in the
+Linux command. The name `release` means the Hassfest lane alone; it is not a
+complete release check or a publication command.
 
-For a focused digest check using a local Python 3.14 installation:
+During a small parser/render change, this dependency-light command gives quick
+feedback using Python 3.14:
 
 ```bash
 python -m unittest discover -s tests -p "test_digest.py"
 ```
 
-That command does not replace the other lanes. Documentation-only changes need
-checks of affected references, metadata, examples, and source claims; choose
-additional product tests for the contracts being changed. Runtime changes need
-the relevant behavior tests and the complete release gates before release.
+For documentation changes, validate claims against their source owners, check
+links and examples, and run metadata or behavior tests affected by the wording.
+For runtime work, exercise the changed success/failure paths and both maintained
+HA environments. The three HA modules are `test_integration_ha.py`,
+`test_email_images.py`, and `test_acquisition_ha.py`; a dependency-light pass
+cannot stand in for their collection and execution.
 
-### Native Linux backend
+### What a local run uses
 
-Hosted unit and HA jobs call the same Bash runner with `native`. To use it
-locally, provide Linux with Python 3.14, working `venv` and pip support, Bash,
-Git, and network access. The unit lane also requires Go to build pinned
-actionlint; the native `release` lane requires Docker for Hassfest.
+Container validation snapshots tracked files and nonignored new files from the
+working tree, including uncommitted edits. Deleted files are omitted. Keep edits
+stable during snapshot creation. The snapshot is mounted read-only and receives
+a fresh Git index for tools that require one; it does not inherit commit history,
+commit hooks, or signing. Windows executable-bit artifacts are normalized.
 
-```bash
-bash scripts/verify-release-local.sh all native
-```
+Each Python lane installs dependencies into a fresh container. Package downloads
+and wheels are reused through the Podman volume
+`free-library-events-validation-pip`; installed environments and pass results
+are not reused. Container bytecode and tool caches stay outside the snapshot.
+Mypy does not retain a cache, and the explicit `compileall` check still executes.
+Git is installed only in the unit container, where tools and fixtures use it.
 
-Each Python lane creates and removes a separate temporary virtual environment.
-Actionlint and its ShellCheck dependency use a temporary tool environment too.
-`all native` runs sequentially against the source checkout, so keep that source
-stable for the duration of the run. Generated Python and tool caches may appear
-in the checkout under the normal ignore rules. Windows compatibility shims are
-not a supported substitute for the Linux HA harness.
+In `all container`, unit validation must succeed before the minimum and current
+HA lanes start in parallel. The runner waits for both, even if one fails, before
+removing their shared snapshot. Hassfest starts only if both pass. Run the two
+HA modes separately when the host should not run them concurrently.
 
-### Snapshot, concurrency, and cleanup
-
-Container runs first copy the current tracked and nonignored untracked files
-into a temporary Linux source tree. They include uncommitted edits and new files,
-omit deleted files and ignored content, normalize executable bits from Windows
-DrvFS, and create a Git index for tools that need one. No commit, hook, signing
-operation, or original Git history is copied. Keep edits stable while the
-snapshot is being created. Every container receives the selected tree read-only.
-
-After `unit` succeeds, `all container` starts the minimum and current HA lanes
-concurrently in separate fresh containers. It waits for both results before
-removing the shared snapshot, including when one lane fails. Hassfest runs only
-after both succeed. Running a single lane remains a serial operation; choose
-separate `minimum` and `current` runs if the host cannot comfortably run both.
-
-The Podman volume `free-library-events-validation-pip` retains downloaded
-packages and wheels between runs. Installed environments and check results are
-never reused. Container installs defer dependency bytecode generation until
-imports, mypy does not retain its cache, and the explicit product compile check
-still runs. Only unit containers provision Git, because the HA-only lanes do not
-use it. Disposable containers and source snapshots are removed on normal exit;
-native environments have their own exit cleanup.
-
-To discard the download cache, first ensure no local validation is using it:
+Disposable containers and the source snapshot have exit cleanup. To remove only
+the reusable download cache, first ensure no validation process is using it:
 
 ```bash
 podman volume rm free-library-events-validation-pip
 ```
 
-A timeout or interrupted process does not prove a lane passed or that cleanup
-completed. Inspect the surviving process or container before retrying, and retain
-the original output when diagnosing failure. The runner's tests exercise lane
-ordering, failure propagation, environment isolation, snapshot selection, and
-cleanup without installing the external dependencies.
+An interrupted run establishes neither success nor cleanup. Check for surviving
+work before retrying and preserve the failure output needed for diagnosis.
 
-## Core support and dependency evidence
+### Running without Podman
 
-The supported-minimum lane targets **Core 2026.8.0 with harness 0.13.354**; the
-current lane targets **Core 2026.9.1 with harness 0.13.364**. The harness is
-`pytest-homeassistant-custom-component`. Exact Core and supporting package pins
-live in the two requirements files; harness and tool pins live in the runner.
-Keep the HACS minimum, those owners, workflow names, and this guide aligned when
-support changes. The current lane names an exact tested target, not a promise
-about every later Core release.
+The hosted unit and HA jobs use the same runner's native Linux backend:
 
-Each HA lane installs its harness first, then its exact requirements in a
-separate step. The minimum lane runs `python -m pip check` after all dependency
-installation and rejects any conflict. The current lane uses
-[`check_ha_patch_compatibility.py`](../scripts/check_ha_patch_compatibility.py)
-to verify the installed Core version, the harness's declared exact Core
-requirement, and the result of `pip check` before tests. The configured matching
-Core/harness pairs are dependency-closure lanes.
+```bash
+bash scripts/verify-release-local.sh all native
+```
 
-The checker also supports one narrowly defined exception for a future pin
-change: a later stable patch within the minimum Core's year and month may use a
-harness whose Core pin lies between that minimum and current patch. Only the
-single metadata-proven harness/Core mismatch is accepted. A cross-month
-mismatch, prerelease, additional conflict, or unexpected `pip check` output fails.
-The exception establishes patch compatibility, not dependency closure, and
-still requires the complete HA test surface to pass. It does not permit changing
-installed metadata, hiding conflicts, or substituting a fake harness.
+Provide Python 3.14 with pip and `venv`, Bash, Git, and network access. Unit mode
+also needs Go to install pinned actionlint; native Hassfest needs Docker.
+Each Python lane and the actionlint tooling get temporary environments with
+exit cleanup. Native `all` runs sequentially against the actual checkout, which
+must stay stable throughout the run. Normal ignored caches may be written there.
+The real Home Assistant harness runs on Linux; Windows import shims are not a
+supported compatibility test.
 
-## Public-source review
+## Interpret the result precisely
 
-[`check_public_safety.py`](../scripts/check_public_safety.py) checks candidate
-file names and contents for private paths, local addresses and hostnames,
-non-example email addresses, and known credential shapes. It rejects unreviewed
-binary content, symbolic links, junctions, unsupported file types, and incomplete
-inventory. Reviewed binary hashes are bound to exact paths in the guard.
+A successful runner finishes with `Local validation passed: <mode> (<backend>)`.
+Earlier dependency installation or an individual passing module does not prove
+that the requested mode completed. Exact commands, tool versions, harness pins,
+and image digests are owned by
+[`verify-release-local.sh`](../scripts/verify-release-local.sh). Formatting,
+lint, and strict typing policy live in [`pyproject.toml`](../pyproject.toml).
 
-In a Git checkout the inventory is tracked plus nonignored untracked files. A
-source archive without Git uses a filesystem inventory with generated-directory
-exclusions. Neither mode scans original Git history, ignored files, or remote
-release assets. The container snapshot's fresh index does not change that
-boundary. A passing guard is a bounded candidate-content check, not proof that
-all secrets or historical private data are absent. Review the exact outgoing
-content and any separately relevant history or artifacts before publication.
+The two maintained environments are:
 
-Examples should use fictional profiles and reserved example addresses. Keep
-real diagnostics, calendar subscription URLs, personal identifiers, and private
-deployment instructions out of commits and issue attachments. Preserve existing
-license text and historical release facts; new validation results belong with
-the exact candidate or release that produced them.
+| Lane | Exact target | Core and supporting requirements |
+| --- | --- | --- |
+| Minimum | Core 2026.8.0 with harness 0.13.354 | [`requirements-ha-test.txt`](../requirements-ha-test.txt) |
+| Current | Core 2026.9.1 with harness 0.13.364 | [`requirements-ha-current.txt`](../requirements-ha-current.txt) |
 
-## Hosted checks and release sequence
+The harness is `pytest-homeassistant-custom-component`. Keep these targets,
+workflow job names, requirements, runner pins, and the minimum in
+[`hacs.json`](../hacs.json) consistent when support changes. An exact current
+lane is evidence for that Core version, not an assurance about every newer one.
 
-[`Validate`](../.github/workflows/validate.yaml) runs on pull requests, pushes to
-`main`, and manual dispatch. It uses Ubuntu 24.04, read-only repository
-permissions, nonpersistent checkout credentials, immutable action references,
-and bounded job timeouts. Its **Release gate** succeeds only when the unit,
-minimum HA, current HA, Hassfest, and HACS jobs all succeed. New runs can cancel
-superseded runs in the same workflow/event/ref concurrency group.
+The harness is installed first and the selected requirements afterward. Minimum
+mode also installs mypy, then runs `python -m pip check` before typing and tests.
+Current mode invokes
+[`check_ha_patch_compatibility.py`](../scripts/check_ha_patch_compatibility.py),
+which checks the installed Core and the harness's exact Core requirement and
+runs `pip check` in that environment. The configured matching pairs are intended
+to be dependency-closed.
 
-Local `all` includes Hassfest but does not run the hosted HACS public repository
-metadata check or CodeQL. CodeQL is configured through GitHub's default setup
-for Python and GitHub Actions, outside the checked-in Validate workflow.
-Successful CodeQL execution means analysis completed; review the alerts as well.
-GitHub repository settings can change independently of source, so read them back
-when preparing a release. The configured `main` protection requires an up-to-date
-**Release gate**, applies to administrators, and requires linear history; it does
-not currently require a pull-request review count.
+The checker can recognize a single harness/Core pin conflict when a newer stable
+patch is tested within the minimum's own year/month and the harness pin falls
+within that patch window. That exceptional result proves patch compatibility,
+not dependency closure. Cross-month pin conflicts, prereleases, additional
+conflicts, unexpected metadata, and unexpected dependency-check output fail.
+The exception never permits skipped HA tests or failed collection.
 
-1. Prepare a release candidate with the manifest version, intended immutable
-   `vYYYY.M.D` tag, release title, and release notes aligned. Preserve historical
-   release evidence and identify any remaining source or compatibility limits.
-2. Run the local checks, compare the publisher's age and event-type options with
-   the local taxonomy, and open
-   the release pull request. Wait for all Validate jobs and the aggregate
-   **Release gate**, plus CodeQL's **Analyze (actions)**, **Analyze (python)**,
-   and **CodeQL** checks. Inspect failures and findings rather than treating a
-   submitted run as completed evidence.
-3. Merge through the current default-branch protection without bypass, using
-   squash or rebase to keep history linear. The pull request is the release
-   procedure; it does not imply that repository settings require reviewers.
-4. On the resulting `main` commit, require a successful Validate push run and
-   CodeQL analysis. Inspect complete logs and open code-scanning alerts, and
-   resolve or explicitly disposition findings introduced by the candidate.
-5. Publish the immutable tag and GitHub Release from that exact validated
-   `main` commit. The local validation runner does not perform either publication
-   operation.
+The public-safety guard examines candidate paths and contents for private
+addresses/paths, non-example emails, and recognized credential formats. It also
+rejects unreviewed binary files, symlinks, junctions, and unsupported file types.
+Its inventory is tracked plus nonignored new files in a checkout, or a filesystem
+walk with generated-directory exclusions in an archive. An unavailable checkout
+inventory fails the guard. See
+[`check_public_safety.py`](../scripts/check_public_safety.py) for exact rules.
+The guard does not inspect original Git history, ignored files, or release assets;
+a passing result is not a universal proof that no private information exists.
+Review the actual outgoing content and any relevant historical or external
+artifacts separately.
 
-[Dependabot](../.github/dependabot.yml) proposes weekly GitHub Actions updates
-after a seven-day cooldown. Python pins move with the product's Core and harness
-contract rather than a separate automatic pip update stream.
+## Carry evidence into a release
 
-HACS selection or installation, a Home Assistant configuration check, restart,
-live validation, and rollback are later deployment steps. This source guide does
-not establish that an installation has adopted a release. Instance backups,
-delivery automations, proxy configuration, and recovery evidence remain with
-the deployment owner.
+The [Validate workflow](../.github/workflows/validate.yaml) runs for pull requests,
+`main` pushes, and manual dispatch. Its unit, minimum, current, Hassfest, and HACS
+jobs all feed the **Release gate**. A skipped or failed dependency blocks that
+aggregate check. Jobs have bounded timeouts and read-only permissions; checkouts
+do not persist credentials. Action references are pinned, and
+[Dependabot](../.github/dependabot.yml) proposes weekly updates after a seven-day
+cooldown. Python pins move with the supported Core/harness environments.
+
+Local `all` does not run hosted HACS validation or CodeQL. GitHub's default CodeQL
+setup covers Python and Actions separately from the checked-in workflow. Read
+back repository settings when preparing a release: currently `main` requires an
+up-to-date **Release gate**, including for administrators, and linear history.
+It does not require a review count. Analysis success alone says nothing about
+whether CodeQL found alerts.
+
+For a release, set the manifest version to `YYYY.M.D` and use the corresponding
+`vYYYY.M.D` in the release title and immutable tag. Record the change and its actual
+validation evidence in [release notes](../RELEASE_NOTES.md), preserving previous
+release facts and the [license](../LICENSE). Compare the publisher's RSS builder
+age/type options with the local taxonomy before every release, including when
+local acquisition code has not changed.
+
+Inspect the builder through a browser when its access challenge requires one.
+This is a release-time source review; the builder is not a runtime polling
+dependency. The integration's acquisition boundary remains the RSS endpoint.
+
+Use a release pull request, require terminal success for every Validate job and
+**Release gate**, and inspect CodeQL's **Analyze (actions)**, **Analyze (python)**,
+and **CodeQL** checks. Merge with squash or rebase through branch protection
+without bypass. On the resulting `main` commit, require the Validate push run
+and CodeQL analysis to succeed; review complete logs and resolve or explicitly
+disposition candidate-introduced alerts. Publish the immutable tag and GitHub
+Release only from that exact validated commit.
+
+Source validation, public publication, HACS installation, and live Home Assistant
+adoption are separate results. The runner performs none of the latter three.
+Backups, configuration checks, restart, live readback, delivery tests, and rollback
+belong to the installation's deployment procedure.

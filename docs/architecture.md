@@ -1,316 +1,227 @@
 # Architecture
 
-Free Library Events polls selected Free Library of Philadelphia RSS feeds,
-normalizes their event occurrences, and applies one person's age settings to
-calendar and digest projections. Home Assistant owns configuration, entity
-lifecycle, scheduling primitives, HTTP serving, and notification delivery.
+Free Library Events turns official Free Library of Philadelphia RSS data into age-filtered Home Assistant calendars and weekly digest payloads. One config entry owns one profile and a shared in-memory source snapshot. The integration acquires and interprets publisher data; Home Assistant and external clients own delivery, scheduling, and calendar subscription behavior.
 
-This document describes the runtime contract and its limits. See the
-[user guide](usage.md) for configuration and automation examples, and
-[development guide](development.md) for validation and release procedures.
+For installation and everyday use, see [README.md](../README.md) and [usage.md](usage.md). Contributor checks and release procedures belong in [development.md](development.md).
 
-## Product boundary
+## Runtime shape
 
-The integration owns feed acquisition, deterministic matching, native calendar
-and health entities, a response-producing digest action, and an optional
-calendar subscription endpoint. Those are reusable parts of presenting the same
-library data. They share one coordinator and require no second integration.
+```mermaid
+flowchart TD
+    Config[Config entry: profile and options] --> Coordinator[LibraryDataCoordinator]
+    RSS[Official branch and age RSS feeds] --> Client[LibraryClient]
+    Client --> Parser[Parse and normalize Event records]
+    Parser --> Coordinator
+    Coordinator --> Expansion[Bounded event-type expansion]
+    Expansion --> Client
+    Coordinator --> Snapshot[LibraryData event snapshot]
+    Coordinator --> Attempt[RefreshAttempt evidence]
+    Snapshot --> Status[Status projection]
+    Attempt --> Status
+    Snapshot --> CalendarItems[Shared calendar projection]
+    CalendarItems --> Calendar[Home Assistant calendar]
+    CalendarItems --> Webcal[Token-protected iCalendar route]
+    Snapshot --> Selection[Select digest events]
+    Selection --> Images[Optional temporary CID images]
+    Selection --> Digest[Render digest]
+    Images --> Digest
+    Digest --> Response[Response payload]
+    Response --> Delivery[Caller-owned notification or email delivery]
+```
 
-The operator owns the person's profile, branch selection, acceptable matching
-mode, delivery schedule, recipients, notification service, and network exposure.
-Household decisions and workflows involving other services belong in private
-Home Assistant configuration. The product does not send messages, create
-registrations, add events to external accounts, or track attendance or delivery.
+The runtime coordinator lives in `ConfigEntry.runtime_data`. Setup performs the first source refresh before adding the button, calendar, and sensor platforms. Global setup registers the response-only `free_library_events.render_digest` action and the HTTP route. These registrations can outlive an individual loaded entry; their handlers still require the appropriate loaded runtime.
 
-The boundaries between source and calculation are explicit:
+The principal owners are:
 
-| Information | Owner and treatment |
+| Concern | Source owner |
 | --- | --- |
-| Titles, dates, start times, descriptions, links, images, and age-category labels | Publisher RSS; parsed and normalized locally |
-| Branch registry | Public metadata in `digest.py`; four supported branches, not automatic discovery of every library |
-| Numeric meanings of age categories and text-based fit ranks | Local rules in `digest.py`; category names come from the publisher, numeric windows do not |
-| End time, venue, room, modality, and presentation highlights | Extracted from recognizable RSS wording; missing end times receive a disclosed configurable placeholder |
-| Name, birth date, filter, selected branches, and Webcal settings | Private config entry; no hard-coded household profile |
-| Branch distance used for email budgeting | Calculated locally from Home Assistant's coordinates and public branch coordinates; not travel time |
-| Delivery, reminders, registration, and external-calendar polling | Caller, calendar client, or publisher; outside the integration's guarantees |
+| HTTP acquisition and feed coverage evidence | [api.py](../custom_components/free_library_events/api.py) |
+| Source planning, snapshots, refresh attempts, recovery | [coordinator.py](../custom_components/free_library_events/coordinator.py) |
+| Parsing, occurrence identity, matching, digest rendering | [digest.py](../custom_components/free_library_events/digest.py) |
+| Shared calendar item projection | [calendar_data.py](../custom_components/free_library_events/calendar_data.py) |
+| Home Assistant entities | [calendar.py](../custom_components/free_library_events/calendar.py), [sensor.py](../custom_components/free_library_events/sensor.py), [button.py](../custom_components/free_library_events/button.py) |
+| Response orchestration and entry lifecycle | [__init__.py](../custom_components/free_library_events/__init__.py) |
+| Image download and disposable storage | [email_images.py](../custom_components/free_library_events/email_images.py) |
+| Calendar publishing | [webcal.py](../custom_components/free_library_events/webcal.py) |
+| Persistent settings and their UI | [config.py](../custom_components/free_library_events/config.py), [config_flow.py](../custom_components/free_library_events/config_flow.py) |
+| Sanitized operational evidence | [diagnostics.py](../custom_components/free_library_events/diagnostics.py) |
 
-Runtime code lives in `custom_components/free_library_events/`:
+## Acquisition must prove its horizon
 
-| Module | Responsibility |
+A source is a branch and official age-category pair, keyed as `branch_code:age_category`. The supported branch codes are `SWK`, `IND`, `CEN`, and `PCI`. Their public metadata and RSS URL construction live in `digest.py`.
+
+Every refresh recomputes age-category selection from the configured birth date and Home Assistant's current local date through 90 days ahead. For a minor, the plan also includes all five child and teen categories so explicit inclusive wording can be discovered outside the most obvious category. Adult and senior source selection follows the overlapping local age windows. A window crossing a life-stage boundary retains the categories needed on both sides.
+
+This 90-day interval selects sources. It does not promise 90 days of events. Coverage recovery targets the Sunday at the end of the digest week, and the publisher's capped feeds can leave that shorter horizon unproven.
+
+`LibraryClient` uses Home Assistant's shared HTTP session. Base feeds are acquired concurrently, then the coordinator selects unresolved capped sources for expansion across the 19 event types in `OFFICIAL_EVENT_TYPES`.
+
+| Bound | Runtime behavior |
 | --- | --- |
-| `config.py`, `config_flow.py`, `const.py` | Settings, migrations, configuration flows, stable identifiers |
-| `api.py` | Bounded RSS requests, parsed feed evidence, event-type expansion |
-| `coordinator.py`, `runtime.py` | Source plan, refresh lifecycle, normalized cache, latest attempt evidence |
-| `digest.py` | Parsing, occurrence identity, matching, safe links and markup, digest rendering |
-| `calendar_data.py`, `calendar.py`, `webcal.py` | Shared calendar projection, native entity, iCalendar subscription |
-| `sensor.py`, `button.py`, `entity.py` | Status projection, manual recovery, shared service device |
-| `__init__.py`, `email_images.py` | Setup, digest action orchestration, optional temporary CID images |
-| `diagnostics.py` | Redacted configuration and source-health evidence |
+| Source HTTP work | At most 8 concurrent requests per client; 20-second request timeout |
+| Source trust | HTTPS on the two allow-listed Free Library hosts, with no URL credentials or nondefault port; at most 2 redirects, each revalidated |
+| Source payload | At most 256 KiB per response; parsing runs off the event loop |
+| Adaptive expansion | At most 12 branch/category sources per refresh, prioritizing the digest week's relevant ages, then nearby age windows |
+| Expansion lifetime | Each selected source has a 90-second expansion timeout |
 
-## Configuration and identity
+A `BranchFeed` retains both normalized events and the evidence needed to judge completeness: published and parsed item counts, ordering, last event date, and any event-type expansion results. The modeled publisher cap is 10 items. A feed proves coverage through a date when:
 
-There is one config entry and one service device. The entry's runtime data is
-the typed `LibraryDataCoordinator`; entities do not create independent pollers.
-The entry and device use the static integration name.
+- every published row parsed and the feed contains fewer than 10 items; or
+- every published row parsed, the capped feed is date-ordered, and its last event date is **strictly later** than the requested date; or
+- a completed expansion has explicitly proved that horizon.
 
-Config-entry version 1, minor version 2 separates required profile data from
-optional behavior. Data holds the display name, birth date, and supported branch
-codes in registry order. Options hold matching, placeholder duration, polling,
-and Webcal controls. Legacy branch booleans remain synchronized compatibility
-mirrors. Migration reads legacy options overrides, preserves effective settings,
-and retains unrecognized values in their existing data or options owner.
+A capped feed ending on Sunday cannot prove that it includes every Sunday event. Expansion proves coverage only if all official type requests succeed, each type feed proves the horizon, and the union of type feeds recovers every base-feed occurrence. A successful HTTP response alone does not establish those conditions.
 
-Reconfiguration updates the profile; unchanged profile submissions do not
-reload. Options use Home Assistant's reload-on-save flow. Webcal enabling or
-rotation stages a complete proposed options mapping and shows its URLs before
-saving. Confirmation rejects the proposal if either entry data or options
-changed after staging. Disabling publication removes the token.
+Expansion still contributes useful recovered rows when proof fails. Failures, malformed or unordered type feeds, capped type feeds, and missing base-prefix recovery remain separate evidence. Bounded examples appear in state attributes and digest metadata; diagnostics retain all structured type-feed blockers. Expansion cannot infer events the publisher did not expose, and it does not scrape event detail pages to fill a gap.
 
-These identifiers are compatibility contracts:
+## Normalization and matching preserve source meaning
 
-| Surface | Stable identifier |
+`parse_feed` produces frozen `Event` records. It reads the publisher's event date and start time, extracts safe text and links from description HTML, and retains sanitized rich description markup for email. It recognizes explicit end times or durations, venue and room wording, and online or hybrid event wording. Unknown end times remain unknown until a calendar projection supplies a labeled placeholder.
+
+The parser skips individual rows with unusable dates, times, or oversized fields while retaining the original published count. It limits processing to 100 RSS items and rejects XML DTD and entity declarations, including multibyte encodings. Content limits and skipped rows therefore remain visible as incomplete parsing rather than silently becoming a complete smaller feed.
+
+Ordinary event and description links must be bounded HTTP(S) URLs without embedded credentials. Automatically loaded images have the narrower publisher-hosted HTTPS boundary. Source HTML is sanitized rather than copied into email as executable markup. Venue and modality evidence also controls calendar locations and directions links so an online event does not acquire an invented physical destination.
+
+### Occurrence identity
+
+The identity is:
+
+```text
+{event.link or event.title}:{branch.code}:{event_date ISO}:{start_time ISO}
+```
+
+The date and time distinguish occurrences that reuse a recurring-series URL. Branch identity distinguishes the same link used at different branches. A source time or date change creates a different occurrence identity; this is not an upstream event-revision tracker.
+
+`merge_events` applies a deterministic, input-order-independent rule. It unions age-category provenance and safe description links, retains richer safe descriptions, and fills available image, end-time, venue, and room fields. An inactive publisher title takes precedence over an overlapping active row, so a cancellation cannot disappear because another feed still carries older copy. Titles marked canceled, cancelled, postponed, or rescheduled are excluded from actionable projections.
+
+Display truncation is downstream of this identity. Shortened email copy must not change the underlying occurrence, calendar UID, or inclusion metadata.
+
+### Age fit
+
+Matching is deterministic and evaluates age **on the event date**. It first considers explicit numeric age wording, then matching publisher categories and specific audience wording, followed by explicit inclusive language. A nonmatching publisher category blocks generic family-oriented inference, while explicit inclusive wording can support a match. Events before the birth date are excluded.
+
+The publisher supplies category names; the numeric windows below are local interpretation rules, not publisher guarantees. Lower bounds are inclusive and upper bounds exclusive.
+
+| Category | Local window in months |
 | --- | --- |
-| Integration and config-entry unique ID | `free_library_events` |
-| Service-device identifier | `("free_library_events", "free_library_events")` |
-| Calendar unique ID | `free_library_events_calendar` |
-| Status unique ID | `free_library_events_status` |
-| Refresh-button unique ID | `free_library_events_refresh` |
-| Digest action | `free_library_events.render_digest` |
-| Webcal route | `/api/free_library_events/calendar/{token}.ics` |
+| Baby | 0–36 |
+| Toddler | 9–48 |
+| Preschool | 30–72 |
+| School Age | 60–156 |
+| Young Adult | 144–228 |
+| Adult | 216 onward |
+| Senior | 720 onward |
 
-Home Assistant entity IDs can be renamed; they are distinct from these unique
-IDs. The stored `child_name` key remains for compatibility even though the
-profile and user interface support a person of any age.
+`Strict` includes `best`; `Recommended` includes `best`, `good`, and `possible`; `Broad` adds `broad`. A filter-mode change affects matching, not the source acquisition plan. Age suitability remains an interpretation of published evidence, and official event details remain the source for attendance and registration decisions.
 
-## Source acquisition and coverage
+## Projections have different clocks and guarantees
 
-The supported registry contains Charles Santore (`SWK`), Independence (`IND`),
-Parkway Central (`CEN`), and Philadelphia City Institute (`PCI`). Each selected
-branch is queried through `eventsrss.cfm` with official age-category filters.
-Runtime acquisition does not scrape event pages or fetch publisher ICS files.
-Safe links to those pages may still appear in output.
+The immutable `LibraryData` snapshot contains merged events, branch counts, source statuses and errors, and its UTC `fetched_at`. Its nested mappings are detached and read-only. `RefreshAttempt` separately records the latest completed base-source attempt, including counts, sanitized error categories, and expedited-retry status.
 
-Each refresh recomputes the source plan using the person's age from today
-through 90 days ahead. A minor's plan includes Baby through Young Adult to find
-inclusive events published under narrower labels. An adult's plan uses the
-locally applicable Young Adult, Adult, or Senior windows. A window crossing
-adulthood includes both sides. This horizon selects age feeds; it does not
-promise 90 days of event availability.
+Those records serve different purposes: a new failed attempt can coexist with an older retained event snapshot. `last_refresh` describes retained data; `last_attempt` describes the latest attempt. Branch counts measure merged cached rows before age filtering, cancellation filtering, or weekly selection.
 
-All RSS requests share an eight-request semaphore. Each HTTP request has a
-20-second timeout, accepts at most 256 KiB of decoded response data, and follows
-at most two redirects. Initial and redirected URLs must use HTTPS on
-`libwww.freelibrary.org` or `www.freelibrary.org`, without embedded credentials
-or a nonstandard port. Parsing runs outside the event loop.
-
-`BranchFeed` records published item count, parsed count, date ordering, final
-parsed event date, and expansion evidence separately from its normalized rows.
-The coverage model uses the observed ten-item RSS boundary:
-
-- A feed with fewer than ten items and every item parsed is treated as covering
-  the requested horizon, including an empty feed.
-- At ten or more items, a fully parsed, ordered feed must reach a date strictly
-  after the horizon. Reaching its final day is insufficient because more events
-  on that day may be missing.
-- An unresolved fully parsed, ordered capped feed can be expanded through the
-  19 event types listed in `OFFICIAL_EVENT_TYPES`. There is no pagination loop.
-
-The coordinator expands at most twelve sources per refresh, prioritizing
-current-age windows, then the nearest supplemental windows, with deterministic
-branch ordering. Each expansion has a 90-second deadline. Expansion failure
-preserves the base feed; successful shards contribute rows even when other
-shards fail.
-
-Expansion proves coverage through the digest week's end only if every type
-feed succeeds and covers that horizon, and the combined shards recover every
-base occurrence. Individual blockers retain their reason, event type, counts,
-and last date. An ordered type feed still capped before the horizon differs
-from malformed, incompletely parsed, unordered, or unavailable source evidence.
-
-These are bounded claims about the queried RSS feeds and maintained taxonomy.
-They do not prove that the publisher listed every event, assigned every useful
-category, or left its feed limit and taxonomy unchanged. A longer calendar
-range is limited to the rows already obtained; reading it does not extend
-acquisition or coverage.
-
-## Normalization and matching
-
-`Event` and its nested source values are immutable. The parser requires usable
-event date and start time, bounds individual fields and item count, and skips
-invalid rows while retaining the published-versus-parsed mismatch. It rejects
-XML DTD and entity declarations. RSS description markup passes through an
-allow-list sanitizer; safe HTTP(S) links, paragraphs, emphasis, and lists can
-survive, while executable markup cannot. Image URLs have a narrower publisher
-host allow-list.
-
-Occurrence identity is the source link, or normalized title when no link is
-available, followed by branch code, event date, and start time. Thus one series
-URL can identify several distinct occurrences. Display-title shortening does
-not change identity. A publisher URL change, or a title change when no URL
-exists, can change identity; this is not an upstream immutable event-ID service.
-
-`merge_events` uses a deterministic order independent of feed arrival. It unions
-official age classifications and safe related links, retains richer descriptive
-content, and fills available image, end-time, venue, and room data. For the same
-identity, a title marked cancelled, canceled, postponed, or rescheduled takes
-precedence. Calendar and digest projections omit those inactive occurrences.
-No cancellation record or historic occurrence ledger is maintained.
-
-Matching evaluates age on the event date. Recognized explicit age restrictions
-take precedence, then applicable official category labels under the local age
-windows, then deterministic audience wording. Explicit inclusive language can
-recover an event whose category is narrower than its description. An unrelated
-official category is not silently replaced by generic activity-title inference.
-`Strict`, `Recommended`, and `Broad` select progressively wider fit ranks; the
-user guide explains their practical use. These are deterministic relevance
-rules, not eligibility or registration decisions from the publisher.
-
-RSS start times are interpreted in `America/New_York`. An explicit matching
-time range or recognized duration in the description supplies an end time only
-within the parser's 15-minute to eight-hour bounds. Otherwise calendar outputs
-use the configured duration and label it as a placeholder. Venue, modality,
-and logistics highlights are text-derived presentation; they do not add source
-taxonomy or alter age inclusion.
-
-## Refresh, recovery, and health
-
-The config-entry-owned Home Assistant coordinator handles polling and debounced
-refresh triggers. Overlap is bounded to a running refresh and a pending
-follow-up. A manual refresh or forced digest waits for a completed attempt,
-including work already in flight, with a ten-minute caller deadline. Cancelling
-or timing out a caller does not cancel shared acquisition. Coordinator unload
-stops its scheduled work and releases waiting callers with failure.
-
-A refresh with at least one successful base source publishes a new immutable
-`LibraryData` snapshot: merged event tuples, read-only source mappings, and one
-fetch timestamp. Failed sources are recorded, but their previous rows are not
-merged into this new partial snapshot. When every base source fails, the update
-fails and the last successful snapshot remains retained.
-
-`RefreshAttempt` separately records the latest completed base-source attempt,
-including source keys, allow-listed error categories, retryable count, completion
-time, and retry decision. Repeated failures update this evidence even when Core
-would suppress an unchanged failed state notification.
-
-The first complete failure in a continuous failure streak requests one
-five-minute retry only when every failure is retryable. Retryable failures are
-transport failures and the selected HTTP statuses in `api.py`; TLS policy,
-redirect, parsing, and size failures do not qualify. A repeated complete failure
-returns to the configured polling interval. Any partial or full success resets
-the allowance. Initial setup follows Core's setup retry policy.
-
-The diagnostic status remains available while the entry is loaded:
-
-| Raw state | Meaning for the selected digest week |
+| Time domain | Meaning |
 | --- | --- |
-| `error` | Latest refresh failed completely |
-| `partial` | A current-age source failed or lacks coverage evidence, or supplemental acquisition has an operational failure |
-| `limited` | Current-age coverage is satisfied but healthy supplemental feeds remain limited |
-| `ok` | No current or supplemental source issue detected by the coverage model |
+| Publisher event time | Parsed as Philadelphia wall time; calendar items attach `America/New_York`, including daylight-saving behavior |
+| Home Assistant local date | Chooses the source age horizon and digest week |
+| Digest week | Monday through Sunday, using the next Monday except that a Monday call includes that same Monday |
+| Status projection boundary | Tuesday at local midnight, when the digest-week calculation advances; re-evaluates cached data without source I/O |
+| Operational timestamps | Refresh, attempt, image-expiry, and HTTP/calendar modification evidence use UTC |
 
-`ok` does not certify publisher completeness or message delivery. Counts and
-coverage attributes describe the retained cache; latest-attempt attributes
-describe the most recent attempt. The refresh button also remains available
-after failure and raises an error if its awaited attempt fails.
+The status entity keeps an immutable projection for property reads. It rebuilds on coordinator updates, consecutive failed-attempt notifications, the Tuesday boundary, and a Home Assistant timezone change. It writes state only when the projection changes and removes its scheduled callback when unloaded. This avoids both network calls from state reads and a stale weekly count during a prolonged outage.
 
-Digest selection uses Home Assistant's local date: Monday includes that Monday's
-week, while Tuesday through Sunday select the following Monday through Sunday.
-The sensor recalculates this projection at Tuesday local midnight without RSS
-I/O, responds to timezone changes, and removes its timer and listener on unload.
-Core owns the native calendar entity's current/upcoming-event scheduling.
+`build_calendar_items` is shared by the Home Assistant calendar and WebCal. It includes all active, age-matched cached occurrences rather than applying the digest week or email size budget. Recognized end times take precedence; otherwise it uses `calendar_duration_minutes` and explains the placeholder in the description. The Home Assistant calendar selects current/next events and requested overlapping ranges from this projection. Opening a wider range does not fetch more publisher data.
 
-## Calendar projections and subscriptions
+## Recovery retains evidence without concealing failure
 
-`calendar_data.py` builds one age-filtered calendar model used by both native
-Home Assistant calendar queries and Webcal. It includes source descriptions,
-safe related links, official-details links, locations, and any placeholder-end
-note. Native range queries return cached events overlapping the requested
-interval. Email display budgets do not truncate this calendar model.
+A refresh with at least one successful base feed produces a new snapshot from that refresh's successful sources and successful expansion rows. Failed sources are listed as errors; their older rows are not carried forward into the new partial snapshot. If every base source fails, the coordinator fails the update and retains its previous snapshot, if any. That cache is in memory, with no event-history persistence or restart restoration.
 
-Webcal serializes the current model as RFC 5545 content with UTC timestamps,
-escaped text, UTF-8-safe line folding, and occurrence-based UIDs. The route is
-registered once per process and accepts `GET` and `HEAD`. Publication must be
-enabled, the entry loaded, and the opaque token matched using constant-time
-comparison. Invalid, disabled, or unloaded tokens return `404`; an otherwise
-valid entry without cached data returns `503` with a retry hint.
+The diagnostic status stays available:
 
-The endpoint never refreshes sources. It can serve retained data after a
-complete acquisition failure. `ETag` hashes the serialized body;
-`Last-Modified` reflects the later cache/config-entry timestamp. Conditional
-requests can return `304`, and HTTP caching allows five minutes before
-revalidation. The iCalendar refresh hints reflect the configured source polling
-interval, but clients control their own polling and cached-event removal.
+| State | Meaning |
+| --- | --- |
+| `ok` | The retained snapshot proves the digest-week coverage for relevant and supplemental age sources |
+| `limited` | Relevant-age coverage is complete, but otherwise healthy supplemental discovery remains capped or unproven |
+| `partial` | Relevant-age requests or coverage are incomplete, or supplemental discovery has an operational or parsing failure |
+| `error` | The latest coordinator update failed completely; older cache evidence may still be present |
 
-The URL token is the credential for this route; Home Assistant bearer login is
-not required. URL generation prefers a configured external/cloud address and
-otherwise discloses an internal-only address. A generated URL does not establish
-DNS, TLS, proxy, firewall, or calendar-provider reachability. `webcal://` is a
-client handoff form of the HTTP(S) subscription address.
+The current-age and supplemental coverage attributes describe the retained snapshot. An `error` state and newer `last_attempt` can invalidate a freshness assumption even when the retained snapshot's coverage flags are true. An empty matched result is likewise not proof that no suitable event exists outside the proven source coverage.
 
-## Digest response and temporary images
+The first failure in a complete-failure streak can receive a five-minute expedited retry only when all failures are retryable transport/HTTP failures and setup has finished. Policy, TLS, parsing, and unsafe-source failures do not qualify. Later failures in the same streak use Core's normal scheduling; any successful base-source refresh resets the streak. Setup retry scheduling belongs to Home Assistant Core.
 
-`free_library_events.render_digest` is response-only and requires exactly one
-loaded entry. It returns `subject`, plain-text `message`, `html`, and `metadata`.
-`force_refresh` defaults to `true`; a failed forced refresh raises an error.
-With `false`, the action can render the retained cache without a new attempt,
-so consumers must interpret `metadata.fetched_at` as the source timestamp.
+Manual refresh and forced digest rendering use the coordinator's shared, debounced completion wait. They wait for an actual completed attempt, including work already in flight. A canceled caller or ten-minute wait timeout does not cancel the shared source refresh. Unload releases waiters and prevents them from treating an unloaded coordinator as a successful result.
 
-The action captures configuration and coordinator ownership before an awaited
-refresh and rejects ownership or settings changes detected afterward. It then
-captures one immutable data snapshot for rendering and optional image work.
-Later refreshes cannot mix new rows or timestamps into that response.
+Consumers expose failure differently:
 
-Email rendering bounds descriptions, links, event count, and HTML size
-(100 events and 80,000 HTML bytes). Under pressure it keeps nearer branches'
-rich cards, uses compact cards, and can omit farther occurrences. Local branch
-distance also prioritizes optional image downloads. Without usable coordinates,
-the ordering falls back deterministically to date, branch, and title. Final
-presentation stays chronological; the bodies disclose email-only omissions.
-Matching counts and occurrence IDs describe the full matched set, while
-email-specific counts describe its rendered subset.
+- The refresh button remains available and reports whether the attempt succeeded.
+- The status sensor remains available to expose the failure and retained-cache evidence.
+- The Home Assistant calendar follows coordinator availability and becomes unavailable on a failed update.
+- WebCal can serve the retained cache while its entry remains loaded.
+- A default forced digest fails when the refresh fails. `force_refresh: false` can render retained data; its `fetched_at` is the caller's freshness evidence, and its source warnings describe that snapshot rather than a newer failed attempt.
 
-The pure renderer does not perform I/O. `embed_images`, which defaults to
-`false`, adds bounded image acquisition in the action layer. It attempts at
-most twelve unique publisher images with four concurrent requests, a 15-second
-HTTP request timeout, two trusted redirects, a 3 MiB per-image limit, and a
-15 MiB stored-image total. Supported file signatures are checked; available
-dimensions guide layout. Temporary request failures and aggregate limits can
-fall back to remote images. Unsafe redirects, unsupported content, and
-oversized individual images are omitted.
+## A digest is a response with optional temporary files
 
-Successful downloads live in a random, marked run directory under Local Media
-when configured, with a legacy `www` fallback otherwise. The response's `images`
-contains local paths; `attachments` contains native SMTP media-source objects
-only when a Local Media directory is available. Both select only CIDs referenced
-by the final HTML. Cleanup is scheduled after one hour, stale runs are purged before
-embedding, and setup purges previously marked runs from current and legacy
-locations. Cleanup checks integration-owned directory names and markers and
-preserves unrelated files. These files are temporary delivery inputs, not a
-durable archive or a retry queue.
+`free_library_events.render_digest` requires exactly one loaded entry. Its schema accepts `force_refresh` (default `true`) and `embed_images` (default `false`) and returns response data only. It does not send mail or schedule delivery.
 
-The caller must deliver the response using its chosen notification service.
-Rendering, downloaded images, calendar links, and SMTP attachment objects do
-not establish successful delivery or an external calendar subscription.
+The handler captures the accepted profile/options and coordinator before awaiting a forced refresh. It rejects the result if the entry unloaded, its runtime was replaced, or its settings changed during that wait. Rendering then selects active occurrences in the digest week and applies the shared age rules.
 
-## Diagnostics and privacy
+Before the first image-download await, the handler retains one immutable `LibraryData` snapshot. Event selection, image inputs, coverage metadata, and `fetched_at` all come from that generation. A later refresh cannot mix newer rows or evidence into a response already being prepared.
 
-Diagnostics redact the display name, birth date, and custom calendar name.
-Effective runtime configuration excludes the Webcal token. Invalid stored
-settings yield `invalid_config` without returning the malformed configuration.
-Source and coordinator exceptions become bounded categories rather than raw
-transport errors. Diagnostics retain full finite source-expansion evidence;
-entity state and response metadata bound failure/blocker examples to three.
+The response's `subject`, plain-text `message`, `html`, and `metadata` serve different consumers. Inclusion metadata describes the full age-matched weekly set. Email-specific metadata distinguishes full cards, compact cards, shortened descriptions, and events omitted by output limits. `included_occurrence_ids` preserves occurrence identity; `included_event_ids` is a legacy link-derived projection and must not be treated as a unique recurring-occurrence key.
 
-RSS acquisition sends selected branch and category queries to the publisher,
-not the stored name or birth date. Coordinates and calculated distances remain
-ephemeral: they are not rendered, logged, persisted, or returned in metadata.
-The digest intentionally contains the configured display name and derived age;
-action traces and downstream messages therefore require private handling.
-Embedded-image responses also contain local file paths.
+Email is limited to 100 candidate events and an 80,000-byte HTML budget. The renderer compacts cards and, if necessary, omits lower-priority events with disclosure. Home Assistant's coordinates can locally prioritize nearer branches for richer cards and retention; coordinates and distance values are not printed in the digest. This presentation priority does not alter age fit or the calendar projection. Public event details, registration links, directions, and Google Calendar creation links remain user-followed links rather than automatic registrations or calendar writes.
 
-Anyone with an enabled subscription URL can read its filtered events and
-configured calendar name. Filtering can reveal interests or an approximate age
-group even without including the stored birth date. Tokens are omitted from
-integration diagnostics, entities, and authored logs, but HTTP access logs and
-calendar clients may retain subscription URLs. Network exposure and handling
-of those external records remain deployment responsibilities.
+The email uses presentation tables, percentage line heights, and cell spacing, with a stacked layout that remains usable when a client ignores responsive CSS. Posters retain their aspect ratio and use a 440-pixel fallback width, expanding responsively where supported; branch-calendar columns stack below 390 pixels. These are intentional markup constraints, not a claim that every mail client has been visually verified.
+
+With `embed_images: false`, safe publisher image URLs remain in HTML. With embedding enabled, `email_images.py` deduplicates image requests, downloads at most 12 images with concurrency 4, and bounds each file to 3 MiB and the batch to 15 MiB. Requests have a 15-second timeout and a revalidated, at-most-two-redirect chain. Supported image signatures are checked rather than trusting the response content type.
+
+Transient request failures and resource limits can retain a remote-image fallback. Invalid image data, unsafe redirects, missing images, and per-file oversize failures omit the image instead. Failure counts and bounded examples are returned separately from event-source coverage.
+
+Downloaded images are written to a unique marked `run-...` directory under the integration's `.free_library_events_email` directory. Storage prefers a configured Local Media directory; the fallback is the integration-owned directory under `www`. The response supplies `images` paths for legacy consumers and `attachments` objects for `smtp.send_message` when Local Media is available. CID values use attachment basenames, and only images actually referenced by final HTML are returned.
+
+If storage creation or writing fails, rollback can remove only a run directory created by that invocation. A name collision or failed directory creation must leave pre-existing data intact.
+
+Cleanup is scheduled one hour after a run is stored. Later embedded renders also purge stale runs, and integration startup purges previously managed runs from current and legacy locations. Cleanup requires both the expected run name and ownership marker. It preserves unrelated files and directories. Process downtime can delay removal, while a restart can remove images before the nominal expiry. A recipient's retained email or attachment is outside this cleanup lifecycle. Delivery must consume the returned files while they exist, and a failed delivery is the caller's recovery responsibility.
+
+## WebCal is a revocable read capability
+
+Publishing is disabled by default. When enabled, `webcal.py` serves GET and HEAD at:
+
+```text
+/api/free_library_events/calendar/{token}.ics
+```
+
+The route does not require a Home Assistant login. The opaque token is the read capability, compared against the enabled options of a loaded entry. Unknown tokens, disabled publishing, and unloaded entries return 404. A matching loaded entry without a snapshot returns 503 with `Retry-After: 300`. Requests render the current cache; they do not trigger acquisition or write to an external calendar.
+
+The options flow generates tokens with `token_urlsafe(32)`. Enabling or rotating a token stages the replacement and shows subscription URLs before saving. Saving rejects concurrent changes to either profile data or options. Disabling removes the stored token; rotation invalidates the old address once the replacement is saved. Revocation stops subsequent access through that address but cannot remove copies an external subscriber already retained.
+
+The generated HTTP(S) address prefers Home Assistant's external or cloud URL and falls back to an internal URL, with that scope disclosed. A `webcal://` form is a convenience address for subscription clients. A configured URL does not prove remote reachability; DNS, transport security, access configuration, and subscriber polling remain external concerns.
+
+The serializer uses deterministic RFC 5545 content, escaped text, CRLF line endings, and UTF-8-safe line folding. Calendar UIDs append `@free-library-events.home-assistant` to the shared occurrence identity. Event timestamps are UTC. Entries are transparent, published events; the feed does not model attendance or an upstream revision sequence.
+
+Responses use a body-hash ETag and `Last-Modified` based on the later of the source snapshot and config-entry modification time. GET and HEAD share metadata, conditional requests can return 304, and `If-None-Match` takes precedence over `If-Modified-Since`. The HTTP cache policy is private with a five-minute revalidation interval. Calendar refresh hints reflect the configured source interval, but the subscriber controls when it polls.
+
+The feed omits the configured person's name and birth date. Its selected events and configurable calendar name can still reveal interests or profile-related information. Treat the entire subscription address as sensitive, including when it appears in a subscribing service or proxy log. Diagnostics omit the token and redact the person's name, birth date, and calendar name; they retain source categories, counts, and operational evidence. Error reporting uses allow-listed categories rather than arbitrary exception text.
+
+Invalid stored configuration produces `config: null` and the fixed `invalid_config` category in diagnostics, without exposing the rejected values. Home coordinates and calculated branch distances are never logged, persisted by this integration, or returned in action metadata; the response can indicate that distance priority was used without disclosing those inputs.
+
+## Persistent identity and change boundaries
+
+Config entry version `1.2` separates required profile data from behavior options:
+
+| Owner | Values |
+| --- | --- |
+| Entry data, edited through reconfiguration | `child_name`, `birth_date`, `branches`, and legacy branch-boolean compatibility mirrors |
+| Entry options | `filter_mode`, `calendar_duration_minutes`, `scan_interval_seconds`, `publish_webcal`, `webcal_name`, and the enabled feed's `webcal_token` |
+
+Normalization is shared by UI, migration, and runtime reads. It rejects unsupported branch codes, future or invalid birth dates, fractional timing values, and out-of-range options. The effective runtime config excludes the WebCal token. Unknown existing fields survive the owned-field updates where supported.
+
+Migration accepts older minor versions of entry version 1 and moves combined settings to the `1.2` owners. Legacy options take precedence over data during normalization; legacy branch booleans are maintained as compatibility mirrors. Newer unknown versions are rejected rather than rewritten. This migration changes storage ownership without changing the single-entry identity.
+
+The config entry unique ID remains `free_library_events`, and the integration keeps a generic service-device identity `(free_library_events, free_library_events)`. Entity unique IDs are `free_library_events_calendar`, `free_library_events_status`, and `free_library_events_refresh`. These are registry identities, not promises about user-visible entity IDs, which Home Assistant users may rename. Profile reconfiguration and option updates use native reload behavior; unchanged profile data avoids an unnecessary reload.
+
+Changes should follow the owner that establishes the behavior. Parser or matching changes must remain consistent across digest, status counts, and both calendar outputs. Calendar formatting belongs in the shared calendar projection before either adapter. Acquisition changes must preserve coverage evidence and bounded request work. Publication changes must preserve token revocation, loaded-entry checks, and conditional-response semantics. Image changes must preserve attachment/CID agreement and disposable-file ownership.
+
+Household delivery schedules, recipients, SMTP configuration, credentials, external calendar accounts, and any automation conditions or delivery deduplication belong to their Home Assistant or external-service owners. They are not additional persistent state for this integration. The product's contract ends at its entities, read-only feed, response payload, and temporary image files.
+
+The source contracts are exercised in [test_digest.py](../tests/test_digest.py), [test_integration_ha.py](../tests/test_integration_ha.py), [test_acquisition_ha.py](../tests/test_acquisition_ha.py), and [test_email_images.py](../tests/test_email_images.py). See [development.md](development.md) for how to run the maintained checks.

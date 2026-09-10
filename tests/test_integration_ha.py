@@ -351,7 +351,7 @@ async def test_options_flow_enables_and_rotates_webcal_feed(
             "webcal://ha.example.test/api/free_library_events/calendar/"
             f"{first_token}.ics"
         ),
-        "url_scope": "This address uses Home Assistant's external or cloud URL",
+        "url_scope": "This URL uses an external or cloud Home Assistant address. Your calendar service must be able to reach that address; the URL has not been tested from outside your network.",
     }
 
     entry.runtime_data = Mock(source_result_count=1)
@@ -1290,7 +1290,7 @@ async def test_setup_entities_action_and_redacted_diagnostics(
         "Related: Early literacy: https://example.test/literacy"
         in (calendar_state.attributes["description"])
     )
-    assert "No end time was recognized" not in calendar_state.attributes["description"]
+    assert "No end time was found" not in calendar_state.attributes["description"]
     assert datetime.fromisoformat(
         calendar_state.attributes["end_time"]
     ) - datetime.fromisoformat(calendar_state.attributes["start_time"]) == timedelta(
@@ -3040,7 +3040,10 @@ async def test_digest_discloses_an_operational_supplemental_failure(
             return_response=True,
         )
 
-    assert "Some feed requests failed or may be incomplete" in response["message"]
+    assert (
+        "Some feed requests failed or have unresolved coverage limits"
+        in response["message"]
+    )
     assert "Charles Santore Library — Young Adult" not in response["message"]
     assert "offline" not in response["message"]
     assert response["metadata"]["supplemental_age_failures"] == [
