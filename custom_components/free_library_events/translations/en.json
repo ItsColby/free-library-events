@@ -99,7 +99,7 @@
       "invalid_filter_mode": "Choose Strict, Recommended, or Broad.",
       "invalid_calendar_duration": "Enter a whole number from 15 to 240 minutes.",
       "invalid_scan_interval": "Enter a whole number from 900 to 86400 seconds.",
-      "invalid_webcal_name": "Enter a calendar name of 1–80 characters.",
+      "invalid_webcal_name": "Enter a calendar name of 1–80 characters without control characters.",
       "webcal_url_unavailable": "No Home Assistant address is available for the subscription URL. Set an internal or external Home Assistant URL, then reopen these settings.",
       "invalid_config": "Review the values in this form and try saving again."
     },

@@ -1,3 +1,27 @@
+# Free Library Events v2026.9.10
+
+## Fixed
+
+- Reject non-RSS XML responses and malformed feed structure instead of treating
+  error pages as complete empty event feeds. Valid empty feeds remain supported.
+- Honor explicit wording such as “children 18 months to 5 years old” when
+  matching events, so broader publisher categories cannot override the age range.
+- Reject control characters in custom calendar names before they reach the
+  subscription feed.
+- Unload partially forwarded platforms when setup fails or is cancelled, so a
+  retry does not retain old entities, listeners, or timers.
+- Keep temporary-image expiry registration running when a digest caller cancels
+  during file storage.
+
+## Documentation and development
+
+- Rebuild installation, settings, delivery, troubleshooting, architecture, and
+  contributor documentation from the current product contracts. Rewrite native
+  setup and action help to explain behavior, limitations, and recovery.
+- Reuse validation downloads, run isolated Home Assistant lanes concurrently,
+  and preserve their shared input until active lanes finish after a handled
+  interruption.
+
 # Free Library Events v2026.9.8
 
 ## Fixed

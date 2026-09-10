@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -55,6 +56,8 @@ from .digest import (
 from .email_images import (
     EMAIL_IMAGE_DIRECTORY,
     IMAGE_CACHE_TTL_SECONDS,
+    ImageDownloadBatch,
+    StoredImageBundle,
     async_download_event_images,
     purge_stale_image_runs,
     purge_stored_image_runs,
@@ -152,6 +155,30 @@ def _smtp_attachments(
     return attachments
 
 
+async def _async_store_images_with_expiry(
+    hass: HomeAssistant, image_root: Path, download_batch: ImageDownloadBatch
+) -> tuple[StoredImageBundle | None, str | None]:
+    """Own the storage result and its expiry even if the render caller leaves."""
+
+    try:
+        stored_images = await hass.async_add_executor_job(
+            store_downloaded_images, image_root, download_batch
+        )
+    except OSError:
+        return None, None
+    if (run_directory := stored_images.run_directory) is None:
+        return stored_images, None
+
+    async def _async_remove_images(_now: datetime) -> None:
+        await hass.async_add_executor_job(remove_stored_image_run, run_directory)
+
+    async_call_later(hass, IMAGE_CACHE_TTL_SECONDS, _async_remove_images)
+    expires_at = (
+        datetime.now(UTC) + timedelta(seconds=IMAGE_CACHE_TTL_SECONDS)
+    ).isoformat()
+    return stored_images, expires_at
+
+
 async def async_setup(hass: HomeAssistant, config: dict[str, object]) -> bool:
     """Register the native response-returning digest action."""
 
@@ -213,7 +240,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: LibraryConfigEntry) -> b
     )
     entry.runtime_data = coordinator
     await coordinator.async_config_entry_first_refresh()
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    try:
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    except BaseException:
+        # Core closes coordinator callbacks on setup failure, but already loaded
+        # platforms own entity listeners and projection timers separately.
+        await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+        raise
     return True
 
 
@@ -330,16 +363,17 @@ async def _async_render_digest(call: ServiceCall) -> ServiceResponse:
             image_root,
             datetime.now(UTC).timestamp() - IMAGE_CACHE_TTL_SECONDS,
         )
-        try:
-            stored_images = await hass.async_add_executor_job(
-                store_downloaded_images, image_root, download_batch
+        stored_images, image_expires_at = await asyncio.shield(
+            hass.async_create_task(
+                _async_store_images_with_expiry(hass, image_root, download_batch),
+                f"{DOMAIN} store digest images",
             )
-        except OSError:
+        )
+        if stored_images is None:
             image_download_failure_count = image_download_count
             image_download_failure_examples = (
                 "Home Assistant could not store digest images",
             )
-            stored_images = None
         fallback_urls = set(download_batch.fallback_urls)
         if stored_images is None:
             fallback_urls.update(image.source_url for image in download_batch.images)
@@ -360,18 +394,6 @@ async def _async_render_digest(call: ServiceCall) -> ServiceResponse:
         }
         if stored_images is not None:
             embedded_image_paths = stored_images.paths
-            run_directory = stored_images.run_directory
-            if run_directory is not None:
-
-                async def _async_remove_images(_now: datetime) -> None:
-                    await hass.async_add_executor_job(
-                        remove_stored_image_run, run_directory
-                    )
-
-                async_call_later(hass, IMAGE_CACHE_TTL_SECONDS, _async_remove_images)
-                image_expires_at = (
-                    datetime.now(UTC) + timedelta(seconds=IMAGE_CACHE_TTL_SECONDS)
-                ).isoformat()
     response = build_digest(
         child_name=config[CONF_CHILD_NAME],
         birth_date=birth_date,

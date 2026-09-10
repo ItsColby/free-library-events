@@ -29,7 +29,7 @@ flowchart TD
     Response --> Delivery[Caller-owned notification or email delivery]
 ```
 
-The runtime coordinator lives in `ConfigEntry.runtime_data`. Setup performs the first source refresh before adding the button, calendar, and sensor platforms. Global setup registers the response-only `free_library_events.render_digest` action and the HTTP route. These registrations can outlive an individual loaded entry; their handlers still require the appropriate loaded runtime.
+The runtime coordinator lives in `ConfigEntry.runtime_data`. Setup performs the first source refresh before adding the button, calendar, and sensor platforms. Failed or cancelled platform setup unloads any platforms already acquired before allowing a retry. Global setup registers the response-only `free_library_events.render_digest` action and the HTTP route. These registrations can outlive an individual loaded entry; their handlers still require the appropriate loaded runtime.
 
 The principal owners are:
 
@@ -78,7 +78,7 @@ Expansion still contributes useful recovered rows when proof fails. Failures, ma
 
 `parse_feed` produces frozen `Event` records. It reads the publisher's event date and start time, extracts safe text and links from description HTML, and retains sanitized rich description markup for email. It recognizes explicit end times or durations, venue and room wording, and online or hybrid event wording. Unknown end times remain unknown until a calendar projection supplies a labeled placeholder.
 
-The parser skips individual rows with unusable dates, times, or oversized fields while retaining the original published count. It limits processing to 100 RSS items and rejects XML DTD and entity declarations, including multibyte encodings. Content limits and skipped rows therefore remain visible as incomplete parsing rather than silently becoming a complete smaller feed.
+The parser requires an RSS document with exactly one channel, so XML error or challenge pages cannot become successful empty feeds. A valid channel with no items remains a valid empty feed. The parser skips individual rows with unusable dates, times, or oversized fields while retaining the original published count. It limits processing to 100 RSS items and rejects XML DTD and entity declarations, including multibyte encodings. Content limits and skipped rows therefore remain visible as incomplete parsing rather than silently becoming a complete smaller feed.
 
 Ordinary event and description links must be bounded HTTP(S) URLs without embedded credentials. Automatically loaded images have the narrower publisher-hosted HTTPS boundary. Source HTML is sanitized rather than copied into email as executable markup. Venue and modality evidence also controls calendar locations and directions links so an online event does not acquire an invented physical destination.
 
@@ -181,7 +181,7 @@ Downloaded images are written to a unique marked `run-...` directory under the i
 
 If storage creation or writing fails, rollback can remove only a run directory created by that invocation. A name collision or failed directory creation must leave pre-existing data intact.
 
-Cleanup is scheduled one hour after a run is stored. Later embedded renders also purge stale runs, and integration startup purges previously managed runs from current and legacy locations. Cleanup requires both the expected run name and ownership marker. It preserves unrelated files and directories. Process downtime can delay removal, while a restart can remove images before the nominal expiry. A recipient's retained email or attachment is outside this cleanup lifecycle. Delivery must consume the returned files while they exist, and a failed delivery is the caller's recovery responsibility.
+Cleanup is scheduled one hour after a run is stored. An independently tracked storage task registers that cleanup even if the digest caller cancels while files are being written. Later embedded renders also purge stale runs, and integration startup purges previously managed runs from current and legacy locations. Cleanup requires both the expected run name and ownership marker. It preserves unrelated files and directories. Process downtime can delay removal, while a restart can remove images before the nominal expiry. A recipient's retained email or attachment is outside this cleanup lifecycle. Delivery must consume the returned files while they exist, and a failed delivery is the caller's recovery responsibility.
 
 ## WebCal is a revocable read capability
 

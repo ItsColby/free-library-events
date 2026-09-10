@@ -21,6 +21,7 @@ from homeassistant.helpers.update_coordinator import UpdateFailed
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.free_library_events.api import (
+    SOURCE_ERROR_INVALID_FEED,
     SOURCE_ERROR_REQUEST_FAILED,
     SOURCE_ERROR_RESPONSE_TOO_LARGE,
     SOURCE_ERROR_UNSAFE_REDIRECT,
@@ -28,6 +29,7 @@ from custom_components.free_library_events.api import (
     LibraryApiError,
     LibraryClient,
 )
+from custom_components.free_library_events.config import normalize_options
 from custom_components.free_library_events.const import (
     CONF_BIRTH_DATE,
     CONF_BRANCHES,
@@ -45,6 +47,54 @@ from custom_components.free_library_events.diagnostics import (
 from custom_components.free_library_events.digest import BRANCHES
 
 pytestmark = pytest.mark.usefixtures("enable_custom_integrations")
+
+
+@pytest.mark.parametrize(
+    "name", ("Library\x00Calendar", "Library\x01Calendar", "Library\x7fCalendar")
+)
+def test_calendar_name_rejects_ics_control_characters(name: str) -> None:
+    with pytest.raises(ValueError, match="invalid_webcal_name"):
+        normalize_options({CONF_WEBCAL_NAME: name})
+
+
+def test_calendar_name_normalizes_whitespace_and_preserves_unicode() -> None:
+    options = normalize_options({CONF_WEBCAL_NAME: "  Bibliothèque\n\tCalendar  "})
+
+    assert options[CONF_WEBCAL_NAME] == "Bibliothèque Calendar"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    (
+        b"<html><body>Temporarily unavailable</body></html>",
+        b"<error>Source unavailable</error>",
+        b"<rss />",
+        b"<rss><channel /><channel /></rss>",
+    ),
+)
+async def test_non_feed_xml_cannot_report_successful_empty_coverage(
+    payload: bytes,
+) -> None:
+    client = LibraryClient(Mock())
+    client._async_get = AsyncMock(return_value=payload)
+
+    with pytest.raises(LibraryApiError) as failure:
+        await client.async_fetch_feed(BRANCHES["CEN"], "Baby")
+
+    assert failure.value.category == SOURCE_ERROR_INVALID_FEED
+    assert failure.value.retryable is False
+    assert failure.value.__suppress_context__ is True
+
+
+async def test_valid_empty_rss_retains_complete_coverage() -> None:
+    client = LibraryClient(Mock())
+    client._async_get = AsyncMock(return_value=b"<rss><channel /></rss>")
+
+    feed = await client.async_fetch_feed(BRANCHES["CEN"], "Baby")
+
+    assert feed.events == ()
+    assert feed.source_count == feed.parsed_count == 0
+    assert feed.covers_through(date(2026, 9, 20)) is True
 
 
 @pytest.mark.parametrize(
