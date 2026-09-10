@@ -429,7 +429,10 @@ Local containers reuse pip downloads and wheels in the Podman volume
 into a fresh container and reruns every check. The disposable cache contains
 neither installed environments nor validation results; remove it with
 `podman volume rm free-library-events-validation-pip` when no local validation
-is running to force fresh downloads.
+is running to force fresh downloads. Container pip installs defer dependency
+bytecode until imports, and mypy checks run without writing a cache. The explicit
+product `compileall` check and every test remain enabled. Git is provisioned only
+for the unit tooling and fixtures that use it.
 
 After unit/static checks pass, `all container` runs the minimum/current HA lanes
 concurrently against a read-only snapshot. It waits for both results before

@@ -223,13 +223,19 @@ class ValidationRunnerTests(unittest.TestCase):
             '[[ "$1" == run && "$2" == --rm ]]\n'
             '[[ "$*" == *":/workspace"* ]] || exit 0\n'
             '[[ "$*" == *"PIP_CACHE_DIR=/pip-cache"* ]]\n'
+            '[[ "$*" == *"PIP_COMPILE=0"* ]]\n'
+            '[[ "$*" == *"MYPY_CACHE_DIR=/dev/null"* ]]\n'
             '[[ "$*" == *"--mount type=volume,source=free-library-events-validation-pip,target=/pip-cache"* ]]\n'
             'lane="${!#}"\n'
             '[[ "$lane" == *"python -m pip install"* ]]\n'
             'if [[ "$lane" == *"requirements-ha-current.txt"* ]]; then\n'
+            '  [[ "${@: -2:1}" == false ]]\n'
             '  [[ "$lane" == *"check_ha_patch_compatibility.py"* ]]\n'
             'elif [[ "$lane" == *"requirements-ha-test.txt"* ]]; then\n'
+            '  [[ "${@: -2:1}" == false ]]\n'
             '  [[ "$lane" == *"python -m pip check"* ]]\n'
+            "else\n"
+            '  [[ "${@: -2:1}" == true ]]\n'
             "fi\n"
             'printf "fresh-python-lane\\n" >> "$TRACE"\n',
         )

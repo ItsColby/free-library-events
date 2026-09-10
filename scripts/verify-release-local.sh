@@ -53,6 +53,8 @@ python_image="docker.io/library/python@sha256:a7fb1e634c4a578f9e0bd6327f11a3cde1
 actionlint_image="docker.io/rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667"
 hassfest_image="ghcr.io/home-assistant/hassfest@sha256:8cd7bdb8f82430c2c13703290b1fc38dcc99957dd76ad3f230035ecee70b672d"
 run_python() (
+  # HA-only lanes opt out of Git provisioning needed by unit tooling/fixtures.
+  local needs_git="${2:-true}"
   if [[ "$backend" == native ]]; then
     # Each lane gets its own environment, including when `all native` is used.
     venv="$(mktemp -d)"
@@ -63,15 +65,15 @@ run_python() (
   else
     podman run --rm -e HOME=/tmp/home -e PIP_DISABLE_PIP_VERSION_CHECK=1 \
       -e PIP_ROOT_USER_ACTION=ignore -e DEBIAN_FRONTEND=noninteractive \
-      -e PIP_CACHE_DIR=/pip-cache \
+      -e PIP_COMPILE=0 -e PIP_CACHE_DIR=/pip-cache \
       -e PYTHONPYCACHEPREFIX=/tmp/pycache -e XDG_CACHE_HOME=/tmp/cache \
-      -e RUFF_CACHE_DIR=/tmp/ruff-cache -e MYPY_CACHE_DIR=/tmp/mypy-cache \
+      -e RUFF_CACHE_DIR=/tmp/ruff-cache -e MYPY_CACHE_DIR=/dev/null \
       -e 'PYTEST_ADDOPTS=-p no:cacheprovider' \
       -v "$repo_root:/workspace:ro" -w /workspace \
       --mount type=volume,source=free-library-events-validation-pip,target=/pip-cache \
       "$python_image" bash -euo pipefail -c \
-      'apt-get update -qq; apt-get install -y -qq --no-install-recommends git >/dev/null; eval "$1"' \
-      local-validation "$1"
+      'if [[ "$1" == true ]]; then apt-get update -qq; apt-get install -y -qq --no-install-recommends git >/dev/null; fi; eval "$2"' \
+      local-validation "$needs_git" "$1"
   fi
 )
 run_actionlint() (
@@ -113,7 +115,7 @@ run_minimum() {
     python -m pip check
     python -m mypy custom_components/free_library_events
     pytest tests/test_integration_ha.py tests/test_email_images.py tests/test_acquisition_ha.py -q
-  '
+  ' false
 }
 run_current() {
   run_python '
@@ -121,7 +123,7 @@ run_current() {
     python -m pip install --upgrade -r requirements-ha-current.txt
     python scripts/check_ha_patch_compatibility.py --minimum requirements-ha-test.txt --current requirements-ha-current.txt
     pytest tests/test_integration_ha.py tests/test_email_images.py tests/test_acquisition_ha.py -q
-  '
+  ' false
 }
 run_ha_matrix() {
   if [[ "$backend" == native ]]; then
