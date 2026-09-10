@@ -366,9 +366,9 @@ class FreeLibraryEventsOptionsFlow(config_entries.OptionsFlowWithReload):
                 "http_url": urls.http_url,
                 "webcal_url": urls.webcal_url,
                 "url_scope": (
-                    "Home Assistant external or cloud URL configured"
+                    "This address uses Home Assistant's external or cloud URL"
                     if urls.external_url_configured
-                    else "Only a Home Assistant internal URL is configured"
+                    else "This address uses Home Assistant's internal URL"
                 ),
             },
         )

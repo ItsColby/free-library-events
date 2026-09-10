@@ -1,17 +1,17 @@
 render_digest:
   name: Render weekly digest
-  description: Refresh the selected library feeds and return an age-aware email payload with source-coverage metadata.
+  description: Return an age-matched weekly digest with email content and source-coverage metadata. This action does not send email or schedule delivery.
   fields:
     force_refresh:
       name: Refresh first
-      description: Load the current official branch feeds before generating the email.
+      description: Wait for a completed feed refresh before rendering. If all source requests fail, the action fails. Turn off to use cached data, which may be stale. Partial results include coverage metadata.
       required: false
       default: true
       selector:
         boolean:
     embed_images:
       name: Embed event images
-      description: Download selected event images for inline SMTP display and return notifier-ready temporary attachments. Files are deleted automatically after one hour.
+      description: Download supported event images and return temporary image paths plus SMTP attachments when Local Media is configured. Cleanup is scheduled after one hour; send the digest before then.
       required: false
       default: false
       selector:

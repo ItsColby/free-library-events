@@ -29,7 +29,7 @@ class HomeAssistantMetadataTests(unittest.TestCase):
         release_runner = (ROOT / "scripts/verify-release-local.sh").read_text(
             encoding="utf-8"
         )
-        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        development = (ROOT / "docs/development.md").read_text(encoding="utf-8")
         commands = (
             "python -m ruff format --check custom_components tests scripts",
             "python -m ruff check custom_components tests scripts",
@@ -57,8 +57,8 @@ class HomeAssistantMetadataTests(unittest.TestCase):
         permissions = workflow.split("\npermissions:\n", 1)[1].split("\n\n", 1)[0]
         self.assertEqual("  contents: read", permissions)
         self.assertNotIn("GH_TOKEN", release_runner)
-        self.assertIn("scripts/verify-release-local.sh", readme)
-        self.assertIn("scripts/verify-release-local.ps1", readme)
+        self.assertIn("scripts/verify-release-local.sh", development)
+        self.assertIn("scripts/verify-release-local.ps1", development)
 
         dependabot = (ROOT / ".github/dependabot.yml").read_text(encoding="utf-8")
         self.assertIn("default-days: 7", dependabot)
@@ -109,7 +109,7 @@ class HomeAssistantMetadataTests(unittest.TestCase):
     def test_home_assistant_support_contract_has_minimum_and_current_lanes(
         self,
     ) -> None:
-        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        development = (ROOT / "docs/development.md").read_text(encoding="utf-8")
         workflow = (ROOT / ".github/workflows/validate.yaml").read_text(
             encoding="utf-8"
         )
@@ -215,9 +215,9 @@ class HomeAssistantMetadataTests(unittest.TestCase):
             ],
             current_requirements.splitlines(),
         )
-        self.assertIn(dependency_check, readme)
-        self.assertIn("Core 2026.8.0 with harness 0.13.354", readme)
-        self.assertIn("Core 2026.9.1 with harness 0.13.364", readme)
+        self.assertIn(dependency_check, development)
+        self.assertIn("Core 2026.8.0 with harness 0.13.354", development)
+        self.assertIn("Core 2026.9.1 with harness 0.13.364", development)
         self.assertEqual(
             "2026.8.0",
             _json_file(ROOT / "hacs.json")["homeassistant"],

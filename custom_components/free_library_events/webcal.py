@@ -87,15 +87,17 @@ def webcal_status(hass: HomeAssistant, enabled: bool, token: object) -> str:
     """Return a safe options-flow status without logging the token."""
 
     if not enabled or not isinstance(token, str) or not token:
-        return "Disabled"
+        return "Off"
     try:
         urls = webcal_subscription_urls(hass, token)
     except NoURLAvailableError:
-        return "Enabled; configure a Home Assistant URL to copy the feed address"
+        return "On; set a Home Assistant URL to obtain a subscription address"
     scope = (
-        "external/cloud URL" if urls.external_url_configured else "internal URL only"
+        "external or cloud address"
+        if urls.external_url_configured
+        else "internal address"
     )
-    return f"Enabled ({scope}): {urls.webcal_url}"
+    return f"On ({scope}): {urls.webcal_url}"
 
 
 class FreeLibraryEventsCalendarFeedView(HomeAssistantView):

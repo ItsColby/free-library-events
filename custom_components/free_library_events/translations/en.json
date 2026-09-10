@@ -3,57 +3,57 @@
   "config": {
     "step": {
       "user": {
-        "title": "Set up library event matching",
-        "description": "Choose one person and the branches to follow. Optional matching, timing, and calendar-subscription settings are available after setup.",
+        "title": "Set up Free Library Events",
+        "description": "Choose one person and the Free Library of Philadelphia branches to follow. Events are matched locally using published ages and descriptions; the library feeds may be incomplete. Matching, refresh timing, and calendar subscriptions can be configured after setup.",
         "data": {
           "child_name": "Person's display name",
           "birth_date": "Person's birth date",
           "branches": "Library branches"
         },
         "data_description": {
-          "child_name": "Used only in locally rendered digest content.",
-          "birth_date": "Used locally to keep age matching current; it is not sent to the library.",
-          "branches": "Select one or more supported Free Library branches."
+          "child_name": "Personalizes the digest. The name is stored in Home Assistant and is not sent to the library.",
+          "birth_date": "Stored in Home Assistant to calculate age on each event date and select age-category feeds. The birth date itself is not sent to the library.",
+          "branches": "Select at least one branch from the supported list. Only the selected branches are requested."
         }
       },
       "reconfigure": {
-        "title": "Change person and branches",
-        "description": "These settings define whose age is matched and which official branch feeds are requested.",
+        "title": "Update person and branches",
+        "description": "Save to reload the integration with the updated profile and branch selection. Matching, refresh timing, and calendar-subscription settings are available in Configure.",
         "data": {
           "child_name": "Person's display name",
           "birth_date": "Person's birth date",
           "branches": "Library branches"
         },
         "data_description": {
-          "child_name": "Used only in locally rendered digest content.",
-          "birth_date": "Used locally to keep age matching current; it is not sent to the library.",
-          "branches": "Select one or more supported Free Library branches."
+          "child_name": "Personalizes the digest. The name is stored in Home Assistant and is not sent to the library.",
+          "birth_date": "Stored in Home Assistant to calculate age on each event date and select age-category feeds. The birth date itself is not sent to the library.",
+          "branches": "Select at least one branch from the supported list. Only the selected branches are requested."
         }
       }
     },
     "error": {
       "child_name_required": "Enter the person's display name.",
-      "invalid_child_name": "Enter a display name of 80 characters or fewer.",
+      "invalid_child_name": "Enter a display name of 1 to 80 characters without control characters.",
       "birth_date_required": "Enter the person's birth date.",
-      "invalid_birth_date": "Enter a valid birth date.",
+      "invalid_birth_date": "Enter a complete, valid birth date.",
       "birth_date_in_future": "The birth date cannot be in the future.",
       "branch_required": "Select at least one library branch.",
       "invalid_branches": "Select only supported library branches.",
-      "invalid_filter_mode": "Select a valid age-match mode.",
-      "invalid_calendar_duration": "Calendar duration must be between 15 and 240 minutes.",
-      "invalid_scan_interval": "Refresh interval must be between 900 and 86400 seconds.",
-      "invalid_config": "Check the settings and try again."
+      "invalid_filter_mode": "Choose Strict, Recommended, or Broad.",
+      "invalid_calendar_duration": "Enter a whole number from 15 to 240 minutes for the placeholder duration.",
+      "invalid_scan_interval": "Enter a whole number from 900 to 86400 seconds for the refresh interval.",
+      "invalid_config": "One or more settings are invalid. Review the values and submit again."
     },
     "abort": {
-      "already_configured": "Free Library Events is already configured. Use Configure to change its settings.",
-      "reconfigure_successful": "The person and branch settings were updated."
+      "already_configured": "Only one Free Library Events entry is supported. Use Reconfigure to change its person or branches, or Configure to change its options.",
+      "reconfigure_successful": "The profile and branch selection have been saved."
     }
   },
   "options": {
     "step": {
       "init": {
-        "title": "Configure weekly library events",
-        "description": "Choose the optional behavior to change. Calendar subscription: {webcal_status}",
+        "title": "Configure Free Library Events",
+        "description": "Choose the settings to update. Calendar subscription: {webcal_status}. Anyone with a subscription URL can read the calendar; keep the URL private.",
         "menu_options": {
           "behavior": "Matching and timing",
           "webcal": "Calendar subscription",
@@ -62,85 +62,85 @@
       },
       "behavior": {
         "title": "Matching and timing",
-        "description": "Matching and timing changes apply after saving. Keep the recommended timing defaults unless the source or calendar behavior needs tuning.",
+        "description": "These settings apply to the digest and calendars after the integration reloads. Age matching is a local interpretation of published information; check the official event details for suitability and requirements.",
         "data": {
           "filter_mode": "Age-match mode",
-          "calendar_duration_minutes": "Calendar placeholder duration (minutes)",
-          "scan_interval_seconds": "Refresh interval (seconds)"
+          "calendar_duration_minutes": "Fallback event duration (minutes)",
+          "scan_interval_seconds": "Automatic refresh interval (seconds)"
         },
         "data_description": {
-          "filter_mode": "Recommended balances age fit with family-friendly options. Strict includes only explicit best matches; Broad includes more general children's events.",
-          "calendar_duration_minutes": "Used only when the library does not publish an end time.",
-          "scan_interval_seconds": "Six hours (21600 seconds) is recommended. The render action refreshes again by default immediately before generating the digest."
+          "filter_mode": "Strict includes the strongest age matches from published ranges, categories, and wording. Recommended also includes inclusive and possible matches. Broad adds general children's and family events.",
+          "calendar_duration_minutes": "Used for calendar end times only when no end time was parsed from the feed. Default: 60 minutes. This is a placeholder, not a published duration.",
+          "scan_interval_seconds": "Default: 21600 seconds (6 hours). Refresh events and the render action can request an earlier refresh. Calendar subscriptions read cached events; each calendar app controls its own polling."
         }
       },
       "webcal": {
         "title": "Calendar subscription",
-        "description": "Enable a token-protected feed for calendar apps that cannot sign in to Home Assistant. Treat either subscription URL as a password. Current status: {webcal_status}",
+        "description": "Optionally expose the age-filtered event cache as an iCalendar feed. The URL contains an access token and works without a Home Assistant login. Anyone with either URL can read the feed. Current status: {webcal_status}",
         "data": {
-          "publish_webcal": "Publish a private calendar subscription feed",
+          "publish_webcal": "Enable calendar subscription",
           "webcal_name": "Calendar name"
         },
         "data_description": {
-          "publish_webcal": "Disabling publishing immediately invalidates and removes the current private URL after reload.",
-          "webcal_name": "Displayed as the calendar name by subscription clients."
+          "publish_webcal": "Off by default. Saving with this disabled removes the token and stops access through the current URL. Events already copied by a calendar app may remain there.",
+          "webcal_name": "Name included in the subscription feed. Calendar apps may let subscribers choose their own display name."
         }
       },
       "regenerate_webcal": {
         "title": "Regenerate calendar subscription URL",
-        "description": "Submitting this form creates a new private URL. Existing calendar subscriptions will stop updating until they are changed to the new URL."
+        "description": "Continue to generate a replacement URL, then submit the next form to save it and invalidate the old URL. Existing subscribers will need the replacement URL to keep updating."
       },
       "webcal_url": {
         "title": "Calendar subscription URL",
-        "description": "{url_scope}. Copy either URL, then select Submit to activate it. Treat both as passwords.\n\nCanonical HTTP(S) URL:\n`{http_url}`\n\nWebCal convenience URL:\n`{webcal_url}`"
+        "description": "{url_scope}. The calendar app must be able to reach this Home Assistant address. Copy a URL and select Submit to save these settings. Treat both URLs as passwords.\n\nHTTP(S) subscription URL:\n`{http_url}`\n\nWebCal URL for apps that support it:\n`{webcal_url}`"
       }
     },
     "error": {
-      "invalid_filter_mode": "Select a valid age-match mode.",
-      "invalid_calendar_duration": "Calendar duration must be between 15 and 240 minutes.",
-      "invalid_scan_interval": "Refresh interval must be between 900 and 86400 seconds.",
-      "invalid_webcal_name": "Enter a calendar name of 80 characters or fewer.",
-      "webcal_url_unavailable": "Configure an internal or external Home Assistant URL before enabling calendar subscription.",
-      "invalid_config": "Check the settings and try again."
+      "invalid_filter_mode": "Choose Strict, Recommended, or Broad.",
+      "invalid_calendar_duration": "Enter a whole number from 15 to 240 minutes for the placeholder duration.",
+      "invalid_scan_interval": "Enter a whole number from 900 to 86400 seconds for the refresh interval.",
+      "invalid_webcal_name": "Enter a calendar name of 1 to 80 characters.",
+      "webcal_url_unavailable": "Home Assistant could not provide a subscription address. Configure an internal or external Home Assistant URL, then try again.",
+      "invalid_config": "One or more settings are invalid. Review the values and submit again."
     },
     "abort": {
-      "options_changed": "The integration settings changed while this calendar URL was being reviewed. No changes were saved. Open Configure and try again."
+      "options_changed": "The integration settings changed while this form was open. This form's changes were not saved. Open Configure again to use the current settings."
     }
   },
   "services": {
     "render_digest": {
       "name": "Render weekly digest",
-      "description": "Refresh the selected library feeds and return an age-aware email payload with source-coverage metadata.",
+      "description": "Return an age-matched weekly digest with email content and source-coverage metadata. This action does not send email or schedule delivery.",
       "fields": {
         "force_refresh": {
           "name": "Refresh first",
-          "description": "Load the current official branch feeds before generating the email."
+          "description": "Wait for a completed feed refresh before rendering. If all source requests fail, the action fails. Turn off to use cached data, which may be stale. Partial results include coverage metadata."
         },
         "embed_images": {
           "name": "Embed event images",
-          "description": "Download selected event images for inline SMTP display and return notifier-ready temporary attachments."
+          "description": "Download supported event images and return temporary image paths plus SMTP attachments when Local Media is configured. Cleanup is scheduled after one hour; send the digest before then."
         }
       }
     }
   },
   "exceptions": {
     "library_data_unavailable": {
-      "message": "No library event data is available. Refresh the integration and try again."
+      "message": "No fetched event data is available. Use Refresh events, check the Status sensor, and run the action again after a successful refresh."
     },
     "library_refresh_failed": {
-      "message": "The library feeds could not be refreshed, so no email was generated. Check the Free Library Events status sensor for details."
+      "message": "The feed refresh failed, so no digest was returned. Check the Free Library Events Status sensor before trying again."
     },
     "settings_changed_during_render": {
-      "message": "The Free Library Events settings changed while the feeds were refreshing, so no email was generated. Run the action again to use the current settings."
+      "message": "The integration was reloaded or its settings changed during the refresh, so no digest was returned. Run the action again with the current settings."
     },
     "manual_refresh_failed": {
-      "message": "The library feeds could not be refreshed. Check the Free Library Events status sensor for details."
+      "message": "The requested refresh failed. Check the Free Library Events Status sensor for source errors and the last successful fetch."
     },
     "library_source_update_failed": {
-      "message": "The library feeds could not be refreshed. Home Assistant will try again automatically."
+      "message": "No source request succeeded in this refresh. Home Assistant will retry automatically; any earlier cached events may be stale."
     },
     "single_loaded_entry_required": {
-      "message": "Free Library Events requires exactly one loaded config entry before rendering a digest."
+      "message": "Load exactly one Free Library Events integration entry before running the digest action."
     }
   },
   "entity": {
