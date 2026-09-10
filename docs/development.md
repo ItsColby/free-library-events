@@ -105,8 +105,10 @@ the reusable download cache, first ensure no validation process is using it:
 podman volume rm free-library-events-validation-pip
 ```
 
-An interrupted run establishes neither success nor cleanup. Check for surviving
-work before retrying and preserve the failure output needed for diagnosis.
+On a handled interrupt or termination signal, the container runner waits for
+active lanes before removing their shared source snapshot and skips later gates.
+Forced termination can still leave work running. Check for surviving work before
+retrying and preserve the failure output needed for diagnosis.
 
 ### Running without Podman
 
@@ -157,7 +159,7 @@ The checker can recognize a single harness/Core pin conflict when a newer stable
 patch is tested within the minimum's own year/month and the harness pin falls
 within that patch window. That exceptional result proves patch compatibility,
 not dependency closure. Cross-month pin conflicts, prereleases, additional
-conflicts, unexpected metadata, and unexpected dependency-check output fail.
+conflicts, unexpected metadata, and unrecognized dependency-check failures fail.
 The exception never permits skipped HA tests or failed collection.
 
 The public-safety guard examines candidate paths and contents for private

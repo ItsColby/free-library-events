@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -49,6 +51,13 @@ else:
         if time.monotonic() > deadline:
             raise SystemExit("The two HA lanes did not overlap")
         time.sleep(0.01)
+    if os.environ.get("MATRIX_INTERRUPT"):
+        while not (events / "interrupt.sent").exists():
+            if time.monotonic() > deadline:
+                raise SystemExit("The runner was not interrupted")
+            time.sleep(0.01)
+        time.sleep(0.1)
+        assert Path(source).is_dir(), "Payload removed while interrupted lanes were active"
     if failure == peer:
         while not (events / (peer + ".done")).exists():
             if time.monotonic() > deadline:
@@ -66,7 +75,7 @@ class ParallelValidationTests(unittest.TestCase):
     """Use real shell jobs and snapshots with isolated external-tool stand-ins."""
 
     def run_matrix(
-        self, failure: str = ""
+        self, failure: str = "", *, interrupt: bool = False
     ) -> tuple[subprocess.CompletedProcess[str], set[str], bool]:
         with tempfile.TemporaryDirectory(prefix="parallel validation ") as temporary:
             root = Path(temporary)
@@ -90,6 +99,7 @@ class ParallelValidationTests(unittest.TestCase):
                 "GIT_CONFIG_NOSYSTEM": "1",
                 "MATRIX_EVENTS": str(events),
                 "MATRIX_FAIL": failure,
+                "MATRIX_INTERRUPT": "1" if interrupt else "",
             }
             for arguments in (
                 ("init", "-q"),
@@ -104,14 +114,36 @@ class ParallelValidationTests(unittest.TestCase):
                     check=True,
                     capture_output=True,
                 )
-            result = subprocess.run(
+            with subprocess.Popen(
                 [str(BASH), str(runner), "all", "container"],
                 cwd=root,
                 env=env,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                check=False,
-                timeout=30,
+            ) as process:
+                try:
+                    if interrupt:
+                        deadline = time.monotonic() + 10
+                        while not all(
+                            (events / f"{lane}.started").exists()
+                            for lane in ("minimum", "current")
+                        ):
+                            if (
+                                process.poll() is not None
+                                or time.monotonic() > deadline
+                            ):
+                                self.fail("The two HA lanes did not start")
+                            time.sleep(0.01)
+                        process.send_signal(signal.SIGTERM)
+                        (events / "interrupt.sent").touch()
+                    stdout, stderr = process.communicate(timeout=30)
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+                        process.communicate(timeout=10)
+            result = subprocess.CompletedProcess(
+                process.args, process.returncode, stdout, stderr
             )
             remaining_payload = any(
                 Path(path.read_text()).exists() for path in events.glob("*.mount")
@@ -140,6 +172,16 @@ class ParallelValidationTests(unittest.TestCase):
         self.assertNotIn("current.started", events)
         self.assertNotIn("release.done", events)
         self.assertFalse(remaining_payload)
+
+    def test_interrupt_waits_for_active_lanes_before_removing_payload(self) -> None:
+        result, events, remaining_payload = self.run_matrix(interrupt=True)
+        self.assertTrue(
+            {"minimum.done", "current.done"} <= events, result.stdout + result.stderr
+        )
+        self.assertNotIn("release.done", events)
+        self.assertNotIn("Local validation passed", result.stdout)
+        self.assertFalse(remaining_payload)
+        self.assertEqual(result.returncode, 128 + signal.SIGTERM)
 
 
 if __name__ == "__main__":

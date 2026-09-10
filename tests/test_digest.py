@@ -357,6 +357,27 @@ class DigestTests(unittest.TestCase):
             "We'll keep #0; literal.",
         )
 
+    def test_parser_rejects_non_feed_xml_instead_of_reporting_an_empty_feed(
+        self,
+    ) -> None:
+        for payload in (
+            "<html><body>Publisher temporarily unavailable</body></html>",
+            "<error>Publisher temporarily unavailable</error>",
+            "<rss />",
+            "<rss><wrapper><channel /></wrapper></rss>",
+            "<rss><channel /><channel /></rss>",
+        ):
+            with (
+                self.subTest(payload=payload),
+                self.assertRaisesRegex(ValueError, "one feed channel"),
+            ):
+                digest.parse_feed(payload, digest.BRANCHES["SWK"], "Baby")
+
+        self.assertEqual(
+            digest.parse_feed("<rss><channel /></rss>", digest.BRANCHES["SWK"], "Baby"),
+            ([], 0),
+        )
+
     def test_parser_skips_one_malformed_item_without_losing_the_feed(self) -> None:
         items = [
             {
@@ -1131,6 +1152,63 @@ class DigestTests(unittest.TestCase):
                 self.assertEqual(
                     digest.classify_event(event, date(2025, 11, 7)), expected
                 )
+
+    def test_published_children_age_ranges_override_category_matches(self) -> None:
+        event = digest.Event(
+            title="Toddler and Preschooler Storytime",
+            event_date=date(2026, 9, 10),
+            start_time=digest.time(10),
+            description="",
+            link="https://example.test/children-age-range",
+            image_url="",
+            branch=digest.BRANCHES["SWK"],
+            age_categories=("Preschool", "Toddler"),
+        )
+        cases = (
+            (
+                "Intended for children 18 months to 5 years old.",
+                ((date(2025, 11, 1), "exclude"), (date(2025, 3, 10), "best")),
+            ),
+            (
+                "This program is intended for children aged 0-5.",
+                ((date(2026, 1, 1), "best"), (date(2020, 9, 10), "exclude")),
+            ),
+            (
+                "For children ages 18 months through 5 years.",
+                ((date(2025, 11, 1), "exclude"), (date(2025, 3, 10), "best")),
+            ),
+        )
+        for description, profiles in cases:
+            for birth_date, expected in profiles:
+                with self.subTest(description=description, birth_date=birth_date):
+                    candidate = digest.replace(event, description=description)
+                    self.assertEqual(
+                        digest.classify_event(candidate, birth_date), expected
+                    )
+                    self.assertEqual(
+                        bool(
+                            digest.matching_events(
+                                [candidate],
+                                birth_date,
+                                "Recommended",
+                                candidate.event_date,
+                                candidate.event_date,
+                            )
+                        ),
+                        expected == "best",
+                    )
+
+    def test_children_number_ranges_require_age_words_or_units(self) -> None:
+        self.assertIsNone(
+            digest._explicit_age_fit("We welcome children 1 to 2 p.m.", 18)
+        )
+        self.assertEqual(
+            digest._explicit_age_fit(
+                "We welcome children 1 to 2 p.m. Intended for children 3 to 5 years.",
+                18,
+            ),
+            "exclude",
+        )
 
     def test_broad_upper_age_limit_is_not_a_recommended_toddler_match(self) -> None:
         event = digest.Event(

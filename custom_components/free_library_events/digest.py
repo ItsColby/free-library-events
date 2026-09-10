@@ -875,7 +875,10 @@ def _safe_feed_root(xml_content: bytes | str) -> ET.Element:
         raise ValueError("RSS payload contains a forbidden XML declaration")
     # The fetcher bounds payload size and source hosts. Parse the original content so
     # ElementTree retains its normal XML encoding detection after the normalized scan.
-    return ET.fromstring(xml_content)  # noqa: S314
+    root = ET.fromstring(xml_content)  # noqa: S314
+    if root.tag != "rss" or len(root.findall("channel")) != 1:
+        raise ValueError("RSS payload does not contain one feed channel")
+    return root
 
 
 def _xml_security_scan_text(xml_content: bytes | str) -> str:
@@ -1013,7 +1016,9 @@ def event_is_active(event: Event) -> bool:
 
 
 AGE_RANGE_RE = re.compile(
-    r"\bages?\s*(?P<low>\d{1,3})\s*"
+    r"\b(?:(?P<age_context>ages?|aged)|"
+    r"children(?:\s+(?P<children_age_context>ages?|aged))?)\s*"
+    r"(?P<low>\d{1,3})\s*"
     r"(?P<low_unit>months?|mos?|years?|yrs?)?\s*"
     r"(?:-|\u2013|to|through)\s*(?P<high>\d{1,3})\s*"
     r"(?P<high_unit>months?|mos?|years?|yrs?)?\b",
@@ -1064,8 +1069,17 @@ def _explicit_age_fit(text: str, child_months: float) -> FitRank | None:
         )
         return "best" if child_months < high + margin else "exclude"
 
-    match = AGE_RANGE_RE.search(text)
-    if match:
+    for match in AGE_RANGE_RE.finditer(text):
+        if not any(
+            match.group(field)
+            for field in (
+                "age_context",
+                "children_age_context",
+                "low_unit",
+                "high_unit",
+            )
+        ):
+            continue
         low_unit = match.group("low_unit") or match.group("high_unit")
         high_unit = match.group("high_unit") or match.group("low_unit")
         low = _to_months(int(match.group("low")), low_unit)

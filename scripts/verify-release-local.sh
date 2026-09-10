@@ -26,7 +26,11 @@ source_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 repo_root="$source_root"
 if [[ "$backend" == container ]]; then
   repo_root="$(mktemp -d)"
-  trap 'rm -rf "$repo_root"' EXIT
+  # A signal can interrupt `wait` while the parallel lanes still own this tree.
+  # Reap them before cleanup, and suppress later gates after an interruption.
+  trap 'trap "" INT TERM; wait; rm -rf "$repo_root"' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
   source_git=(git -C "$source_root")
   if [[ -n "$source_git_dir" ]]; then
     source_git=(git --git-dir="$source_git_dir" --work-tree="$source_root")
