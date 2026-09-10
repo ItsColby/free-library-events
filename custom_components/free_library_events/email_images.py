@@ -367,12 +367,21 @@ def remove_stored_image_run(run_directory: Path) -> None:
         pass
 
 
+def _image_directory_children(root_directory: Path) -> tuple[Path, ...]:
+    """Snapshot stored paths while allowing another cleanup to remove the root."""
+
+    if not root_directory.is_dir():
+        return ()
+    try:
+        return tuple(root_directory.iterdir())
+    except FileNotFoundError, NotADirectoryError:
+        return ()
+
+
 def purge_stored_image_runs(root_directory: Path) -> None:
     """Remove every image run previously owned by this integration."""
 
-    if not root_directory.is_dir():
-        return
-    for candidate in root_directory.iterdir():
+    for candidate in _image_directory_children(root_directory):
         if candidate.is_dir():
             remove_stored_image_run(candidate)
     try:
@@ -384,9 +393,7 @@ def purge_stored_image_runs(root_directory: Path) -> None:
 def purge_stale_image_runs(root_directory: Path, cutoff_timestamp: float) -> None:
     """Remove integration-owned image runs created before a cutoff."""
 
-    if not root_directory.is_dir():
-        return
-    for candidate in root_directory.iterdir():
+    for candidate in _image_directory_children(root_directory):
         marker = candidate / _MANAGED_MARKER
         try:
             is_stale = marker.is_file() and marker.stat().st_mtime < cutoff_timestamp

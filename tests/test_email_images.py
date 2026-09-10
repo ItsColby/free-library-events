@@ -348,6 +348,42 @@ class EmailImageTests(unittest.IsolatedAsyncioTestCase):
                     retained_file.read_text(encoding="utf-8"), "Existing data"
                 )
 
+    def test_cleanup_tolerates_expiry_removing_the_root_during_enumeration(
+        self,
+    ) -> None:
+        batch = email_images.ImageDownloadBatch(
+            images=(email_images.DownloadedImage("source", _PNG, ".png"),),
+            requested_count=1,
+            failure_count=0,
+            failure_examples=(),
+        )
+        original_iterdir = Path.iterdir
+        for stale_only in (False, True):
+            with (
+                self.subTest(stale_only=stale_only),
+                tempfile.TemporaryDirectory() as temporary_directory,
+            ):
+                root = Path(temporary_directory) / "email-images"
+                bundle = email_images.store_downloaded_images(root, batch)
+                run_directory = bundle.run_directory
+                assert run_directory is not None
+
+                def expire_before_enumeration(
+                    directory: Path,
+                    root: Path = root,
+                    run_directory: Path = run_directory,
+                ):
+                    if directory == root:
+                        email_images.remove_stored_image_run(run_directory)
+                    return original_iterdir(directory)
+
+                with patch.object(Path, "iterdir", expire_before_enumeration):
+                    if stale_only:
+                        email_images.purge_stale_image_runs(root, 200)
+                    else:
+                        email_images.purge_stored_image_runs(root)
+                self.assertFalse(root.exists())
+
     def test_stale_cleanup_preserves_fresh_managed_run(self) -> None:
         batch = email_images.ImageDownloadBatch(
             images=(email_images.DownloadedImage("source", _PNG, ".png"),),
