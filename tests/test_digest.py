@@ -357,6 +357,27 @@ class DigestTests(unittest.TestCase):
             "We'll keep #0; literal.",
         )
 
+    def test_parser_rejects_non_feed_xml_instead_of_reporting_an_empty_feed(
+        self,
+    ) -> None:
+        for payload in (
+            "<html><body>Publisher temporarily unavailable</body></html>",
+            "<error>Publisher temporarily unavailable</error>",
+            "<rss />",
+            "<rss><wrapper><channel /></wrapper></rss>",
+            "<rss><channel /><channel /></rss>",
+        ):
+            with (
+                self.subTest(payload=payload),
+                self.assertRaisesRegex(ValueError, "one feed channel"),
+            ):
+                digest.parse_feed(payload, digest.BRANCHES["SWK"], "Baby")
+
+        self.assertEqual(
+            digest.parse_feed("<rss><channel /></rss>", digest.BRANCHES["SWK"], "Baby"),
+            ([], 0),
+        )
+
     def test_parser_skips_one_malformed_item_without_losing_the_feed(self) -> None:
         items = [
             {
@@ -1132,6 +1153,63 @@ class DigestTests(unittest.TestCase):
                     digest.classify_event(event, date(2025, 11, 7)), expected
                 )
 
+    def test_published_children_age_ranges_override_category_matches(self) -> None:
+        event = digest.Event(
+            title="Toddler and Preschooler Storytime",
+            event_date=date(2026, 9, 10),
+            start_time=digest.time(10),
+            description="",
+            link="https://example.test/children-age-range",
+            image_url="",
+            branch=digest.BRANCHES["SWK"],
+            age_categories=("Preschool", "Toddler"),
+        )
+        cases = (
+            (
+                "Intended for children 18 months to 5 years old.",
+                ((date(2025, 11, 1), "exclude"), (date(2025, 3, 10), "best")),
+            ),
+            (
+                "This program is intended for children aged 0-5.",
+                ((date(2026, 1, 1), "best"), (date(2020, 9, 10), "exclude")),
+            ),
+            (
+                "For children ages 18 months through 5 years.",
+                ((date(2025, 11, 1), "exclude"), (date(2025, 3, 10), "best")),
+            ),
+        )
+        for description, profiles in cases:
+            for birth_date, expected in profiles:
+                with self.subTest(description=description, birth_date=birth_date):
+                    candidate = digest.replace(event, description=description)
+                    self.assertEqual(
+                        digest.classify_event(candidate, birth_date), expected
+                    )
+                    self.assertEqual(
+                        bool(
+                            digest.matching_events(
+                                [candidate],
+                                birth_date,
+                                "Recommended",
+                                candidate.event_date,
+                                candidate.event_date,
+                            )
+                        ),
+                        expected == "best",
+                    )
+
+    def test_children_number_ranges_require_age_words_or_units(self) -> None:
+        self.assertIsNone(
+            digest._explicit_age_fit("We welcome children 1 to 2 p.m.", 18)
+        )
+        self.assertEqual(
+            digest._explicit_age_fit(
+                "We welcome children 1 to 2 p.m. Intended for children 3 to 5 years.",
+                18,
+            ),
+            "exclude",
+        )
+
     def test_broad_upper_age_limit_is_not_a_recommended_toddler_match(self) -> None:
         event = digest.Event(
             title="Chess Club for Kids",
@@ -1355,9 +1433,7 @@ class DigestTests(unittest.TestCase):
         self.assertIn('class="event-day-spacer"', payload["html"])
         self.assertNotIn('<div style="margin:0 0 24px">', payload["html"])
         self.assertIn(
-            "The library did not publish end times for these activities; "
-            "Google Calendar uses a "
-            "60-minute placeholder for those activities.",
+            "No end time was found in the fetched data for these events. Their Google Calendar links use a 60-minute fallback duration; check the listing before saving.",
             payload["html"],
         )
         self.assertIn(
@@ -1366,7 +1442,7 @@ class DigestTests(unittest.TestCase):
         )
         self.assertNotIn("4 age-matched library activities for Avery", payload["html"])
         self.assertIn(
-            "4 activities selected for Avery’s age across 4 libraries.",  # noqa: RUF001
+            "4 activities selected for Avery across 4 libraries.",
             payload["html"],
         )
         self.assertNotIn("Listed for:", payload["html"])
@@ -1461,7 +1537,7 @@ class DigestTests(unittest.TestCase):
         )
         self.assertIn("html,body {color-scheme:only light}", payload["html"])
         self.assertNotIn("color-scheme:light only", payload["html"])
-        self.assertIn("Browse full branch calendars:", payload["html"])
+        self.assertIn("Official branch calendars:", payload["html"])
         self.assertNotIn("See every published event:", payload["html"])
 
     def test_branch_distance_prioritization_never_renders_distance_copy(self) -> None:
@@ -1521,13 +1597,11 @@ class DigestTests(unittest.TestCase):
 
         self.assertEqual(
             digest._calendar_placeholder_note([event], 60),
-            "The library did not publish end times for these activities; "
-            "Google Calendar uses a 60-minute placeholder for those activities.",
+            "No end time was found in the fetched data for these events. Their Google Calendar links use a 60-minute fallback duration; check the listing before saving.",
         )
         self.assertEqual(
             digest._calendar_placeholder_note([event, with_end], 60),
-            "Some end times are not published; Google Calendar uses a 60-minute "
-            "placeholder for those activities.",
+            "No end time was found in the fetched data for some events. Their Google Calendar links use a 60-minute fallback duration; check the listing before saving.",
         )
         self.assertEqual(digest._calendar_placeholder_note([with_end], 60), "")
 
@@ -1555,8 +1629,7 @@ class DigestTests(unittest.TestCase):
 
         for body in (payload["message"], payload["html"]):
             self.assertIn(
-                "Some library listings may be missing. Check the full branch "
-                "calendars below.",
+                "Some feed requests failed or have unresolved coverage limits. Use the official branch calendars to check for other events.",
                 body,
             )
             self.assertNotIn(
@@ -1566,12 +1639,16 @@ class DigestTests(unittest.TestCase):
             self.assertNotIn("could not load: Parkway Central Library", body)
             self.assertNotIn("Charles Santore Library — School Age", body)
         self.assertLess(
-            payload["html"].index("Some library listings may be missing."),
-            payload["html"].index("Browse full branch calendars:"),
+            payload["html"].index(
+                "Some feed requests failed or have unresolved coverage limits."
+            ),
+            payload["html"].index("Official branch calendars:"),
         )
         self.assertLess(
-            payload["message"].index("Some library listings may be missing."),
-            payload["message"].index("Full branch calendars:"),
+            payload["message"].index(
+                "Some feed requests failed or have unresolved coverage limits."
+            ),
+            payload["message"].index("Official branch calendars:"),
         )
         self.assertEqual(
             payload["metadata"]["source_errors"], ["Parkway Central Library"]
@@ -1613,7 +1690,7 @@ class DigestTests(unittest.TestCase):
 
         card = payload["html"]
         self.assertIn(
-            "1 activity selected for Avery’s age at 1 library.",  # noqa: RUF001
+            "1 activity selected for Avery at 1 library.",
             card,
         )
         self.assertNotIn("event was checked", card)
@@ -1636,7 +1713,7 @@ class DigestTests(unittest.TestCase):
         self.assertNotIn(">Event details</a>", card)
         self.assertNotIn(">Other calendars</a>", card)
         self.assertNotIn("calendar placeholder", digest.google_calendar_url(event, 60))
-        self.assertNotIn("End time not published", card)
+        self.assertNotIn("No end time was found", card)
 
         message = payload["message"]
         self.assertIn(
@@ -1708,8 +1785,7 @@ class DigestTests(unittest.TestCase):
         self.assertIn("LIBRARY FUN FOR MORGAN", payload["message"])
         self.assertIn("Library fun for Morgan", payload["html"])
         self.assertIn(
-            "No clearly age-matched activities were published; "
-            "check the full branch calendars.",
+            "No matching entries in this digest. The official branch calendars can help you check for other events.",
             payload["html"],
         )
 
@@ -2275,7 +2351,7 @@ class DigestTests(unittest.TestCase):
         self.assertNotRegex(payload["html"], r"(?:~|&lt;)?\d+(?:\.\d+)?\s*mi\b")
         self.assertNotIn("distance", payload["html"].lower())
         self.assertNotIn(
-            "Nearby activities include more detail; every match stays listed.",
+            "Some listings have less detail to fit this email.",
             payload["html"],
         )
         self.assertNotIn('class="compact-calendar-link"', payload["html"])
@@ -2319,9 +2395,9 @@ class DigestTests(unittest.TestCase):
             + metadata["email_omitted_count"],
             metadata["included_count"],
         )
-        self.assertIn("additional matched activities were omitted", payload["html"])
-        self.assertIn("additional matched activities were omitted", payload["message"])
-        self.assertNotIn("Every match stays listed", payload["html"])
+        self.assertIn("matched activities were omitted", payload["html"])
+        self.assertIn("matched activities were omitted", payload["message"])
+        self.assertNotIn("Every matched event is included", payload["html"])
 
     def test_nested_description_lists_preserve_their_parent_item(self) -> None:
         rendered = digest._description_render_html(
@@ -2401,8 +2477,8 @@ class DigestTests(unittest.TestCase):
         self.assertEqual(
             metadata["full_card_event_ids"], [digest.event_identity(events[0])]
         )
-        self.assertIn("1 additional matched activity was omitted", payload["message"])
-        self.assertNotIn("Every match stays listed", payload["html"])
+        self.assertIn("1 matched activity was omitted", payload["message"])
+        self.assertNotIn("Every matched event is included", payload["html"])
 
     def test_dynamic_icons_use_words_instead_of_substrings(self) -> None:
         event = digest.Event(

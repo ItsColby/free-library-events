@@ -1,17 +1,31 @@
 render_digest:
   name: Render weekly digest
-  description: Refresh the selected library feeds and return an age-aware email payload with source-coverage metadata.
+  description: >-
+    Builds subject, message, html, and metadata for a Monday–Sunday event digest. On
+    Mondays it uses the week starting that day; otherwise it uses the coming week. Pass
+    the response to a notification action to send it.
+
   fields:
     force_refresh:
       name: Refresh first
-      description: Load the current official branch feeds before generating the email.
+      description: >-
+        Request a feed refresh before rendering (default: on). If that refresh fails,
+        the action returns an error. Turn this off to use the existing cache, which may
+        be older; rendering still requires fetched data.
+
       required: false
       default: true
       selector:
         boolean:
     embed_images:
       name: Embed event images
-      description: Download selected event images for inline SMTP display and return notifier-ready temporary attachments. Files are deleted automatically after one hour.
+      description: >-
+        Download event images for inline email use and add images and attachments to the
+        response (default: off). Modern SMTP attachments require Local Media; without
+        it, the attachments list is empty. Pass the matching response fields to your
+        notification action. Cleanup is scheduled after one hour, so send promptly. Some
+        images may remain remote or be omitted; display depends on the email client.
+
       required: false
       default: false
       selector:

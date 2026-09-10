@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+import threading
 import types
 from collections.abc import Callable
 from dataclasses import replace
@@ -27,7 +28,7 @@ from homeassistant.config_entries import (
     ConfigEntryState,
 )
 from homeassistant.const import STATE_UNAVAILABLE
-from homeassistant.core import HomeAssistant, is_callback
+from homeassistant.core import HomeAssistant, ServiceCall, is_callback
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
@@ -38,7 +39,10 @@ from pytest_homeassistant_custom_component.common import (
 )
 from pytest_homeassistant_custom_component.typing import ClientSessionGenerator
 
-from custom_components.free_library_events import async_migrate_entry
+from custom_components.free_library_events import (
+    _async_render_digest,
+    async_migrate_entry,
+)
 from custom_components.free_library_events.api import (
     MAX_RSS_REQUEST_CONCURRENCY,
     MAX_RSS_RESPONSE_BYTES,
@@ -351,7 +355,7 @@ async def test_options_flow_enables_and_rotates_webcal_feed(
             "webcal://ha.example.test/api/free_library_events/calendar/"
             f"{first_token}.ics"
         ),
-        "url_scope": "Home Assistant external or cloud URL configured",
+        "url_scope": "This URL uses an external or cloud Home Assistant address. Your calendar service must be able to reach that address; the URL has not been tested from outside your network.",
     }
 
     entry.runtime_data = Mock(source_result_count=1)
@@ -1218,6 +1222,106 @@ async def test_status_publishes_each_consecutive_failure_attempt(
         assert await hass.config_entries.async_unload(entry.entry_id)
 
 
+@pytest.mark.parametrize("stage", ("first_refresh", "platforms"))
+async def test_cancelled_setup_releases_runtime_and_platforms_before_retry(
+    hass: HomeAssistant, stage: str
+) -> None:
+    entry = _entry()
+    entry.add_to_hass(hass)
+    setup_started = asyncio.Event()
+    release_setup = asyncio.Event()
+    forward_platforms = hass.config_entries.async_forward_entry_setups
+
+    async def fetch_feed(_branch, age_category):
+        if stage == "first_refresh":
+            setup_started.set()
+            await release_setup.wait()
+        return _empty_feed(age_category)
+
+    async def forward_then_wait(config_entry, platforms):
+        await forward_platforms(config_entry, platforms)
+        if stage == "platforms":
+            setup_started.set()
+            await release_setup.wait()
+
+    with (
+        patch(
+            "custom_components.free_library_events.api.LibraryClient.async_fetch_feed",
+            side_effect=fetch_feed,
+        ),
+        patch.object(
+            hass.config_entries,
+            "async_forward_entry_setups",
+            side_effect=forward_then_wait,
+        ),
+    ):
+        setup_task = asyncio.create_task(
+            hass.config_entries.async_setup(entry.entry_id)
+        )
+        try:
+            await setup_started.wait()
+            coordinator = entry.runtime_data
+            setup_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await setup_task
+        finally:
+            release_setup.set()
+            if not setup_task.done():
+                setup_task.cancel()
+            await asyncio.gather(setup_task, return_exceptions=True)
+
+        assert entry.state is ConfigEntryState.SETUP_ERROR
+        assert coordinator._shutdown_requested is True
+        assert not coordinator._listeners
+        assert not coordinator._attempt_listeners
+        assert coordinator._unsub_refresh is None
+        assert coordinator._refresh_completion is None
+
+        assert await hass.config_entries.async_reload(entry.entry_id)
+        await hass.async_block_till_done()
+        assert entry.state is ConfigEntryState.LOADED
+        assert entry.runtime_data is not coordinator
+        assert len(entry.runtime_data._listeners) == 3
+        assert len(entry.runtime_data._attempt_listeners) == 1
+        assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_failed_platform_forwarding_releases_entities_before_retry(
+    hass: HomeAssistant,
+) -> None:
+    entry = _entry()
+    entry.add_to_hass(hass)
+    forward_platforms = hass.config_entries.async_forward_entry_setups
+
+    async def forward_then_fail(config_entry, platforms):
+        await forward_platforms(config_entry, platforms)
+        raise RuntimeError("platform forwarding failed")
+
+    with patch(
+        "custom_components.free_library_events.api.LibraryClient.async_fetch_feed",
+        side_effect=lambda _branch, age_category: _empty_feed(age_category),
+    ):
+        with patch.object(
+            hass.config_entries,
+            "async_forward_entry_setups",
+            side_effect=forward_then_fail,
+        ):
+            assert not await hass.config_entries.async_setup(entry.entry_id)
+        coordinator = entry.runtime_data
+        assert entry.state is ConfigEntryState.SETUP_ERROR
+        assert coordinator._shutdown_requested is True
+        assert not coordinator._listeners
+        assert not coordinator._attempt_listeners
+        assert coordinator._unsub_refresh is None
+
+        assert await hass.config_entries.async_reload(entry.entry_id)
+        await hass.async_block_till_done()
+        assert entry.runtime_data is not coordinator
+        assert len(entry.runtime_data._listeners) == 3
+        assert len(entry.runtime_data._attempt_listeners) == 1
+        assert await hass.config_entries.async_unload(entry.entry_id)
+
+
 async def test_setup_entities_action_and_redacted_diagnostics(
     hass: HomeAssistant,
 ) -> None:
@@ -1290,7 +1394,7 @@ async def test_setup_entities_action_and_redacted_diagnostics(
         "Related: Early literacy: https://example.test/literacy"
         in (calendar_state.attributes["description"])
     )
-    assert "End time not published" not in calendar_state.attributes["description"]
+    assert "No end time was found" not in calendar_state.attributes["description"]
     assert datetime.fromisoformat(
         calendar_state.attributes["end_time"]
     ) - datetime.fromisoformat(calendar_state.attributes["start_time"]) == timedelta(
@@ -1512,6 +1616,84 @@ async def test_setup_entities_action_and_redacted_diagnostics(
         for branch in BRANCHES.values()
         for category in ("Baby", "Toddler", "Preschool", "School Age", "Young Adult")
     }
+
+
+async def test_cancelled_image_storage_retains_its_expiry_cleanup(
+    hass: HomeAssistant,
+) -> None:
+    entry = _entry()
+    entry.add_to_hass(hass)
+    store_started = asyncio.Event()
+    release_store = threading.Event()
+    stored_runs: list[Path] = []
+    batch = ImageDownloadBatch(
+        images=(
+            DownloadedImage(
+                "https://libwww.freelibrary.org/images/storytime.png", b"image", ".png"
+            ),
+        ),
+        requested_count=1,
+        failure_count=0,
+        failure_examples=(),
+    )
+
+    def delayed_store(image_root, download_batch):
+        hass.loop.call_soon_threadsafe(store_started.set)
+        if not release_store.wait(timeout=10):
+            raise TimeoutError("test did not release image storage")
+        result = store_downloaded_images(image_root, download_batch)
+        assert result.run_directory is not None
+        stored_runs.append(result.run_directory)
+        return result
+
+    with (
+        patch(
+            "custom_components.free_library_events.api.LibraryClient.async_fetch_feed",
+            side_effect=lambda _branch, age_category: _empty_feed(age_category),
+        ),
+        patch(
+            "custom_components.free_library_events.async_download_event_images",
+            return_value=batch,
+        ),
+        patch(
+            "custom_components.free_library_events.store_downloaded_images",
+            # The HA fixture executes Mock executor targets inline; retain a
+            # real function so storage can still be running when we cancel.
+            new=delayed_store,
+        ),
+        patch("custom_components.free_library_events.async_call_later") as schedule,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        render_task = asyncio.create_task(
+            _async_render_digest(
+                ServiceCall(
+                    hass,
+                    DOMAIN,
+                    SERVICE_RENDER_DIGEST,
+                    {ATTR_FORCE_REFRESH: False, ATTR_EMBED_IMAGES: True},
+                )
+            )
+        )
+        try:
+            await store_started.wait()
+            render_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await render_task
+            schedule.assert_not_called()
+        finally:
+            release_store.set()
+            if not render_task.done():
+                render_task.cancel()
+            await asyncio.gather(render_task, return_exceptions=True)
+            await hass.async_block_till_done()
+
+        assert len(stored_runs) == 1
+        assert stored_runs[0].is_dir()
+        schedule.assert_called_once()
+        await schedule.call_args.args[2](datetime.now(UTC))
+        assert not stored_runs[0].exists()
+        assert await hass.config_entries.async_unload(entry.entry_id)
 
 
 @pytest.mark.parametrize("supersession", ("profile", "coordinator"))
@@ -3040,7 +3222,10 @@ async def test_digest_discloses_an_operational_supplemental_failure(
             return_response=True,
         )
 
-    assert "Some library listings may be missing" in response["message"]
+    assert (
+        "Some feed requests failed or have unresolved coverage limits"
+        in response["message"]
+    )
     assert "Charles Santore Library — Young Adult" not in response["message"]
     assert "offline" not in response["message"]
     assert response["metadata"]["supplemental_age_failures"] == [

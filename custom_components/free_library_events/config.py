@@ -134,7 +134,13 @@ def normalize_options(values: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(webcal_name, str):
         raise TypeError("invalid_webcal_name")
     webcal_name = " ".join(webcal_name.split())
-    if not webcal_name or len(webcal_name) > MAX_WEBCAL_NAME_LENGTH:
+    if (
+        not webcal_name
+        or len(webcal_name) > MAX_WEBCAL_NAME_LENGTH
+        or any(
+            ord(character) < 32 or ord(character) == 127 for character in webcal_name
+        )
+    ):
         raise ValueError("invalid_webcal_name")
     if filter_mode not in FILTER_MODES:
         raise ValueError("invalid_filter_mode")

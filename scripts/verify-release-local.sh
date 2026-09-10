@@ -26,7 +26,11 @@ source_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 repo_root="$source_root"
 if [[ "$backend" == container ]]; then
   repo_root="$(mktemp -d)"
-  trap 'rm -rf "$repo_root"' EXIT
+  # A signal can interrupt `wait` while the parallel lanes still own this tree.
+  # Reap them before cleanup, and suppress later gates after an interruption.
+  trap 'trap "" INT TERM; wait; rm -rf "$repo_root"' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
   source_git=(git -C "$source_root")
   if [[ -n "$source_git_dir" ]]; then
     source_git=(git --git-dir="$source_git_dir" --work-tree="$source_root")
@@ -53,6 +57,8 @@ python_image="docker.io/library/python@sha256:a7fb1e634c4a578f9e0bd6327f11a3cde1
 actionlint_image="docker.io/rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667"
 hassfest_image="ghcr.io/home-assistant/hassfest@sha256:8cd7bdb8f82430c2c13703290b1fc38dcc99957dd76ad3f230035ecee70b672d"
 run_python() (
+  # HA-only lanes opt out of Git provisioning needed by unit tooling/fixtures.
+  local needs_git="${2:-true}"
   if [[ "$backend" == native ]]; then
     # Each lane gets its own environment, including when `all native` is used.
     venv="$(mktemp -d)"
@@ -63,12 +69,15 @@ run_python() (
   else
     podman run --rm -e HOME=/tmp/home -e PIP_DISABLE_PIP_VERSION_CHECK=1 \
       -e PIP_ROOT_USER_ACTION=ignore -e DEBIAN_FRONTEND=noninteractive \
+      -e PIP_COMPILE=0 -e PIP_CACHE_DIR=/pip-cache \
       -e PYTHONPYCACHEPREFIX=/tmp/pycache -e XDG_CACHE_HOME=/tmp/cache \
-      -e RUFF_CACHE_DIR=/tmp/ruff-cache -e MYPY_CACHE_DIR=/tmp/mypy-cache \
+      -e RUFF_CACHE_DIR=/tmp/ruff-cache -e MYPY_CACHE_DIR=/dev/null \
       -e 'PYTEST_ADDOPTS=-p no:cacheprovider' \
-      -v "$repo_root:/workspace" -w /workspace "$python_image" bash -euo pipefail -c \
-      'apt-get update -qq; apt-get install -y -qq --no-install-recommends git >/dev/null; eval "$1"' \
-      local-validation "$1"
+      -v "$repo_root:/workspace:ro" -w /workspace \
+      --mount type=volume,source=free-library-events-validation-pip,target=/pip-cache \
+      "$python_image" bash -euo pipefail -c \
+      'if [[ "$1" == true ]]; then apt-get update -qq; apt-get install -y -qq --no-install-recommends git >/dev/null; fi; eval "$2"' \
+      local-validation "$needs_git" "$1"
   fi
 )
 run_actionlint() (
@@ -97,6 +106,7 @@ run_unit() {
     python -m unittest discover -s tests -p "test_public_safety.py"
     python -m unittest discover -s tests -p "test_ha_patch_compatibility.py"
     python -m unittest discover -s tests -p "test_validation_runner.py"
+    python -m unittest discover -s tests -p "test_parallel_validation.py"
     python -m compileall -q custom_components/free_library_events tests scripts
     python scripts/check_public_safety.py
   '
@@ -109,7 +119,7 @@ run_minimum() {
     python -m pip check
     python -m mypy custom_components/free_library_events
     pytest tests/test_integration_ha.py tests/test_email_images.py tests/test_acquisition_ha.py -q
-  '
+  ' false
 }
 run_current() {
   run_python '
@@ -117,7 +127,23 @@ run_current() {
     python -m pip install --upgrade -r requirements-ha-current.txt
     python scripts/check_ha_patch_compatibility.py --minimum requirements-ha-test.txt --current requirements-ha-current.txt
     pytest tests/test_integration_ha.py tests/test_email_images.py tests/test_acquisition_ha.py -q
-  '
+  ' false
+}
+run_ha_matrix() {
+  if [[ "$backend" == native ]]; then
+    run_minimum
+    run_current
+  else
+    # Containers read one immutable payload; installed environments stay separate.
+    local minimum_pid current_pid minimum_status=0 current_status=0
+    run_minimum & minimum_pid=$!
+    run_current & current_pid=$!
+    # Always reap both lanes before the parent can remove the payload.
+    wait "$minimum_pid" || minimum_status=$?
+    wait "$current_pid" || current_status=$?
+    printf 'Home Assistant lanes: minimum=%s current=%s\n' "$minimum_status" "$current_status"
+    (( minimum_status == 0 && current_status == 0 ))
+  fi
 }
 run_release() {
   if [[ "$backend" == native ]]; then
@@ -127,7 +153,7 @@ run_release() {
   fi
 }
 case "$mode" in
-  all) run_unit; run_minimum; run_current; run_release ;;
+  all) run_unit; run_ha_matrix; run_release ;;
   unit) run_unit ;;
   minimum) run_minimum ;;
   current) run_current ;;

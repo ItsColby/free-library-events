@@ -366,9 +366,9 @@ class FreeLibraryEventsOptionsFlow(config_entries.OptionsFlowWithReload):
                 "http_url": urls.http_url,
                 "webcal_url": urls.webcal_url,
                 "url_scope": (
-                    "Home Assistant external or cloud URL configured"
+                    "This URL uses an external or cloud Home Assistant address. Your calendar service must be able to reach that address; the URL has not been tested from outside your network."
                     if urls.external_url_configured
-                    else "Only a Home Assistant internal URL is configured"
+                    else "This URL uses an internal Home Assistant address. The subscribing device or service needs access to that network; an online calendar service may be unable to reach it."
                 ),
             },
         )
