@@ -1189,6 +1189,204 @@ class DigestTests(unittest.TestCase):
             with self.subTest(title=title, description=description):
                 self.assertEqual(digest.explicit_venue(title, description), "")
 
+    def test_conditional_weather_location_suppresses_a_fixed_destination(self) -> None:
+        description = (
+            "Cooler weather? We'll have storytime in the auditorium on the ground "
+            "floor! Warmer weather? We'll be in Bluebird Park across the street."
+        )
+        event = digest.Event(
+            title="Baby Storytime",
+            event_date=date(2026, 7, 20),
+            start_time=digest.time(10),
+            description=description,
+            link="https://example.test/conditional-location",
+            image_url="",
+            branch=digest.BRANCHES["CEN"],
+            age_categories=("Baby",),
+            room=digest.explicit_room(description),
+        )
+        location = "Location depends on weather; check the official listing"
+        note = f"{location} before traveling."
+        self.assertEqual(digest.event_location_note(event), note)
+        self.assertEqual(
+            digest.event_location_name(event), "Location depends on weather"
+        )
+        self.assertEqual(digest.event_calendar_location(event), location)
+        self.assertEqual(digest.event_directions_url(event), "")
+        self.assertIn(
+            "Hosted by Parkway Central Library", digest.event_location_summary(event)
+        )
+        location_html = digest._event_location_html(event)
+        self.assertNotIn("ground floor", location_html)
+        self.assertNotIn("href=", location_html)
+        self.assertIn("Location depends on weather", location_html)
+
+        for compact in (False, True):
+            with self.subTest(compact=compact):
+                query = digest.urllib.parse.parse_qs(
+                    digest.urllib.parse.urlsplit(
+                        digest.google_calendar_url(event, 60, compact=compact)
+                    ).query
+                )
+                self.assertEqual(query["location"], [location])
+                self.assertIn(note, query["details"][0])
+                self.assertIn("Hosted by Parkway Central Library", query["details"][0])
+
+        payload = digest.build_digest(
+            child_name="Avery",
+            birth_date=date(2025, 11, 1),
+            filter_mode="Recommended",
+            duration_minutes=60,
+            selected_branches=(digest.BRANCHES["CEN"],),
+            reference_date=date(2026, 7, 19),
+            events=[event],
+            source_counts={"CEN": 1},
+        )
+        self.assertIn("Location depends on weather", payload["html"])
+        self.assertIn("Hosted by Parkway Central Library", payload["html"])
+        self.assertIn("Location depends on weather", payload["message"])
+        self.assertIn(description, payload["message"])
+        self.assertNotIn("https://www.google.com/maps/search/", payload["html"])
+        self.assertNotIn("https://www.google.com/maps/search/", payload["message"])
+
+        explicit_park = digest.replace(event, venue="Bluebird Park")
+        self.assertEqual(digest.event_calendar_location(explicit_park), location)
+        self.assertNotIn(
+            "Outdoors",
+            {label for _kind, label in digest._event_chip_specs(explicit_park)},
+        )
+        self.assertEqual(
+            digest.event_identity(explicit_park), digest.event_identity(event)
+        )
+        hybrid = digest.replace(explicit_park, modality="hybrid")
+        self.assertEqual(digest.event_calendar_location(hybrid), f"{location} (hybrid)")
+        self.assertIn("Online option", digest.event_location_summary(hybrid))
+        self.assertEqual(digest.event_directions_url(hybrid), "")
+        online = digest.replace(explicit_park, modality="online")
+        self.assertEqual(digest.event_location_note(online), "")
+        self.assertEqual(digest.event_calendar_location(online), "Online")
+        self.assertEqual(digest.event_location_summary(online), "Online")
+
+    def test_weather_location_note_survives_email_description_excerpt(self) -> None:
+        event = digest.Event(
+            title="Baby Storytime",
+            event_date=date(2026, 7, 20),
+            start_time=digest.time(10),
+            description=(
+                "Songs and stories for babies. " * 200
+                + "In inclement weather, the program will move indoors."
+            ),
+            link="https://example.test/long-conditional-location",
+            image_url="",
+            branch=digest.BRANCHES["CEN"],
+            age_categories=("Baby",),
+            venue="Bluebird Park",
+        )
+        displayed = digest._display_event(event)
+        self.assertFalse(event.weather_location_conditional)
+        self.assertTrue(displayed.description_truncated)
+        self.assertNotIn("weather", displayed.description)
+        self.assertEqual(
+            digest.event_location_note(displayed), digest.event_location_note(event)
+        )
+        self.assertEqual(digest.event_identity(displayed), digest.event_identity(event))
+        self.assertEqual(digest.event_directions_url(displayed), "")
+        self.assertNotIn(
+            "Weather affects location",
+            {label for _kind, label in digest._event_chip_specs(displayed)},
+        )
+        for compact in (False, True):
+            with self.subTest(compact=compact):
+                rendered = digest._render_event_card(
+                    displayed, duration_minutes=60, compact=compact
+                )
+                self.assertIn("Location depends on weather", rendered)
+                self.assertNotIn("https://www.google.com/maps/search/", rendered)
+                query = digest.urllib.parse.parse_qs(
+                    digest.urllib.parse.urlsplit(
+                        digest.google_calendar_url(displayed, 60, compact=compact)
+                    ).query
+                )
+                self.assertEqual(
+                    query["location"],
+                    ["Location depends on weather; check the official listing"],
+                )
+                self.assertIn(digest.event_location_note(event), query["details"][0])
+
+    def test_weather_location_note_distinguishes_moves_from_cancellation(self) -> None:
+        base = digest.Event(
+            title="Community Program",
+            event_date=date(2026, 7, 20),
+            start_time=digest.time(10),
+            description="",
+            link="https://example.test/weather-location",
+            image_url="",
+            branch=digest.BRANCHES["CEN"],
+            venue="Bluebird Park",
+        )
+        for description in (
+            "In inclement weather, the program will move indoors.",
+            "In bad weather, our storytime will be held in the auditorium.",
+            "If it rains, the event will move indoors.",
+            "In case of rain, we will meet in the auditorium.",
+            "The event may move indoors because of the weather.",
+            "The event could move indoors because of the weather.",
+            "We meet regardless of weather, but in bad weather we'll move indoors.",
+            "We meet regardless of weather; however, in bad weather we'll move indoors.",
+            (
+                "The event will not be canceled for weather. "
+                "In inclement weather, we will move indoors."
+            ),
+        ):
+            with self.subTest(description=description):
+                event = digest.replace(base, description=description)
+                self.assertTrue(digest.event_location_note(event))
+                self.assertEqual(digest.event_directions_url(event), "")
+                self.assertEqual(
+                    digest.event_calendar_location(event),
+                    "Location depends on weather; check the official listing",
+                )
+                self.assertNotIn(
+                    "Weather affects location",
+                    {label for _kind, label in digest._event_chip_specs(event)},
+                )
+                self.assertNotIn(
+                    "Weather dependent",
+                    {label for _kind, label in digest._event_chip_specs(event)},
+                )
+
+        for description in (
+            "Join us in Bluebird Park, weather permitting.",
+            "In unfavorable weather, the program will be canceled.",
+            "The event will not be canceled because of the weather.",
+            "We will not move indoors because of the weather.",
+            "In inclement weather, the program will not be held indoors.",
+            "We will meet indoors regardless of the weather.",
+            "Rain or shine, we will meet in Bluebird Park.",
+            "If it rains, the event will be canceled.",
+            "In case of rain, the event will be canceled.",
+            "If it rains, the event will not move indoors.",
+            "In case of rain, we will not meet in the auditorium.",
+            "If it rains, frogs will move indoors.",
+            "The event moved to Bluebird Park because of the weather.",
+            "The event will move to Bluebird Park because of the weather.",
+            "Learn how frogs move indoors during cooler weather.",
+            "Learn about cooler weather and warmer weather.",
+            "Storytime takes place in the auditorium.",
+        ):
+            with self.subTest(description=description):
+                event = digest.replace(base, description=description)
+                self.assertEqual(digest.event_location_note(event), "")
+                self.assertEqual(
+                    digest.event_calendar_location(event),
+                    "Bluebird Park, Philadelphia, PA",
+                )
+                self.assertTrue(digest.event_directions_url(event))
+                self.assertNotIn(
+                    "Weather affects location",
+                    {label for _kind, label in digest._event_chip_specs(event)},
+                )
+
     def test_age_on_event_date(self) -> None:
         self.assertEqual(digest.age_on(date(2025, 1, 15), date(2026, 7, 24)), (1, 6, 9))
         self.assertEqual(
@@ -2067,7 +2265,7 @@ class DigestTests(unittest.TestCase):
         location_labels = {
             label for _kind, label in digest._event_chip_specs(location_change)
         }
-        self.assertIn("Weather affects location", location_labels)
+        self.assertNotIn("Weather affects location", location_labels)
         self.assertNotIn("Weather dependent", location_labels)
 
         inclement_location_change = digest.replace(
@@ -2078,8 +2276,25 @@ class DigestTests(unittest.TestCase):
             label
             for _kind, label in digest._event_chip_specs(inclement_location_change)
         }
-        self.assertIn("Weather affects location", inclement_labels)
+        self.assertNotIn("Weather affects location", inclement_labels)
         self.assertNotIn("Weather dependent", inclement_labels)
+
+        for risk in (
+            "Severe weather may cancel the event.",
+            "Weather permitting.",
+        ):
+            with self.subTest(risk=risk):
+                conditional_with_risk = digest.replace(
+                    inclement_location_change,
+                    description=f"{inclement_location_change.description} {risk}",
+                )
+                self.assertTrue(digest.event_location_note(conditional_with_risk))
+                risk_labels = {
+                    label
+                    for _kind, label in digest._event_chip_specs(conditional_with_risk)
+                }
+                self.assertIn("Weather dependent", risk_labels)
+                self.assertNotIn("Weather affects location", risk_labels)
 
         negated = digest.replace(
             event,

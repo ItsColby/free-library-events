@@ -156,6 +156,7 @@ class Event:
     modality: Literal["in_person", "online", "hybrid"] = "in_person"
     image_layout: Literal["side", "hero"] = "side"
     description_truncated: bool = False
+    weather_location_conditional: bool = False
 
     @property
     def starts_at(self) -> datetime:
@@ -984,6 +985,7 @@ def _event_merge_priority(event: Event) -> tuple[bool, int, int, int, int, str]:
             event.modality,
             event.image_layout,
             event.description_truncated,
+            event.weather_location_conditional,
         )
     )
     return (
@@ -1324,21 +1326,85 @@ def icon_for(event: Event) -> str:
     return "\N{SPARKLES}"
 
 
+_CONDITIONAL_LOCATION_LABEL = "Location depends on weather"
+_CONDITIONAL_LOCATION_DETAILS = (
+    f"{_CONDITIONAL_LOCATION_LABEL}; check the official listing"
+)
+_WEATHER_LOCATION_CONDITION_RE = re.compile(
+    r"\b(?:cooler|warmer) weather\b|"
+    r"\b(?:if|when|in(?: case of)?|during)\s+(?:the\s+)?"
+    r"(?:(?:unfavorable|inclement|bad|rainy|cold|hot|wet)\s+)?weather\b|"
+    r"\b(?:depending on|based on) (?:the )?weather\b|"
+    r"\bif it rains\b|\bin case of rain\b",
+    re.IGNORECASE,
+)
+_WEATHER_LOCATION_SUBJECT = (
+    r"(?:we(?:['\u2019]ll)?|it(?:['\u2019]ll)?|"
+    r"(?:(?:the|this|our)\s+)?(?:program|event|storytime))"
+)
+_WEATHER_LOCATION_MOVE = (
+    rf"\b{_WEATHER_LOCATION_SUBJECT}\s+(?:(?:will|may|might|could|can)\s+)?(?:be\s+)?"
+    r"(?:moves?|moved|relocat(?:e|es|ed))\s+"
+    r"(?:(?:the\s+)?(?:event|program|storytime)\s+)?"
+    r"(?:indoors?|outdoors?|inside|outside|to|into)\b"
+)
+_WEATHER_LOCATION_SETTING = (
+    rf"\b{_WEATHER_LOCATION_SUBJECT}\s+(?:(?:will|may|might|could|can)\s+)?"
+    r"(?:meet|gather|stay|be|is|are|held|(?:take|takes) place|"
+    r"have (?:the )?(?:storytime|program|event))\s+(?:held\s+)?"
+    r"(?:indoors?|outdoors?|inside|outside|in|at)\b"
+)
+
+
+def event_location_note(event: Event) -> str:
+    """Explain a conditional physical venue, excluding cancellation-only wording."""
+
+    if event.modality == "online":
+        return ""
+    if event.weather_location_conditional:
+        return f"{_CONDITIONAL_LOCATION_DETAILS} before traveling."
+    for clause in re.split(
+        r"[.!;\n]+|\b(?:but|however)\b",
+        f"{event.title}\n{event.description}",
+        flags=re.IGNORECASE,
+    ):
+        conditional_weather = _WEATHER_LOCATION_CONDITION_RE.search(clause)
+        if not (
+            conditional_weather or re.search(r"\bweather\b", clause, re.IGNORECASE)
+        ) or re.search(r"\bregardless of (?:the )?weather\b", clause, re.IGNORECASE):
+            continue
+        if (
+            conditional_weather
+            and _has_positive_claim(_WEATHER_LOCATION_SETTING, clause)
+        ) or (
+            (
+                conditional_weather
+                or re.search(r"\b(?:may|might|could)\b", clause, re.IGNORECASE)
+            )
+            and _has_positive_claim(_WEATHER_LOCATION_MOVE, clause)
+        ):
+            return f"{_CONDITIONAL_LOCATION_DETAILS} before traveling."
+    return ""
+
+
 def event_location_name(event: Event) -> str:
-    """Return the most specific confidently published location name."""
+    """Return a precise place name or an explicit online/conditional label."""
 
     if event.modality == "online":
         return "Online"
+    if event_location_note(event):
+        return _CONDITIONAL_LOCATION_LABEL
     return event.venue or event.branch.name
 
 
 def event_location_label(event: Event) -> str:
-    """Return only the place and room represented by the map destination."""
+    """Return a place/room label or explicit online/conditional location context."""
 
     location = event_location_name(event)
     if event.modality == "online":
         return location
-    location = f"{location} {MIDDLE_DOT} {event.room}" if event.room else location
+    if event.room and not event_location_note(event):
+        location = f"{location} {MIDDLE_DOT} {event.room}"
     if event.modality == "hybrid":
         location += f" {MIDDLE_DOT} Online option"
     return location
@@ -1348,7 +1414,7 @@ def event_location_summary(event: Event) -> str:
     """Return the visible venue, room, and off-site hosting context."""
 
     summary = event_location_label(event)
-    if event.venue and event.modality != "online":
+    if (event.venue or event_location_note(event)) and event.modality != "online":
         summary += f" {MIDDLE_DOT} Hosted by {event.branch.name}"
     return summary
 
@@ -1361,7 +1427,7 @@ def _event_location_html(event: Event) -> str:
         return f"{location_pin}{html.escape(event_location_name(event))}"
 
     physical_label = event_location_name(event)
-    if event.room:
+    if event.room and not event_location_note(event):
         physical_label += f" {MIDDLE_DOT} {event.room}"
     directions = event_directions_url(event)
     if directions:
@@ -1378,16 +1444,20 @@ def _event_location_html(event: Event) -> str:
 
     if event.modality == "hybrid":
         rendered += f" {MIDDLE_DOT} Online option"
-    if event.venue:
+    if event.venue or event_location_note(event):
         rendered += f" {MIDDLE_DOT} Hosted by {html.escape(event.branch.name)}"
     return rendered
 
 
 def event_calendar_location(event: Event) -> str:
-    """Return a geocodable calendar location without a redundant email address."""
+    """Return a precise address or a truthful online/conditional location label."""
 
     if event.modality == "online":
         return "Online"
+    if event_location_note(event):
+        return _CONDITIONAL_LOCATION_DETAILS + (
+            " (hybrid)" if event.modality == "hybrid" else ""
+        )
     if event.venue:
         location = f"{event.venue}, Philadelphia, PA"
         return f"{location} (hybrid)" if event.modality == "hybrid" else location
@@ -1418,14 +1488,17 @@ def google_calendar_url(
     compact: bool = False,
 ) -> str:
     end = event.end_at or event.starts_at + timedelta(minutes=duration_minutes)
+    location_note = event_location_note(event)
     detail_parts = (
-        []
-        if compact
-        else [
-            _bounded_text(event.description, MAX_CALENDAR_DETAILS_CHARS),
-            *related_link_lines(event),
-        ]
+        [location_note, f"Hosted by {event.branch.name}"] if location_note else []
     )
+    if not compact:
+        detail_parts.extend(
+            [
+                _bounded_text(event.description, MAX_CALENDAR_DETAILS_CHARS),
+                *related_link_lines(event),
+            ]
+        )
     details = "\n\n".join(part for part in detail_parts if part)
     details += f"\n\nOfficial event details: {event_details_url(event)}"
     if event.end_at is None:
@@ -1458,9 +1531,9 @@ def directions_url(branch: Branch) -> str:
 
 
 def event_directions_url(event: Event) -> str:
-    """Return a map link for an explicit venue or the hosting branch."""
+    """Return directions only when the physical destination is not conditional."""
 
-    if event.modality == "online":
+    if event.modality == "online" or event_location_note(event):
         return ""
     if not event.venue:
         return directions_url(event.branch)
@@ -1576,12 +1649,15 @@ def _logistics_chip_specs(
     """Return logistics chips and whether the event is a take-home craft."""
 
     logistics_chips: list[tuple[str, str]] = []
-    if _has_positive_claim(r"\b(?:outdoor|outdoors|outside)\b", searchable) or (
-        event.venue
-        and re.search(
-            r"\b(?:park|square|playground|garden)\b",
-            event.venue,
-            re.IGNORECASE,
+    if not event_location_note(event) and (
+        _has_positive_claim(r"\b(?:outdoor|outdoors|outside)\b", searchable)
+        or (
+            event.venue
+            and re.search(
+                r"\b(?:park|square|playground|garden)\b",
+                event.venue,
+                re.IGNORECASE,
+            )
         )
     ):
         logistics_chips.append(("logistics", "Outdoors"))
@@ -1648,15 +1724,6 @@ def _event_chip_specs(event: Event) -> tuple[tuple[str, str], ...]:
     logistics_chips, take_home_craft = _logistics_chip_specs(event, searchable)
     if take_home_craft:
         topic_chips = [chip for chip in topic_chips if chip != ("topic", "Crafts")]
-    weather_location_change = re.search(
-        r"\b(?:cooler|warmer) weather\b|"
-        r"\bweather\b[^.]{0,80}\b(?:indoors?|inside|move|moves|moved|"
-        r"relocat(?:e|es|ed|ion)|alternate location)\b|"
-        r"\b(?:indoors?|inside|move|moves|moved|relocat(?:e|es|ed|ion)|"
-        r"alternate location)\b[^.]{0,80}\bweather\b",
-        searchable,
-        re.IGNORECASE,
-    )
     weather_risk = re.search(
         r"\bweather permitting\b|\bweather\b[^.]{0,60}\b(?:cancel|postpone|"
         r"reschedul)",
@@ -1676,13 +1743,10 @@ def _event_chip_specs(event: Event) -> tuple[tuple[str, str], ...]:
         searchable,
         re.IGNORECASE,
     )
-    if not weather_negated:
-        if weather_risk:
-            action_chips.append(("action", "Weather dependent"))
-        elif weather_location_change:
-            action_chips.append(("action", "Weather affects location"))
-        elif weather_conditions:
-            action_chips.append(("action", "Weather dependent"))
+    if not weather_negated and (
+        weather_risk or (weather_conditions and not event_location_note(event))
+    ):
+        action_chips.append(("action", "Weather dependent"))
     if re.search(r"\bwhile supplies last\b", searchable, re.IGNORECASE):
         action_chips.append(("action", "Limited supplies"))
     registration_required = re.search(
@@ -1741,7 +1805,6 @@ def _event_chip_specs(event: Event) -> tuple[tuple[str, str], ...]:
     action_priority = {
         "Registration required": 0,
         "Weather dependent": 1,
-        "Weather affects location": 2,
         "Limited supplies": 3,
     }
     action_chips.sort(key=lambda chip: action_priority.get(chip[1], 99))
@@ -2291,6 +2354,7 @@ def _display_event(event: Event) -> Event:
         description=description,
         description_html="" if truncated else event.description_html,
         description_truncated=truncated,
+        weather_location_conditional=bool(event_location_note(event)),
     )
 
 
