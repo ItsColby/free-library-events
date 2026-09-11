@@ -191,8 +191,10 @@ up-to-date **Release gate**, including for administrators, and linear history.
 It does not require a review count. Analysis success alone says nothing about
 whether CodeQL found alerts.
 
-For a release, set the manifest version to `YYYY.M.D` and use the corresponding
-`vYYYY.M.D` in the release title and immutable tag. Record the change and its actual
+For a release, set the manifest version to `YYYY.M.D`, with an optional `.N`
+suffix for a same-day patch (for example, `2026.9.10.2`). Derive the release title
+and immutable tag as `v` followed by that exact manifest value. Record the change
+and its actual
 validation evidence in [release notes](../RELEASE_NOTES.md), preserving previous
 release facts and the [license](../LICENSE). Compare the publisher's RSS builder
 age/type options with the local taxonomy before every release, including when
