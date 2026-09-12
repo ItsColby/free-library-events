@@ -2687,6 +2687,67 @@ class DigestTests(unittest.TestCase):
         self.assertEqual(full_ids, frozenset())
         self.assertNotIn("with photos", rendered)
 
+    def test_budgeted_cards_are_reused_without_changing_the_complete_response(
+        self,
+    ) -> None:
+        events = [
+            digest.Event(
+                title=f"Baby activity {index} \N{SNOWMAN}",
+                event_date=date(2026, 7, 20 + index % 6),
+                start_time=digest.time(10),
+                description="Stories and play. " * 120,
+                link=f"https://example.test/{index}",
+                image_url="cid:original.png",
+                branch=digest.BRANCHES["CEN"],
+                age_categories=("Baby",),
+            )
+            for index in range(100)
+        ]
+        arguments = {
+            "child_name": "Avery",
+            "birth_date": date(2025, 11, 1),
+            "filter_mode": "Recommended",
+            "duration_minutes": 60,
+            "selected_branches": (digest.BRANCHES["CEN"],),
+            "reference_date": date(2026, 7, 19),
+            "events": events,
+            "source_counts": {"CEN": 100},
+        }
+        render_html = digest._render_html
+
+        def uncached_render(*args, **kwargs):
+            kwargs.pop("rendered_cards", None)
+            return render_html(*args, **kwargs)
+
+        for budget in (35_000, 80_000):
+            with (
+                self.subTest(budget=budget),
+                patch.object(digest, "MAX_DIGEST_HTML_BYTES", budget),
+            ):
+                with patch.object(digest, "_render_html", side_effect=uncached_render):
+                    expected = digest.build_digest(**arguments)
+                with patch.object(
+                    digest, "_render_event_card", wraps=digest._render_event_card
+                ) as render_card:
+                    actual = digest.build_digest(**arguments)
+                self.assertEqual(actual, expected)
+                self.assertEqual(render_card.call_count, 200)
+                self.assertLessEqual(actual["metadata"]["html_bytes"], budget)
+
+        # A later invocation can reuse the same occurrence with different CID,
+        # layout and duration. It must not reuse the earlier representation.
+        arguments["events"] = events[:1]
+        first = digest.build_digest(**arguments)
+        later = digest.build_digest(
+            **{**arguments, "duration_minutes": 90},
+            image_url_overrides={digest.event_identity(events[0]): "cid:later.png"},
+            image_layout_overrides={digest.event_identity(events[0]): "hero"},
+        )
+        self.assertIn("cid:original.png", first["html"])
+        self.assertNotIn("cid:original.png", later["html"])
+        self.assertIn("cid:later.png", later["html"])
+        self.assertIn('class="event-hero-image-cell"', later["html"])
+
     def test_mobile_layout_keeps_every_card_rich_when_the_html_budget_allows(
         self,
     ) -> None:

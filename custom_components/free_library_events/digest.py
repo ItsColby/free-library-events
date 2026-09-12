@@ -2063,16 +2063,21 @@ def _render_html(
     source_warnings: Sequence[str],
     full_event_ids: frozenset[str] | None = None,
     email_omitted_count: int = 0,
+    rendered_cards: Mapping[tuple[Event, bool], str] | None = None,
 ) -> str:
     if full_event_ids is None:
         full_event_ids = frozenset(event_identity(event) for event in events)
     day_sections: list[str] = []
     for event_date, day_items in groupby(events, key=lambda event: event.event_date):
         day_cards = "".join(
-            _render_event_card(
-                event,
-                duration_minutes=duration_minutes,
-                compact=event_identity(event) not in full_event_ids,
+            (
+                rendered_cards[(event, event_identity(event) not in full_event_ids)]
+                if rendered_cards is not None
+                else _render_event_card(
+                    event,
+                    duration_minutes=duration_minutes,
+                    compact=event_identity(event) not in full_event_ids,
+                )
             )
             for event in day_items
         )
@@ -2388,6 +2393,16 @@ def _render_budgeted_html(
         key=lambda event: _distance_priority(event, distance_by_branch_code),
     )
     omitted_count = initially_omitted_count
+    # The caller caps candidates at MAX_EMAIL_EVENTS. Keep both representations
+    # only for this invocation, keyed by the complete displayed event (including
+    # image/CID overrides), rather than its source identity alone.
+    rendered_cards = {
+        (event, compact): _render_event_card(
+            event, duration_minutes=duration_minutes, compact=compact
+        )
+        for event in rendered_events
+        for compact in (False, True)
+    }
 
     def render(full_ids: frozenset[str]) -> str:
         return _render_html(
@@ -2402,15 +2417,12 @@ def _render_budgeted_html(
             source_warnings=source_warnings,
             full_event_ids=full_ids,
             email_omitted_count=omitted_count,
+            rendered_cards=rendered_cards,
         )
 
     def full_card_delta(event: Event) -> int:
-        return len(
-            _render_event_card(event, duration_minutes=duration_minutes).encode("utf-8")
-        ) - len(
-            _render_event_card(
-                event, duration_minutes=duration_minutes, compact=True
-            ).encode("utf-8")
+        return len(rendered_cards[(event, False)].encode("utf-8")) - len(
+            rendered_cards[(event, True)].encode("utf-8")
         )
 
     compact_html = render(frozenset())
