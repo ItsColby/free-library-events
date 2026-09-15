@@ -22,6 +22,7 @@ if str(ROOT) not in sys.path:
 
 import aiohttp
 import pytest
+from homeassistant.components.calendar import CalendarEvent
 from homeassistant.components.smtp.helpers import _build_html_msg
 from homeassistant.config_entries import (
     SOURCE_RECONFIGURE,
@@ -1906,7 +1907,138 @@ def test_stored_cid_images_match_home_assistant_smtp_mime_contract(
         remove_stored_image_run(bundle.run_directory)
 
 
-def test_calendar_keeps_recurring_series_occurrences_distinct() -> None:
+@pytest.fixture
+def selection_calendar() -> LibraryCalendar:
+    """Three real source events, including one with a fallback duration."""
+
+    events = tuple(
+        Event(
+            title=f"Storytime {hour}",
+            event_date=date(2026, 7, 22),
+            start_time=time(hour),
+            description="Stories and songs.",
+            link=f"https://example.test/events/storytime-{hour}",
+            image_url="",
+            branch=BRANCHES["IND"],
+            age_categories=("Baby",),
+            end_at=datetime.combine(date(2026, 7, 22), time(hour + 1))
+            if hour != 12
+            else None,
+        )
+        for hour in (10, 11, 12)
+    )
+    calendar = LibraryCalendar.__new__(LibraryCalendar)
+    calendar._entry = types.SimpleNamespace(
+        data=USER_INPUT | {CONF_BIRTH_DATE: "2025-11-15"}, options={}
+    )
+    calendar.coordinator = types.SimpleNamespace(
+        data=types.SimpleNamespace(events=events)
+    )
+    return calendar
+
+
+@pytest.mark.parametrize(
+    ("hour", "expected_hour"), ((9, 10), (11, 11), (12, 12), (13, None))
+)
+def test_calendar_constructs_only_the_current_or_next_native_event(
+    selection_calendar: LibraryCalendar, hour: int, expected_hour: int | None
+) -> None:
+    with (
+        patch(
+            "custom_components.free_library_events.calendar.dt_util.now",
+            return_value=datetime(2026, 7, 22, hour, tzinfo=LOCAL_TIME_ZONE),
+        ),
+        patch(
+            "custom_components.free_library_events.calendar.CalendarEvent",
+            wraps=CalendarEvent,
+        ) as construct,
+    ):
+        event = selection_calendar.event
+
+    assert construct.call_count == (0 if expected_hour is None else 1)
+    if expected_hour is None:
+        assert event is None
+    else:
+        assert isinstance(event, CalendarEvent)
+        assert event.start == datetime(
+            2026, 7, 22, expected_hour, tzinfo=LOCAL_TIME_ZONE
+        )
+        assert event.end == datetime(
+            2026, 7, 22, expected_hour + 1, tzinfo=LOCAL_TIME_ZONE
+        )
+        assert event.uid == event_identity(
+            selection_calendar.coordinator.data.events[expected_hour - 10]
+        )
+        if expected_hour == 12:
+            assert "60 minutes as a fallback" in event.description
+
+
+@pytest.mark.parametrize(
+    ("start_hour", "end_hour", "expected_hours"),
+    (
+        (9, 10, []),
+        (10, 11, [10]),
+        (11, 12, [11]),
+        (12, 14, [12]),
+        (13, 14, []),
+        (9, 14, [10, 11, 12]),
+    ),
+)
+async def test_calendar_converts_only_events_overlapping_the_requested_range(
+    hass: HomeAssistant,
+    selection_calendar: LibraryCalendar,
+    start_hour: int,
+    end_hour: int,
+    expected_hours: list[int],
+) -> None:
+    with patch(
+        "custom_components.free_library_events.calendar.CalendarEvent",
+        wraps=CalendarEvent,
+    ) as construct:
+        events = await selection_calendar.async_get_events(
+            hass,
+            datetime(2026, 7, 22, start_hour, tzinfo=LOCAL_TIME_ZONE).astimezone(UTC),
+            datetime(2026, 7, 22, end_hour, tzinfo=LOCAL_TIME_ZONE).astimezone(UTC),
+        )
+
+    assert construct.call_count == len(expected_hours)
+    assert [event.start.hour for event in events] == expected_hours
+    assert all(isinstance(event, CalendarEvent) for event in events)
+
+
+async def test_calendar_preserves_source_order_and_handles_missing_snapshot(
+    hass: HomeAssistant, selection_calendar: LibraryCalendar
+) -> None:
+    selection_calendar.coordinator.data.events = tuple(
+        reversed(selection_calendar.coordinator.data.events)
+    )
+    with patch(
+        "custom_components.free_library_events.calendar.dt_util.now",
+        return_value=datetime(2026, 7, 22, 9, tzinfo=LOCAL_TIME_ZONE),
+    ):
+        assert selection_calendar.event.start.hour == 12
+    events = await selection_calendar.async_get_events(
+        hass, datetime(2026, 7, 1, tzinfo=UTC), datetime(2026, 8, 1, tzinfo=UTC)
+    )
+    assert [event.start.hour for event in events] == [12, 11, 10]
+    selection_calendar.coordinator.data = None
+    with patch(
+        "custom_components.free_library_events.calendar.CalendarEvent",
+        wraps=CalendarEvent,
+    ) as construct:
+        assert selection_calendar.event is None
+        assert (
+            await selection_calendar.async_get_events(
+                hass, datetime(2026, 7, 1, tzinfo=UTC), datetime(2026, 8, 1, tzinfo=UTC)
+            )
+            == []
+        )
+    construct.assert_not_called()
+
+
+async def test_calendar_keeps_recurring_series_occurrences_distinct(
+    hass: HomeAssistant,
+) -> None:
     first = Event(
         title="Weekly Storytime",
         event_date=date(2026, 7, 20),
@@ -1937,7 +2069,9 @@ def test_calendar_keeps_recurring_series_occurrences_distinct() -> None:
     calendar._entry = entry
     calendar.coordinator = coordinator
 
-    rendered = calendar._calendar_events()
+    rendered = await calendar.async_get_events(
+        hass, datetime(2026, 7, 1, tzinfo=UTC), datetime(2026, 8, 1, tzinfo=UTC)
+    )
 
     assert [item.uid for item in rendered] == [
         event_identity(first),
@@ -1979,7 +2113,8 @@ def test_calendar_keeps_recurring_series_occurrences_distinct() -> None:
         ),
     ),
 )
-def test_calendar_and_webcal_preserve_publisher_context_without_changing_location(
+async def test_calendar_and_webcal_preserve_publisher_context_without_changing_location(
+    hass: HomeAssistant,
     venue: str,
     modality: Literal["in_person", "online", "hybrid"],
     categories: tuple[str, ...],
@@ -2006,7 +2141,9 @@ def test_calendar_and_webcal_preserve_publisher_context_without_changing_locatio
     calendar.coordinator = types.SimpleNamespace(
         data=types.SimpleNamespace(events=(event,))
     )
-    ha_items = calendar._calendar_events()
+    ha_items = await calendar.async_get_events(
+        hass, datetime(2026, 7, 1, tzinfo=UTC), datetime(2026, 8, 1, tzinfo=UTC)
+    )
     rendered = render_icalendar(
         items,
         fetched_at=datetime(2026, 7, 19, 16, 15, tzinfo=UTC),
