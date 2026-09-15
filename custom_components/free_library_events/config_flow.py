@@ -280,7 +280,13 @@ class FreeLibraryEventsOptionsFlow(config_entries.OptionsFlowWithReload):
     ) -> ConfigFlowResult:
         """Enable, disable, or rename the private calendar feed."""
 
-        current = entry_options(self.config_entry.data, self.config_entry.options)
+        if self._pending_options is not None:
+            if self._pending_owner != self._entry_owner():
+                self._clear_pending_options()
+                return self.async_abort(reason="options_changed")
+            current = entry_options(self.config_entry.data, self._pending_options)
+        else:
+            current = entry_options(self.config_entry.data, self.config_entry.options)
         errors: dict[str, str] = {}
         if user_input is not None:
             try:
@@ -346,7 +352,6 @@ class FreeLibraryEventsOptionsFlow(config_entries.OptionsFlowWithReload):
             urls = webcal_subscription_urls(self.hass, token)
         except NoURLAvailableError:
             pending_options = self._pending_options
-            self._clear_pending_options()
             return self.async_show_form(
                 step_id="webcal",
                 data_schema=_webcal_schema(pending_options),

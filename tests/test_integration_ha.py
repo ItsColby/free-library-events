@@ -396,6 +396,113 @@ async def test_options_flow_enables_and_rotates_webcal_feed(
     assert entry.options["future_behavior"] == future_option["future_behavior"]
 
 
+@pytest.mark.parametrize("outcome", ("save", "cancel", "disable", "options", "profile"))
+async def test_webcal_rotation_survives_url_recovery(
+    hass: HomeAssistant, outcome: str
+) -> None:
+    old_token = "old-synthetic-recovery-token"
+    new_token = "new-synthetic-recovery-token"
+    original_options = {
+        **BEHAVIOR_INPUT,
+        CONF_PUBLISH_WEBCAL: True,
+        CONF_WEBCAL_TOKEN: old_token,
+        CONF_WEBCAL_NAME: "Library Events",
+        "future_behavior": {"enabled": True},
+    }
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Free Library Events",
+        unique_id=DOMAIN,
+        data=PROFILE_DATA,
+        options=original_options,
+        version=1,
+        minor_version=2,
+    )
+    entry.add_to_hass(hass)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "regenerate_webcal"}
+    )
+    retry_input = {
+        CONF_PUBLISH_WEBCAL: True,
+        CONF_WEBCAL_NAME: "Recovered Library Events",
+    }
+    with (
+        patch(
+            "custom_components.free_library_events.config_flow.token_urlsafe",
+            return_value=new_token,
+        ) as generate_token,
+        patch.object(
+            hass.config_entries, "async_reload", new_callable=AsyncMock
+        ) as async_reload,
+    ):
+        with patch(
+            "custom_components.free_library_events.webcal.get_url",
+            side_effect=NoURLAvailableError,
+        ):
+            result = await hass.config_entries.options.async_configure(
+                result["flow_id"], {}
+            )
+            assert result["step_id"] == "webcal"
+            assert result["errors"] == {"base": "webcal_url_unavailable"}
+            result = await hass.config_entries.options.async_configure(
+                result["flow_id"], retry_input
+            )
+            assert result["step_id"] == "webcal"
+            assert result["errors"] == {"base": "webcal_url_unavailable"}
+            assert old_token not in str(result)
+            assert new_token not in str(result)
+        assert entry.options == original_options
+        async_reload.assert_not_awaited()
+
+        if outcome == "options":
+            hass.config_entries.async_update_entry(
+                entry, options={**entry.options, CONF_FILTER_MODE: "Strict"}
+            )
+        elif outcome == "profile":
+            hass.config_entries.async_update_entry(
+                entry, data={**entry.data, CONF_CHILD_NAME: "Jordan"}
+            )
+        accepted_owner = (dict(entry.data), dict(entry.options))
+        hass.config.external_url = "https://ha.example.test"
+        if outcome == "disable":
+            retry_input[CONF_PUBLISH_WEBCAL] = False
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], retry_input
+        )
+
+        if outcome in ("options", "profile"):
+            assert result["type"] is FlowResultType.ABORT
+            assert result["reason"] == "options_changed"
+            assert (entry.data, entry.options) == accepted_owner
+            async_reload.assert_not_awaited()
+        elif outcome == "disable":
+            assert result["type"] is FlowResultType.CREATE_ENTRY
+            assert entry.options[CONF_PUBLISH_WEBCAL] is False
+            assert CONF_WEBCAL_TOKEN not in entry.options
+            assert async_reload.await_count == 1
+        else:
+            assert result["step_id"] == "webcal_url"
+            assert new_token in result["description_placeholders"]["webcal_url"]
+            assert old_token not in result["description_placeholders"]["webcal_url"]
+            assert entry.options == original_options
+            async_reload.assert_not_awaited()
+            if outcome == "cancel":
+                hass.config_entries.options.async_abort(result["flow_id"])
+                assert entry.options == original_options
+                async_reload.assert_not_awaited()
+            else:
+                result = await hass.config_entries.options.async_configure(
+                    result["flow_id"], {}
+                )
+                assert result["type"] is FlowResultType.CREATE_ENTRY
+                assert entry.options[CONF_WEBCAL_TOKEN] == new_token
+                assert entry.options[CONF_WEBCAL_NAME] == retry_input[CONF_WEBCAL_NAME]
+                assert async_reload.await_count == 1
+        generate_token.assert_called_once_with(32)
+        assert entry.options["future_behavior"] == {"enabled": True}
+
+
 async def test_webcal_preview_rejects_competing_options_update(
     hass: HomeAssistant,
 ) -> None:
