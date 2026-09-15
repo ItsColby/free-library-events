@@ -2444,8 +2444,12 @@ class DigestTests(unittest.TestCase):
             )
         )
         for description, expected in cases:
-            for apostrophe in ("'", "\N{RIGHT SINGLE QUOTATION MARK}"):
-                text = description.replace("'", apostrophe)
+            for text in dict.fromkeys(
+                (
+                    description,
+                    description.replace("'", "\N{RIGHT SINGLE QUOTATION MARK}"),
+                )
+            ):
                 with self.subTest(description=text, expected=expected):
                     self.assertEqual(
                         digest._has_positive_claim(pattern, text), expected
