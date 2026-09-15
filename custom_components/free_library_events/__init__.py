@@ -245,7 +245,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: LibraryConfigEntry) -> b
     except BaseException:
         # Core closes coordinator callbacks on setup failure, but already loaded
         # platforms own entity listeners and projection timers separately.
-        await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+        try:
+            await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+        except Exception, asyncio.CancelledError:  # noqa: BLE001
+            # Preserve the original setup failure if rollback also fails.
+            _LOGGER.error("Error unloading platforms after setup failure")
         raise
     return True
 

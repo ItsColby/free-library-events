@@ -45,6 +45,9 @@ from custom_components.free_library_events import (
     _async_render_digest,
     async_migrate_entry,
 )
+from custom_components.free_library_events import (
+    async_setup_entry as native_setup_entry,
+)
 from custom_components.free_library_events.api import (
     MAX_RSS_REQUEST_CONCURRENCY,
     MAX_RSS_RESPONSE_BYTES,
@@ -1331,15 +1334,26 @@ async def test_status_publishes_each_consecutive_failure_attempt(
         assert await hass.config_entries.async_unload(entry.entry_id)
 
 
-@pytest.mark.parametrize("stage", ("first_refresh", "platforms"))
+@pytest.mark.parametrize(
+    ("stage", "rollback_error"),
+    (
+        ("first_refresh", None),
+        ("platforms", None),
+        ("platforms", RuntimeError("rollback failed")),
+        ("platforms", asyncio.CancelledError("rollback cancelled")),
+    ),
+)
 async def test_cancelled_setup_releases_runtime_and_platforms_before_retry(
-    hass: HomeAssistant, stage: str
+    hass: HomeAssistant, stage: str, rollback_error: BaseException | None
 ) -> None:
     entry = _entry()
     entry.add_to_hass(hass)
     setup_started = asyncio.Event()
     release_setup = asyncio.Event()
     forward_platforms = hass.config_entries.async_forward_entry_setups
+    unload_platforms = hass.config_entries.async_unload_platforms
+    forwarding_errors: list[asyncio.CancelledError] = []
+    setup_errors: list[BaseException] = []
 
     async def fetch_feed(_branch, age_category):
         if stage == "first_refresh":
@@ -1350,36 +1364,71 @@ async def test_cancelled_setup_releases_runtime_and_platforms_before_retry(
     async def forward_then_wait(config_entry, platforms):
         await forward_platforms(config_entry, platforms)
         if stage == "platforms":
+            # Shared Core components have finished loading. Cancel this entry's
+            # acquired platforms, not Core's cached global component setup.
             setup_started.set()
-            await release_setup.wait()
+            try:
+                await release_setup.wait()
+            except asyncio.CancelledError as err:
+                forwarding_errors.append(err)
+                raise
 
-    with (
-        patch(
-            "custom_components.free_library_events.api.LibraryClient.async_fetch_feed",
-            side_effect=fetch_feed,
-        ),
-        patch.object(
-            hass.config_entries,
-            "async_forward_entry_setups",
-            side_effect=forward_then_wait,
-        ),
-    ):
-        setup_task = asyncio.create_task(
-            hass.config_entries.async_setup(entry.entry_id)
-        )
+    async def unload_then_fail(*args):
+        result = await unload_platforms(*args)
+        if rollback_error is not None:
+            raise rollback_error
+        return result
+
+    async def record_setup_failure(*args):
         try:
-            await setup_started.wait()
-            coordinator = entry.runtime_data
-            setup_task.cancel()
-            with pytest.raises(asyncio.CancelledError):
-                await setup_task
-        finally:
-            release_setup.set()
-            if not setup_task.done():
+            return await native_setup_entry(*args)
+        except (Exception, asyncio.CancelledError) as err:
+            setup_errors.append(err)
+            raise
+
+    with patch(
+        "custom_components.free_library_events.api.LibraryClient.async_fetch_feed",
+        side_effect=fetch_feed,
+    ):
+        with (
+            patch.object(
+                hass.config_entries,
+                "async_forward_entry_setups",
+                side_effect=forward_then_wait,
+            ),
+            patch.object(
+                hass.config_entries, "async_unload_platforms", unload_then_fail
+            ),
+            patch(
+                "custom_components.free_library_events.async_setup_entry",
+                record_setup_failure,
+            ),
+        ):
+            setup_task = asyncio.create_task(
+                hass.config_entries.async_setup(entry.entry_id)
+            )
+            try:
+                await setup_started.wait()
+                coordinator = entry.runtime_data
                 setup_task.cancel()
-            await asyncio.gather(setup_task, return_exceptions=True)
+                with pytest.raises(asyncio.CancelledError):
+                    await setup_task
+            finally:
+                release_setup.set()
+                if not setup_task.done():
+                    setup_task.cancel()
+                await asyncio.gather(setup_task, return_exceptions=True)
 
         assert entry.state is ConfigEntryState.SETUP_ERROR
+        assert len(setup_errors) == 1
+        assert setup_errors[0] is not rollback_error
+        if stage == "platforms":
+            assert len(forwarding_errors) == 1
+            assert setup_errors[0] is forwarding_errors[0]
+            assert all(
+                entry.entry_id not in component._platforms
+                for component in hass.data["entity_components"].values()
+            )
         assert coordinator._shutdown_requested is True
         assert not coordinator._listeners
         assert not coordinator._attempt_listeners
@@ -1395,36 +1444,78 @@ async def test_cancelled_setup_releases_runtime_and_platforms_before_retry(
         assert await hass.config_entries.async_unload(entry.entry_id)
 
 
+@pytest.mark.parametrize(
+    "rollback_error",
+    (
+        None,
+        RuntimeError("rollback failed"),
+        asyncio.CancelledError("rollback cancelled"),
+    ),
+)
 async def test_failed_platform_forwarding_releases_entities_before_retry(
     hass: HomeAssistant,
+    rollback_error: BaseException | None,
 ) -> None:
     entry = _entry()
     entry.add_to_hass(hass)
     forward_platforms = hass.config_entries.async_forward_entry_setups
+    unload_platforms = hass.config_entries.async_unload_platforms
+    forwarding_error = RuntimeError("platform forwarding failed")
+    setup_errors: list[BaseException] = []
 
     async def forward_then_fail(config_entry, platforms):
         await forward_platforms(config_entry, platforms)
-        raise RuntimeError("platform forwarding failed")
+        raise forwarding_error
+
+    async def unload_then_fail(*args):
+        result = await unload_platforms(*args)
+        if rollback_error is not None:
+            raise rollback_error
+        return result
+
+    async def record_setup_failure(*args):
+        try:
+            return await native_setup_entry(*args)
+        except (Exception, asyncio.CancelledError) as err:
+            setup_errors.append(err)
+            raise
 
     with patch(
         "custom_components.free_library_events.api.LibraryClient.async_fetch_feed",
         side_effect=lambda _branch, age_category: _empty_feed(age_category),
     ):
-        with patch.object(
-            hass.config_entries,
-            "async_forward_entry_setups",
-            side_effect=forward_then_fail,
+        with (
+            patch.object(
+                hass.config_entries,
+                "async_forward_entry_setups",
+                side_effect=forward_then_fail,
+            ),
+            patch.object(
+                hass.config_entries, "async_unload_platforms", unload_then_fail
+            ),
+            patch(
+                "custom_components.free_library_events.async_setup_entry",
+                record_setup_failure,
+            ),
         ):
             assert not await hass.config_entries.async_setup(entry.entry_id)
         coordinator = entry.runtime_data
         assert entry.state is ConfigEntryState.SETUP_ERROR
+        assert len(setup_errors) == 1
+        assert setup_errors[0] is forwarding_error
+        assert all(
+            entry.entry_id not in component._platforms
+            for component in hass.data["entity_components"].values()
+        )
         assert coordinator._shutdown_requested is True
         assert not coordinator._listeners
         assert not coordinator._attempt_listeners
         assert coordinator._unsub_refresh is None
+        assert coordinator._refresh_completion is None
 
         assert await hass.config_entries.async_reload(entry.entry_id)
         await hass.async_block_till_done()
+        assert entry.state is ConfigEntryState.LOADED
         assert entry.runtime_data is not coordinator
         assert len(entry.runtime_data._listeners) == 3
         assert len(entry.runtime_data._attempt_listeners) == 1
