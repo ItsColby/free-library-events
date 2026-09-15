@@ -11,7 +11,11 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
-from .calendar_data import LIBRARY_TIME_ZONE, build_calendar_items
+from .calendar_data import (
+    LIBRARY_TIME_ZONE,
+    LibraryCalendarItem,
+    build_calendar_items,
+)
 from .config import entry_config
 from .const import DOMAIN
 from .coordinator import LibraryDataCoordinator
@@ -19,6 +23,19 @@ from .entity import service_device_info
 from .runtime import LibraryConfigEntry
 
 PARALLEL_UPDATES = 0
+
+
+def _as_calendar_event(item: LibraryCalendarItem) -> CalendarEvent:
+    """Convert a selected shared item into its native calendar representation."""
+
+    return CalendarEvent(
+        start=item.start,
+        end=item.end,
+        summary=item.summary,
+        description=item.description,
+        location=item.location,
+        uid=item.uid,
+    )
 
 
 async def async_setup_entry(
@@ -54,29 +71,20 @@ class LibraryCalendar(CoordinatorEntity[LibraryDataCoordinator], CalendarEntity)
     def _config(self) -> dict[str, object]:
         return entry_config(self._entry.data, self._entry.options)
 
-    def _calendar_events(self) -> list[CalendarEvent]:
+    def _calendar_items(self) -> tuple[LibraryCalendarItem, ...]:
         source_events = self.coordinator.data.events if self.coordinator.data else ()
-        return [
-            CalendarEvent(
-                start=item.start,
-                end=item.end,
-                summary=item.summary,
-                description=item.description,
-                location=item.location,
-                uid=item.uid,
-            )
-            for item in build_calendar_items(source_events, self._config)
-        ]
+        return build_calendar_items(source_events, self._config)
 
     @property
     def event(self) -> CalendarEvent | None:
         """Return the current or next age-matched event."""
 
         now = dt_util.now(LIBRARY_TIME_ZONE)
-        return next(
-            (event for event in self._calendar_events() if event.end > now),
+        item = next(
+            (item for item in self._calendar_items() if item.end > now),
             None,
         )
+        return _as_calendar_event(item) if item is not None else None
 
     async def async_get_events(
         self,
@@ -88,7 +96,7 @@ class LibraryCalendar(CoordinatorEntity[LibraryDataCoordinator], CalendarEntity)
 
         del hass
         return [
-            event
-            for event in self._calendar_events()
-            if event.end > start_date and event.start < end_date
+            _as_calendar_event(item)
+            for item in self._calendar_items()
+            if item.end > start_date and item.start < end_date
         ]
