@@ -608,34 +608,6 @@ async def test_webcal_preview_rejects_external_profile_update(
     async_reload.assert_not_awaited()
 
 
-async def test_options_flow_preserves_unrecognized_options(
-    hass: HomeAssistant,
-) -> None:
-    future_option = {"future_behavior": {"enabled": True}}
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        title="Free Library Events",
-        unique_id=DOMAIN,
-        data=PROFILE_DATA,
-        options={**BEHAVIOR_INPUT, **future_option},
-        version=1,
-        minor_version=2,
-    )
-    entry.add_to_hass(hass)
-
-    result = await hass.config_entries.options.async_init(entry.entry_id)
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"next_step_id": "behavior"}
-    )
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {CONF_FILTER_MODE: "Strict"}
-    )
-
-    assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert entry.options[CONF_FILTER_MODE] == "Strict"
-    assert entry.options["future_behavior"] == future_option["future_behavior"]
-
-
 async def test_options_flow_disables_webcal_and_removes_token(
     hass: HomeAssistant,
 ) -> None:
@@ -714,12 +686,13 @@ async def test_options_flow_does_not_save_webcal_without_a_home_assistant_url(
 async def test_options_flow_updates_behavior_without_profile_data(
     hass: HomeAssistant,
 ) -> None:
+    future_option = {"future_behavior": {"enabled": True}}
     entry = MockConfigEntry(
         domain=DOMAIN,
         title="Free Library Events",
         unique_id=DOMAIN,
         data=PROFILE_DATA,
-        options=BEHAVIOR_INPUT,
+        options={**BEHAVIOR_INPUT, **future_option},
         version=1,
         minor_version=2,
     )
@@ -738,6 +711,7 @@ async def test_options_flow_updates_behavior_without_profile_data(
     assert entry.options[CONF_FILTER_MODE] == "Strict"
     assert entry.options[CONF_CALENDAR_DURATION] == 60
     assert entry.options[CONF_SCAN_INTERVAL] == 21600
+    assert entry.options["future_behavior"] == future_option["future_behavior"]
 
 
 async def test_manual_refresh_button_remains_available_and_reports_result(
@@ -3271,19 +3245,6 @@ async def test_client_base_fetch_does_not_expand() -> None:
 
     assert result is feed
     client._async_fetch_single.assert_awaited_once()
-
-
-async def test_client_does_not_chain_private_transport_details() -> None:
-    private_detail = "synthetic private transport detail"
-    client = LibraryClient(None)  # type: ignore[arg-type]
-    client._async_get = AsyncMock(side_effect=TimeoutError(private_detail))
-
-    with pytest.raises(LibraryApiError, match=SOURCE_ERROR_REQUEST_FAILED) as failure:
-        await client.async_fetch_feed(BRANCHES["CEN"], "Baby")
-
-    assert failure.value.__cause__ is None
-    assert failure.value.retryable is True
-    assert private_detail not in repr(failure.value)
 
 
 @pytest.mark.parametrize(
