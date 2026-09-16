@@ -77,11 +77,11 @@ and update the supported-branch documentation before treating it as supported.
 
 ## Run the checks for the selected work
 
-The normal local entry point is the repository's container runner. From the
-repository root on Windows:
+The normal local entry point is the repository's container runner in `affected`
+mode. From the repository root on Windows, supply the candidate comparison:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-release-local.ps1 -Mode all
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-release-local.ps1 -Base <base-commit> -Head HEAD
 ```
 
 It requires the `Ubuntu-24.04` WSL distribution with rootless Podman, Bash, Git,
@@ -91,7 +91,7 @@ both the worktree and its Git directory before invoking Linux validation.
 On Linux with rootless Podman:
 
 ```bash
-bash scripts/verify-release-local.sh all container
+bash scripts/verify-release-local.sh affected container "" --base <base-commit> --head HEAD
 ```
 
 Either script can also be invoked by path from another directory. Bash defaults
@@ -100,15 +100,19 @@ accepts `-Mode`, comparison refs or changed paths, and always uses containers fo
 
 | Mode | Work performed |
 | --- | --- |
+| `affected` (default) | Only checks selected from the supplied comparison or explicit changed paths; unresolved applicability stops the run |
 | `unit` | actionlint with ShellCheck, shell-script ShellCheck, zizmor, Ruff format/lint, seven dependency-light test modules, compile checks, and public-content validation |
 | `minimum` | Minimum Core environment, dependency check, strict mypy, and the complete HA test surface |
 | `current` | Current Core environment, metadata/dependency compatibility check, and the complete HA test surface |
 | `release` | Hassfest |
 | `all` | `unit`, both HA modes, then Hassfest |
 
-For example, use `-Mode unit` on Windows or replace `all` with `unit` in the
-Linux command. The name `release` means the Hassfest lane alone; it is not a
-complete release check or a publication command.
+The other modes deliberately request complete lanes without comparison arguments.
+For example, use `-Mode unit` on Windows or
+`bash scripts/verify-release-local.sh unit container` on Linux. Use `-Mode all`
+or `bash scripts/verify-release-local.sh all container` only for an explicit
+complete local check. The name `release` means the Hassfest lane alone; it is
+not a complete release check or a publication command.
 
 During a small parser/render change, this dependency-light command gives quick
 feedback using Python 3.14:
@@ -161,7 +165,7 @@ retrying and preserve the failure output needed for diagnosis.
 The hosted unit and HA jobs use the same runner's native Linux backend:
 
 ```bash
-bash scripts/verify-release-local.sh all native
+bash scripts/verify-release-local.sh affected native "" --base <base-commit> --head HEAD
 ```
 
 Provide Python 3.14 with pip and `venv`, Bash, Git, and network access. Unit mode
@@ -251,13 +255,15 @@ Inspect the builder through a browser when its access challenge requires one.
 This is a release-time source review; the builder is not a runtime polling
 dependency. The integration's acquisition boundary remains the RSS endpoint.
 
-Use a release pull request, require terminal success for every Validate job and
-**Release gate**, and inspect CodeQL's **Analyze (actions)**, **Analyze (python)**,
-and **CodeQL** checks. Merge with squash or rebase through branch protection
-without bypass. On the resulting `main` commit, require the Validate push run
-and CodeQL analysis to succeed; review complete logs and resolve or explicitly
-disposition candidate-introduced alerts. Publish the immutable tag and GitHub
-Release only from that exact validated commit.
+Use a release pull request and require terminal success for the planning job,
+every selected Validate job, and **Release gate**. Accept a skipped job only when
+the candidate's applicability plan excludes it; a selected job that skips blocks
+release. Inspect CodeQL's **Analyze (actions)**, **Analyze (python)**, and **CodeQL**
+checks. Merge with squash or rebase through branch protection without bypass.
+On the resulting `main` commit, require its Validate push run to satisfy the same
+plan-based success rule and CodeQL analysis to succeed; review complete logs and
+resolve or explicitly disposition candidate-introduced alerts. Publish the
+immutable tag and GitHub Release only from that exact validated commit.
 
 Source validation, public publication, HACS installation, and live Home Assistant
 adoption are separate results. The runner performs none of the latter three.
