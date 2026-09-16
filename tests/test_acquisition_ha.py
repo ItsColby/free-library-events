@@ -134,7 +134,9 @@ async def test_tls_policy_failures_do_not_receive_transport_retries(
     assert failure.value.category == SOURCE_ERROR_REQUEST_FAILED
     assert failure.value.retryable is retryable
     assert failure.value.__suppress_context__ is True
+    assert failure.value.__cause__ is None
     assert str(failure.value) == SOURCE_ERROR_REQUEST_FAILED
+    assert "synthetic" not in repr(failure.value)
 
 
 async def test_malformed_redirect_is_a_sanitized_policy_failure() -> None:
