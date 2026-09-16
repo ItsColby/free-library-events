@@ -31,9 +31,11 @@ and unmapped changes fail with an unresolved applicability message.
 The product-owned planner traces local Python imports and reviewed direct-file
 consumers. Changed tests run in their native collector; runtime changes include
 the affected success, failure, and recovery consumers in both maintained HA
-environments. A support requirements change selects that environment, without
-invalidating the unchanged sibling lane. Runner and workflow dependency declarations
-are compared against the supplied base, or HEAD for working-path selections;
+environments. A support requirements change selects that environment. Minimum
+requirements also select current compatibility, which reads both requirements
+files, without selecting unchanged current tests or typing. Runner and workflow
+dependency declarations are compared against the supplied base, or HEAD for
+working-path selections;
 changed harness, Python image, action, and tool pins select their actual consumers.
 An unavailable dependency comparison remains unresolved. The Bash runner remains
 the owner of exact local tool versions. Tooling, workflow, public-content and
