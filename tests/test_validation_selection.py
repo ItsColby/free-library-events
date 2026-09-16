@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -52,6 +53,7 @@ class ValidationSelectionTests(unittest.TestCase):
             ("actionlint_image", False, False, False),
             ("actionlint", False, False, False),
             ("zizmor", False, False, False),
+            ("shellcheck-py", False, False, False),
         ):
             previous = current.replace(pins[key], pins[key] + ".previous")
             with (
@@ -82,8 +84,16 @@ class ValidationSelectionTests(unittest.TestCase):
                     self.assertTrue(plan["lane_tests"][key])
                     other = "current" if key == "minimum" else "minimum"
                     self.assertEqual([], plan["lane_tests"][other])
-                if key in {"actionlint_image", "actionlint", "zizmor"}:
+                if key in {
+                    "actionlint_image",
+                    "actionlint",
+                    "zizmor",
+                    "shellcheck-py",
+                }:
                     self.assertTrue(plan["workflow"])
+                if key == "shellcheck-py":
+                    self.assertTrue(plan["shell"])
+                    self.assertEqual([], plan["ha_tests"])
 
     def test_workflow_dependency_changes_select_only_the_changed_job(self):
         path = ".github/workflows/validate.yaml"
@@ -144,17 +154,6 @@ class ValidationSelectionTests(unittest.TestCase):
                 "jobs:\n  future_job:\n    uses: unknown/action@ref"
             )
 
-    def test_lane_pin_change_does_not_broaden_unchanged_sibling_tests(self):
-        path = "scripts/verify-release-local.sh"
-        current = (ROOT / path).read_text()
-        pin = planner.runner_dependencies(current)["current"]
-        with patch.object(
-            planner, "_git", return_value=current.replace(pin, pin + ".previous")
-        ):
-            plan = planner.build_plan([path])
-        self.assertTrue(plan["lane_tests"]["current"])
-        self.assertEqual([], plan["lane_tests"]["minimum"])
-
     def test_retained_document_contracts_select_their_static_consumer(self):
         for path in ["docs/development.md"]:
             with self.subTest(path=path):
@@ -162,7 +161,7 @@ class ValidationSelectionTests(unittest.TestCase):
                 self.assertIn(planner.METADATA_TEST, plan["unit_tests"])
                 self.assertEqual([], plan["ha_tests"])
 
-    def test_only_changed_support_environment_runs(self):
+    def test_support_requirements_select_environment_and_compatibility_consumers(self):
         for path, lane, other in (
             ("requirements-ha-test.txt", "minimum", "current"),
             ("requirements-ha-current.txt", "current", "minimum"),
@@ -170,9 +169,20 @@ class ValidationSelectionTests(unittest.TestCase):
             with self.subTest(path=path):
                 plan = planner.build_plan([path])
                 self.assertTrue(plan["jobs"][lane])
-                self.assertFalse(plan["jobs"][other])
+                self.assertEqual(lane == "minimum", plan["jobs"][other])
                 self.assertTrue(plan["ha_tests"])
+                self.assertTrue(plan["lane_tests"][lane])
+                self.assertEqual([], plan["lane_tests"][other])
+                self.assertEqual([], plan["lane_typing"][other])
                 self.assertFalse(plan["jobs"]["release"])
+                if lane == "minimum":
+                    self.assertTrue(plan["lane_typing"][lane])
+                    command = planner.lane_command(plan, "current")
+                    self.assertEqual(
+                        "python scripts/check_ha_patch_compatibility.py --minimum "
+                        "requirements-ha-test.txt --current requirements-ha-current.txt",
+                        command,
+                    )
 
     def test_runtime_change_reaches_real_import_consumers(self):
         plan = planner.build_plan([planner.PRODUCT + "/const.py"])
@@ -270,24 +280,75 @@ class ValidationSelectionTests(unittest.TestCase):
         ):
             planner.changed_paths("base", "head", None)
 
-    def test_successful_aggregate_requires_exact_planned_results(self):
-        plan = planner.build_plan(["README.md"])
+    @unittest.skipUnless(
+        os.name == "posix" and shutil.which("bash"), "requires native Bash"
+    )
+    def test_workflow_aggregate_requires_exact_planned_results(self):
+        workflow = (ROOT / ".github/workflows/validate.yaml").read_text()
+        gate = workflow.split("\n  release_gate:\n", 1)[1]
+        command = textwrap.dedent(gate.split("        run: |\n", 1)[1])
+        plan = planner.build_plan(["tests/test_integration_ha.py"])
+        names = {
+            "unit": "UNIT",
+            "minimum": "HOME_ASSISTANT_MINIMUM",
+            "current": "HOME_ASSISTANT_CURRENT",
+            "release": "HASSFEST",
+            "hacs": "HACS",
+        }
         results = {
-            job: "success" if selected else "skipped"
+            names[job]: "success" if selected else "skipped"
             for job, selected in plan["jobs"].items()
         }
-        planner.require_results(plan, results)
-        for job, replacement in (
-            ("unit", "skipped"),
-            ("unit", "failure"),
-            ("unit", "cancelled"),
-            ("current", "success"),
-        ):
-            with (
-                self.subTest(job=job, result=replacement),
-                self.assertRaises(ValueError),
-            ):
-                planner.require_results(plan, {**results, job: replacement})
+        cases = [("planned success", {}, True)]
+        cases.extend(
+            (f"{job}: {replacement}", {names[job]: replacement}, False)
+            for job, selected in plan["jobs"].items()
+            for replacement in (
+                ("skipped", "failure", "cancelled") if selected else ("success",)
+            )
+        )
+        cases.extend(
+            (f"plan: {status}", {"PLAN_STATUS": status}, False)
+            for status in ("skipped", "failure", "cancelled")
+        )
+        cases.append(
+            (
+                "unresolved plan",
+                {"PLAN": json.dumps({**plan, "unresolved": ["unknown.input"]})},
+                False,
+            )
+        )
+        for case, overrides, expected in cases:
+            with self.subTest(case=case):
+                result = subprocess.run(
+                    [
+                        "bash",
+                        "--noprofile",
+                        "--norc",
+                        "-e",
+                        "-o",
+                        "pipefail",
+                        "-c",
+                        command,
+                    ],
+                    env={
+                        **os.environ,
+                        "PATH": str(Path(sys.executable).parent)
+                        + os.pathsep
+                        + os.environ["PATH"],
+                        "PLAN_STATUS": "success",
+                        "PLAN": json.dumps(plan),
+                        **results,
+                        **overrides,
+                    },
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=10,
+                )
+                self.assertEqual(
+                    expected, result.returncode == 0, result.stdout + result.stderr
+                )
 
     def test_workflow_and_packaging_flags_accumulate(self):
         workflow = (ROOT / ".github/workflows/validate.yaml").read_text()
