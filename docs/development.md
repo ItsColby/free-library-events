@@ -6,6 +6,50 @@ reproduce it locally, and carry it into a release. For the data model and runtim
 boundaries, read [Architecture](architecture.md); for caller behavior and examples,
 read the [user guide](usage.md).
 
+## Select validation for the change
+
+The default runner mode is `affected`. Preview an exact candidate comparison
+before running it:
+
+```powershell
+.\scripts\verify-release-local.ps1 -Base <base-commit> -Head HEAD -PlanOnly
+.\scripts\verify-release-local.ps1 -Base <base-commit> -Head HEAD
+```
+
+For a working edit, use `-ChangedPath scripts/verify-release-local.sh` instead of
+refs. On Linux, use `bash scripts/verify-release-local.sh affected container ""`
+with `--base <base-commit> --head HEAD`, or repeated `--path <relative-path>`;
+add `--plan-only` to inspect the JSON plan without snapshots or installations.
+Planning uses an existing host Python 3.14 (`python3.14`, an installed uv runtime,
+or `VALIDATION_PYTHON`) to parse source without importing the integration. It
+does not download a runtime; HA execution keeps its isolated Python 3.14 lane.
+Explicit paths describe the complete change being accepted. The refs mode
+requires the checked-out candidate as its head; it does not include uncommitted
+edits. An empty verified comparison selects no jobs. Missing comparison input
+and unmapped changes fail with an unresolved applicability message.
+
+The product-owned planner traces local Python imports and reviewed direct-file
+consumers. Changed tests run in their native collector; runtime changes include
+the affected success, failure, and recovery consumers in both maintained HA
+environments. A support requirements change selects that environment, without
+invalidating the unchanged sibling lane. Runner and workflow dependency declarations
+are compared against the supplied base, or HEAD for working-path selections;
+changed harness, Python image, action, and tool pins select their actual consumers.
+An unavailable dependency comparison remains unresolved. The Bash runner remains
+the owner of exact local tool versions. Tooling, workflow, public-content and
+metadata checks are selected independently of product tests. Configuration
+changes without a reviewed tool-specific mapping need explicit review, rather
+than an automatic complete run.
+
+Pull requests and main pushes use this same selection. The stable Release gate
+requires the planning job and every selected job to succeed, and accepts skipped
+jobs only when the plan excludes them. Manual workflow dispatch explicitly runs
+the complete lanes. `all`, `unit`, `minimum`, `current`, and `release` remain
+explicit complete-lane requests. Reuse evidence whose source and environment
+have not changed; a merge alone does not invalidate it. Local checks do not
+replace HACS, authorize publication, or establish live behavior.
+
+
 ## Start with the affected contract
 
 | Change | Implementation and evidence to inspect together |
@@ -35,7 +79,7 @@ The normal local entry point is the repository's container runner. From the
 repository root on Windows:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-release-local.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-release-local.ps1 -Mode all
 ```
 
 It requires the `Ubuntu-24.04` WSL distribution with rootless Podman, Bash, Git,
@@ -49,12 +93,12 @@ bash scripts/verify-release-local.sh all container
 ```
 
 Either script can also be invoked by path from another directory. Bash defaults
-to `all container`; `--help` prints its argument contract. The PowerShell wrapper
-accepts `-Mode` and always uses containers.
+to `affected container`; `--help` prints its argument contract. The PowerShell wrapper
+accepts `-Mode`, comparison refs or changed paths, and always uses containers for execution.
 
 | Mode | Work performed |
 | --- | --- |
-| `unit` | actionlint with ShellCheck, shell-script ShellCheck, zizmor, Ruff format/lint, six dependency-light test modules, compile checks, and public-content validation |
+| `unit` | actionlint with ShellCheck, shell-script ShellCheck, zizmor, Ruff format/lint, seven dependency-light test modules, compile checks, and public-content validation |
 | `minimum` | Minimum Core environment, dependency check, strict mypy, and the complete HA test surface |
 | `current` | Current Core environment, metadata/dependency compatibility check, and the complete HA test surface |
 | `release` | Hassfest |
@@ -178,8 +222,9 @@ artifacts separately.
 
 The [Validate workflow](../.github/workflows/validate.yaml) runs for pull requests,
 `main` pushes, and manual dispatch. Its unit, minimum, current, Hassfest, and HACS
-jobs all feed the **Release gate**. A skipped or failed dependency blocks that
-aggregate check. Jobs have bounded timeouts and read-only permissions; checkouts
+jobs feed the **Release gate** through the applicability plan. A selected job
+that skips or fails blocks the aggregate; an excluded job must be skipped.
+Jobs have bounded timeouts and read-only permissions; checkouts
 do not persist credentials. Action references are pinned, and
 [Dependabot](../.github/dependabot.yml) proposes weekly updates after a seven-day
 cooldown. Python pins move with the supported Core/harness environments.

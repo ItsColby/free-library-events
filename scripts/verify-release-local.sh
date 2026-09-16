@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
-mode="${1:-all}"
+mode="${1:-affected}"
 backend="${2:-container}"
 source_git_dir="${3:-}"
 usage() {
-  echo "Usage: bash scripts/verify-release-local.sh [all|unit|minimum|current|release] [container|native] [git-dir]"
+  echo "Usage: bash scripts/verify-release-local.sh [affected|all|unit|minimum|current|release] [container|native] [git-dir]"
 }
 if [[ "$mode" == --help || "$mode" == -h ]]; then
   usage
   exit 0
 fi
-if (( $# > 3 )); then
+if [[ "$mode" != affected ]] && (( $# > 3 )); then
   usage >&2
   exit 2
 fi
 case "$mode" in
-  all|unit|minimum|current|release) ;;
+  all|unit|minimum|current|release|affected) ;;
   *) echo "Unknown mode: $mode" >&2; usage >&2; exit 2 ;;
 esac
 case "$backend" in
@@ -24,6 +24,47 @@ case "$backend" in
 esac
 source_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 repo_root="$source_root"
+validation_python="${VALIDATION_PYTHON:-}"
+if [[ "$mode" == affected && -z "$validation_python" ]]; then
+  if command -v python3.14 >/dev/null 2>&1; then
+    validation_python="$(command -v python3.14)"
+  elif command -v uv >/dev/null 2>&1; then
+    validation_python="$(uv python find 3.14 --no-python-downloads)"
+  elif [[ -x "$HOME/.local/bin/uv" ]]; then
+    validation_python="$("$HOME/.local/bin/uv" python find 3.14 --no-python-downloads)"
+  else
+    echo "Affected planning requires Python 3.14; set VALIDATION_PYTHON to an existing interpreter." >&2
+    exit 2
+  fi
+fi
+affected_args=()
+affected_only=""
+affected_plan=""
+if [[ "$mode" == affected ]]; then
+  if (( $# >= 3 )); then shift 3; else shift "$#"; fi
+  plan_only=false
+  while (( $# )); do
+    case "$1" in
+      --only) affected_only="${2:?Missing lane}"; shift 2 ;;
+      --plan-only) plan_only=true; shift ;;
+      *) affected_args+=("$1"); shift ;;
+    esac
+  done
+  if [[ -n "$source_git_dir" ]]; then affected_args+=(--git-directory "$source_git_dir"); fi
+  affected_plan="$("$validation_python" "$source_root/scripts/plan_validation.py"  "${affected_args[@]}")"
+
+  if [[ -n "$affected_only" && "$affected_only" != unit && "$affected_only" != minimum && "$affected_only" != current && "$affected_only" != release ]]; then
+    echo "Unknown affected lane: $affected_only" >&2; exit 2
+  fi
+  if [[ -n "$affected_only" && "$(printf '%s' "$affected_plan" | "$validation_python" -c 'import json,sys; print(str(json.load(sys.stdin)["jobs"][sys.argv[1]]).lower())' "$affected_only")" != true ]]; then
+    echo "Plan did not select $affected_only" >&2; exit 2
+  fi
+  if [[ "$plan_only" == true ]]; then printf '%s\n' "$affected_plan"; exit 0; fi
+  if [[ "$(printf '%s' "$affected_plan" | "$validation_python" -c 'import json,sys; print(any(json.load(sys.stdin)["jobs"].values()))')" == False ]]; then
+    echo "No validation jobs apply to the verified empty comparison."; exit 0
+  fi
+fi
+
 if [[ "$backend" == container ]]; then
   repo_root="$(mktemp -d)"
   # A signal can interrupt `wait` while the parallel lanes still own this tree.
@@ -107,27 +148,34 @@ run_unit() {
     python -m unittest discover -s tests -p "test_ha_patch_compatibility.py"
     python -m unittest discover -s tests -p "test_validation_runner.py"
     python -m unittest discover -s tests -p "test_parallel_validation.py"
+    python -m unittest discover -s tests -p "test_validation_selection.py"
     python -m compileall -q custom_components/free_library_events tests scripts
     python scripts/check_public_safety.py
   '
 }
 run_minimum() {
-  run_python '
-    python -m pip install "pytest-homeassistant-custom-component==0.13.354"
-    python -m pip install --upgrade -r requirements-ha-test.txt
-    python -m pip install "mypy==2.3.0"
+  local checks='    python -m pip install "mypy==2.3.0"
     python -m pip check
     python -m mypy custom_components/free_library_events
-    pytest tests/test_integration_ha.py tests/test_email_images.py tests/test_acquisition_ha.py -q
-  ' false
+    pytest tests -q --ignore=tests/test_digest.py --ignore=tests/test_metadata.py --ignore=tests/test_public_safety.py --ignore=tests/test_ha_patch_compatibility.py --ignore=tests/test_validation_runner.py --ignore=tests/test_parallel_validation.py --ignore=tests/test_validation_selection.py'
+  if [[ "$mode" == affected ]]; then
+    checks="$("$validation_python" "$source_root/scripts/plan_validation.py"  "${affected_args[@]}" --command minimum)"
+  fi
+  run_python '
+    python -m pip install "pytest-homeassistant-custom-component==0.13.354" || exit "$?"
+    python -m pip install --upgrade -r requirements-ha-test.txt || exit "$?"
+'"$checks" false
 }
 run_current() {
+  local checks='    python scripts/check_ha_patch_compatibility.py --minimum requirements-ha-test.txt --current requirements-ha-current.txt
+    pytest tests -q --ignore=tests/test_digest.py --ignore=tests/test_metadata.py --ignore=tests/test_public_safety.py --ignore=tests/test_ha_patch_compatibility.py --ignore=tests/test_validation_runner.py --ignore=tests/test_parallel_validation.py --ignore=tests/test_validation_selection.py'
+  if [[ "$mode" == affected ]]; then
+    checks="$("$validation_python" "$source_root/scripts/plan_validation.py"  "${affected_args[@]}" --command current)"
+  fi
   run_python '
-    python -m pip install "pytest-homeassistant-custom-component==0.13.364"
-    python -m pip install --upgrade -r requirements-ha-current.txt
-    python scripts/check_ha_patch_compatibility.py --minimum requirements-ha-test.txt --current requirements-ha-current.txt
-    pytest tests/test_integration_ha.py tests/test_email_images.py tests/test_acquisition_ha.py -q
-  ' false
+    python -m pip install "pytest-homeassistant-custom-component==0.13.364" || exit "$?"
+    python -m pip install --upgrade -r requirements-ha-current.txt || exit "$?"
+'"$checks" false
 }
 run_ha_matrix() {
   if [[ "$backend" == native ]]; then
@@ -152,7 +200,33 @@ run_release() {
     podman run --rm -v "$repo_root:/github/workspace:ro" "$hassfest_image"
   fi
 }
+
+run_affected() {
+  local lane selected command
+  for lane in unit minimum current release; do
+    [[ -z "$affected_only" || "$lane" == "$affected_only" ]] || continue
+    selected="$(printf '%s' "$affected_plan" | "$validation_python" -c 'import json,sys; print(str(json.load(sys.stdin)["jobs"][sys.argv[1]]).lower())' "$lane")"
+    if [[ "$selected" != true ]]; then
+      if [[ -n "$affected_only" ]]; then echo "Plan did not select $lane" >&2; return 2; fi
+      continue
+    fi
+    case "$lane" in
+      unit)
+        if [[ "$(printf '%s' "$affected_plan" | "$validation_python" -c 'import json,sys; print(str(json.load(sys.stdin)["workflow"]).lower())')" == true ]]; then
+          run_actionlint
+        fi
+        command="$("$validation_python" "$source_root/scripts/plan_validation.py"  "${affected_args[@]}" --command unit)"
+        run_python "$command"
+        ;;
+      minimum) run_minimum ;;
+      current) run_current ;;
+      release) run_release ;;
+    esac
+  done
+}
+
 case "$mode" in
+  affected) run_affected ;;
   all) run_unit; run_ha_matrix; run_release ;;
   unit) run_unit ;;
   minimum) run_minimum ;;
