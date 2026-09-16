@@ -146,6 +146,17 @@ class HomeAssistantMetadataTests(unittest.TestCase):
         release_job = release_runner.index("run_release()")
         minimum_workflow = release_runner[minimum_job:current_job]
         current_workflow = release_runner[current_job:release_job]
+
+        # The isolated runner appends checks after its environment installation.
+        def execution_order(block):
+            setup = block[block.index("  run_python '") :]
+            checks = block[
+                block.index("  local checks=") : block.index('  if [[ "$mode"')
+            ]
+            return setup + checks
+
+        minimum_workflow = execution_order(minimum_workflow)
+        current_workflow = execution_order(current_workflow)
         self.assertIn(harness_install, minimum_workflow)
         self.assertIn(minimum_install, minimum_workflow)
         self.assertLess(
@@ -180,9 +191,12 @@ class HomeAssistantMetadataTests(unittest.TestCase):
             "tests/test_acquisition_ha.py",
         )
         for lane in (minimum_workflow, current_workflow):
+            self.assertIn("pytest tests -q", lane)
+            self.assertIn("--ignore=tests/test_digest.py", lane)
+            self.assertIn("--ignore=tests/test_validation_selection.py", lane)
             for module in ha_tests:
                 with self.subTest(module=module):
-                    self.assertIn(module, lane)
+                    self.assertNotIn(f"--ignore={module}", lane)
         self.assertEqual(
             [
                 ROOT / "requirements-ha-current.txt",
