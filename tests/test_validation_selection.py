@@ -368,6 +368,9 @@ class ValidationSelectionTests(unittest.TestCase):
                 GIT_COMMITTER_EMAIL="validation@example.com",
             )
 
+            # The control Git calls must observe the replacement despite the runner.
+            env.pop("GIT_NO_REPLACE_OBJECTS", None)
+
             def git(*args):
                 return subprocess.check_output(
                     ["git", "-C", str(root), *args], env=env, text=True
