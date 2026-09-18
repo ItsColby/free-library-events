@@ -52,7 +52,6 @@ class HomeAssistantMetadataTests(unittest.TestCase):
         self.assertIn("run_actionlint", release_runner)
         self.assertIn("bash scripts/verify-release-local.sh unit native", workflow)
         self.assertNotIn("ubuntu-latest", workflow)
-        self.assertEqual(6, workflow.count("runs-on: ubuntu-24.04"))
         self.assertEqual(1, workflow.count("permissions:"))
         permissions = workflow.split("\npermissions:\n", 1)[1].split("\n\n", 1)[0]
         self.assertEqual("  contents: read", permissions)
@@ -120,7 +119,7 @@ class HomeAssistantMetadataTests(unittest.TestCase):
             'python -m pip install "pytest-homeassistant-custom-component==0.13.354"'
         )
         current_harness_install = (
-            'python -m pip install "pytest-homeassistant-custom-component==0.13.364"'
+            'python -m pip install "pytest-homeassistant-custom-component==0.13.365"'
         )
         minimum_install = "python -m pip install --upgrade -r requirements-ha-test.txt"
         current_install = (
@@ -136,7 +135,7 @@ class HomeAssistantMetadataTests(unittest.TestCase):
             "Home Assistant minimum integration tests (Core 2026.8.0)", workflow
         )
         self.assertIn(
-            "Home Assistant current integration tests (Core 2026.9.1)",
+            "Home Assistant current integration tests (Core 2026.9.2)",
             workflow,
         )
         self.assertIn("bash scripts/verify-release-local.sh minimum native", workflow)
@@ -146,6 +145,17 @@ class HomeAssistantMetadataTests(unittest.TestCase):
         release_job = release_runner.index("run_release()")
         minimum_workflow = release_runner[minimum_job:current_job]
         current_workflow = release_runner[current_job:release_job]
+
+        # The isolated runner appends checks after its environment installation.
+        def execution_order(block):
+            setup = block[block.index("  run_python '") :]
+            checks = block[
+                block.index("  local checks=") : block.index('  if [[ "$mode"')
+            ]
+            return setup + checks
+
+        minimum_workflow = execution_order(minimum_workflow)
+        current_workflow = execution_order(current_workflow)
         self.assertIn(harness_install, minimum_workflow)
         self.assertIn(minimum_install, minimum_workflow)
         self.assertLess(
@@ -180,9 +190,12 @@ class HomeAssistantMetadataTests(unittest.TestCase):
             "tests/test_acquisition_ha.py",
         )
         for lane in (minimum_workflow, current_workflow):
+            self.assertIn("pytest tests -q", lane)
+            self.assertIn("--ignore=tests/test_digest.py", lane)
+            self.assertIn("--ignore=tests/test_validation_selection.py", lane)
             for module in ha_tests:
                 with self.subTest(module=module):
-                    self.assertIn(module, lane)
+                    self.assertNotIn(f"--ignore={module}", lane)
         self.assertEqual(
             [
                 ROOT / "requirements-ha-current.txt",
@@ -208,7 +221,7 @@ class HomeAssistantMetadataTests(unittest.TestCase):
         )
         self.assertEqual(
             [
-                "homeassistant==2026.9.1",
+                "homeassistant==2026.9.2",
                 "PyTurboJPEG==1.8.3",
                 "ha-ffmpeg==3.2.2",
                 "mutagen==1.48.1",
@@ -217,7 +230,7 @@ class HomeAssistantMetadataTests(unittest.TestCase):
         )
         self.assertIn(dependency_check, development)
         self.assertIn("Core 2026.8.0 with harness 0.13.354", development)
-        self.assertIn("Core 2026.9.1 with harness 0.13.364", development)
+        self.assertIn("Core 2026.9.2 with harness 0.13.365", development)
         self.assertEqual(
             "2026.8.0",
             _json_file(ROOT / "hacs.json")["homeassistant"],
