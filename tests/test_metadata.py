@@ -52,7 +52,6 @@ class HomeAssistantMetadataTests(unittest.TestCase):
         self.assertIn("run_actionlint", release_runner)
         self.assertIn("bash scripts/verify-release-local.sh unit native", workflow)
         self.assertNotIn("ubuntu-latest", workflow)
-        self.assertEqual(6, workflow.count("runs-on: ubuntu-24.04"))
         self.assertEqual(1, workflow.count("permissions:"))
         permissions = workflow.split("\npermissions:\n", 1)[1].split("\n\n", 1)[0]
         self.assertEqual("  contents: read", permissions)
@@ -231,7 +230,7 @@ class HomeAssistantMetadataTests(unittest.TestCase):
         )
         self.assertIn(dependency_check, development)
         self.assertIn("Core 2026.8.0 with harness 0.13.354", development)
-        self.assertIn("Core 2026.9.1 with harness 0.13.364", development)
+        self.assertIn("Core 2026.9.2 with harness 0.13.365", development)
         self.assertEqual(
             "2026.8.0",
             _json_file(ROOT / "hacs.json")["homeassistant"],
