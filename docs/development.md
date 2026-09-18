@@ -190,7 +190,7 @@ The two maintained environments are:
 | Lane | Exact target | Core and supporting requirements |
 | --- | --- | --- |
 | Minimum | Core 2026.8.0 with harness 0.13.354 | [`requirements-ha-test.txt`](../requirements-ha-test.txt) |
-| Current | Core 2026.9.1 with harness 0.13.364 | [`requirements-ha-current.txt`](../requirements-ha-current.txt) |
+| Current | Core 2026.9.2 with harness 0.13.365 | [`requirements-ha-current.txt`](../requirements-ha-current.txt) |
 
 The harness is `pytest-homeassistant-custom-component`. Keep these targets,
 workflow job names, requirements, runner pins, and the minimum in

@@ -20,7 +20,100 @@ sys.path.insert(0, str(ROOT))
 from scripts import plan_validation as planner
 
 
+class WorkflowDependencyContentTests(unittest.TestCase):
+    """Execution inputs invalidate only the mapped workflow consumers."""
+
+    def setUp(self):
+        self.source = (ROOT / ".github/workflows/validate.yaml").read_text()
+
+    def changed_lanes(self, before, after):
+        previous = planner.workflow_dependencies(before)
+        current = planner.workflow_dependencies(after)
+        return {lane for lane in current if current[lane] != previous[lane]}
+
+    def current_job(self, old, new):
+        prefix, body = self.source.split("  home_assistant_current:\n", 1)
+        self.assertIn(old, body)
+        return prefix + "  home_assistant_current:\n" + body.replace(old, new, 1)
+
+    def test_changed_command_revalidates_its_lane(self):
+        changed = self.current_job("--only current", "--only minimum")
+        self.assertEqual({"current"}, self.changed_lanes(self.source, changed))
+
+    def test_changed_checkout_depth_revalidates_its_lane(self):
+        changed = self.current_job("fetch-depth: 0", "fetch-depth: 1")
+        self.assertEqual({"current"}, self.changed_lanes(self.source, changed))
+
+    def test_job_environment_revalidates_its_lane(self):
+        changed = self.current_job(
+            "    steps:",
+            '    env:\n      EXPECTED_CORE: "changed"\n    steps:',
+        )
+        self.assertEqual({"current"}, self.changed_lanes(self.source, changed))
+
+    def test_shared_environment_and_defaults_revalidate_all_consumers(self):
+        for owner, changed in (
+            (
+                "env",
+                self.source.replace("env:\n", 'env:\n  ADDED_INPUT: "changed"\n', 1),
+            ),
+            ("defaults", "defaults:\n  run:\n    shell: bash\n" + self.source),
+        ):
+            with self.subTest(owner=owner):
+                self.assertEqual(
+                    set(planner.JOBS), self.changed_lanes(self.source, changed)
+                )
+
+    def test_literal_hash_payloads_are_preserved(self):
+        for value in ('"value # before"', "|\n        # before"):
+            with self.subTest(value=value):
+                before = self.current_job(
+                    "    steps:", f"    env:\n      CHECK: {value}\n    steps:"
+                )
+                after = before.replace("# before", "# after")
+                self.assertEqual({"current"}, self.changed_lanes(before, after))
+
+    def test_display_name_does_not_revalidate_execution(self):
+        changed = self.current_job("    name:", "    name: Renamed #")
+        self.assertEqual(set(), self.changed_lanes(self.source, changed))
+
+    def test_yaml_comments_do_not_revalidate_execution(self):
+        changed = self.current_job("    steps:", "    # comment\n    steps:")
+        self.assertEqual(set(), self.changed_lanes(self.source, changed))
+
+
 class ValidationSelectionTests(unittest.TestCase):
+    def runner_fixture(self):
+        """Exercise CLI identity checks against an owned committed repository."""
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        (root / "scripts").mkdir()
+        for name in ("plan_validation.py", "verify-release-local.sh"):
+            shutil.copyfile(ROOT / "scripts" / name, root / "scripts" / name)
+        (root / "tests").mkdir()
+        (root / "tests/test_integration_ha.py").write_text(
+            "# Synthetic selection target; no HA import or execution.\n"
+        )
+        env = dict(
+            os.environ,
+            GIT_AUTHOR_NAME="Validation",
+            GIT_COMMITTER_NAME="Validation",
+            GIT_AUTHOR_EMAIL="validation@example.com",
+            GIT_COMMITTER_EMAIL="validation@example.com",
+        )
+
+        def git(*args):
+            return subprocess.check_output(
+                ["git", "-C", str(root), *args], env=env, text=True
+            ).strip()
+
+        git("-c", "init.templateDir=", "init", "-q")
+        git("add", ".")
+        commit = git("commit-tree", git("write-tree"), "-m", "runner fixture")
+        git("update-ref", "HEAD", commit)
+        return root
+
     def test_docs_do_not_run_product_or_environment_suites(self):
         plan = planner.build_plan(["README.md"])
         self.assertTrue(plan["jobs"]["unit"])
@@ -579,10 +672,11 @@ class ValidationSelectionTests(unittest.TestCase):
         self.assertFalse(plan["jobs"]["current"])
 
     def test_plan_cli_rejects_unresolved_paths_without_launching_jobs(self):
+        root = self.runner_fixture()
         result = subprocess.run(
             [
                 sys.executable,
-                str(ROOT / "scripts/plan_validation.py"),
+                str(root / "scripts/plan_validation.py"),
                 *[],
                 "--path",
                 "unknown.input",
@@ -596,10 +690,11 @@ class ValidationSelectionTests(unittest.TestCase):
         self.assertEqual("", result.stdout)
 
     def test_plan_cli_is_json_and_needs_no_ha_import(self):
+        root = self.runner_fixture()
         result = subprocess.run(
             [
                 sys.executable,
-                str(ROOT / "scripts/plan_validation.py"),
+                str(root / "scripts/plan_validation.py"),
                 *[],
                 "--path",
                 "README.md",
@@ -641,7 +736,7 @@ if os.environ.get("SELECTION_FAIL") == "dependencies" and "--upgrade" in args:
 if os.environ.get("SELECTION_FAIL") == "tests" and ("pytest" in args or "unittest" in args or "--home-assistant" in args):
     raise SystemExit(23)
 """
-        script = ROOT / "scripts/verify-release-local.sh"
+        script = self.runner_fixture() / "scripts/verify-release-local.sh"
         for failure in ("", "harness", "dependencies", "tests"):
             with (
                 self.subTest(failure=failure),
@@ -717,13 +812,14 @@ if os.environ.get("SELECTION_FAIL") == "tests" and ("pytest" in args or "unittes
         os.name == "posix" and shutil.which("bash"), "requires native Bash"
     )
     def test_native_plan_and_unselected_lane_stop_before_environment_creation(self):
+        root = self.runner_fixture()
         with tempfile.TemporaryDirectory() as directory:
             env = dict(os.environ, TMPDIR=directory, VALIDATION_PYTHON=sys.executable)
             for extra, expected in ((["--plan-only"], 0), (["--only", "current"], 2)):
                 result = subprocess.run(
                     [
                         "bash",
-                        str(ROOT / "scripts/verify-release-local.sh"),
+                        str(root / "scripts/verify-release-local.sh"),
                         "affected",
                         "native",
                         "",

@@ -36,6 +36,13 @@ class ValidationRunnerTests(unittest.TestCase):
             "GIT_CONFIG_GLOBAL": os.devnull,
             "GIT_CONFIG_NOSYSTEM": "1",
         }
+        subprocess.run(
+            ["git", "-C", str(self.repo), "init", "-q"],
+            env=self.env,
+            check=True,
+            capture_output=True,
+            timeout=10,
+        )
 
     def executable(self, name: str, body: str) -> None:
         path = self.bin / name
@@ -183,7 +190,6 @@ class ValidationRunnerTests(unittest.TestCase):
                 timeout=10,
             )
 
-        git("init", "-q")
         (self.repo / ".gitignore").write_text("private.txt\n", encoding="utf-8")
         (self.repo / "tracked.txt").write_text("original", encoding="utf-8")
         git("add", "--all")
@@ -212,12 +218,6 @@ class ValidationRunnerTests(unittest.TestCase):
         self.assertTrue((self.repo / "private.txt").exists())
 
     def test_container_lanes_reuse_downloads_but_keep_fresh_installs(self) -> None:
-        subprocess.run(
-            ["git", "-C", str(self.repo), "init", "-q"],
-            env=self.env,
-            check=True,
-            capture_output=True,
-        )
         self.executable(
             "podman",
             '[[ "$1" == run && "$2" == --rm ]]\n'

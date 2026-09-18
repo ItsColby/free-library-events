@@ -78,7 +78,7 @@ class HomeAssistantMetadataTests(unittest.TestCase):
             'python -m pip install "pytest-homeassistant-custom-component==0.13.354"'
         )
         current_harness_install = (
-            'python -m pip install "pytest-homeassistant-custom-component==0.13.364"'
+            'python -m pip install "pytest-homeassistant-custom-component==0.13.365"'
         )
         minimum_install = "python -m pip install --upgrade -r requirements-ha-test.txt"
         current_install = (
@@ -94,7 +94,7 @@ class HomeAssistantMetadataTests(unittest.TestCase):
             "Home Assistant minimum integration tests (Core 2026.8.0)", workflow
         )
         self.assertIn(
-            "Home Assistant current integration tests (Core 2026.9.1)",
+            "Home Assistant current integration tests (Core 2026.9.2)",
             workflow,
         )
         self.assertIn("bash scripts/verify-release-local.sh minimum native", workflow)
@@ -180,7 +180,7 @@ class HomeAssistantMetadataTests(unittest.TestCase):
         )
         self.assertEqual(
             [
-                "homeassistant==2026.9.1",
+                "homeassistant==2026.9.2",
                 "PyTurboJPEG==1.8.3",
                 "ha-ffmpeg==3.2.2",
                 "mutagen==1.48.1",
