@@ -496,6 +496,7 @@ class ValidationSelectionTests(unittest.TestCase):
             git("-c", "init.templateDir=", "init", "-q")
             (root / "scripts").mkdir()
             for relative in (
+                ".gitignore",
                 planner.PLANNER,
                 "scripts/check_public_safety.py",
                 "scripts/verify-release-local.ps1",
