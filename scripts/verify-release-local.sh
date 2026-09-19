@@ -44,7 +44,7 @@ if [[ "$(cd "$actual_root" && pwd -P)" != "$(cd "$source_root" && pwd -P)" ]]; t
   echo "Git target root does not match the wrapper source root." >&2; exit 2
 fi
 validation_python="${VALIDATION_PYTHON:-}"
-if [[ "$mode" == affected && -z "$validation_python" ]]; then
+if [[ ( "$mode" == affected || "$backend" == container ) && -z "$validation_python" ]]; then
   if command -v python3.14 >/dev/null 2>&1; then
     validation_python="$(command -v python3.14)"
   elif command -v uv >/dev/null 2>&1; then
@@ -52,7 +52,7 @@ if [[ "$mode" == affected && -z "$validation_python" ]]; then
   elif [[ -x "$HOME/.local/bin/uv" ]]; then
     validation_python="$("$HOME/.local/bin/uv" python find 3.14 --no-python-downloads)"
   else
-    echo "Affected planning requires Python 3.14; set VALIDATION_PYTHON to an existing interpreter." >&2
+    echo "Source admission and planning require Python 3.14; set VALIDATION_PYTHON to an existing interpreter." >&2
     exit 2
   fi
 fi
@@ -89,19 +89,22 @@ if [[ "$mode" == affected ]]; then
 fi
 
 if [[ "$backend" == container ]]; then
-  repo_root="$(mktemp -d)"
+  temporary_root="$(mktemp -d)"
+  repo_root="$temporary_root/payload"
   # A signal can interrupt `wait` while the parallel lanes still own this tree.
   # Reap them before cleanup, and suppress later gates after an interruption.
-  trap 'trap "" INT TERM; wait; rm -rf "$repo_root"' EXIT
+  trap 'trap "" INT TERM; wait; rm -rf "$temporary_root"' EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM
+  mkdir "$repo_root"
   "${source_git[@]}" ls-files --cached --others --exclude-standard -z |
     while IFS= read -r -d '' path; do
       if [[ -e "$source_root/$path" || -L "$source_root/$path" ]]; then
         printf '%s\0' "$path"
       fi
-    done |
-    tar -C "$source_root" --null --files-from=- --create --file=- |
+    done > "$temporary_root/source-paths"
+  "$validation_python" "$source_root/scripts/check_public_safety.py" --check-source-paths < "$temporary_root/source-paths"
+  tar -C "$source_root" --null --files-from="$temporary_root/source-paths" --create --file=- |
     tar -C "$repo_root" --extract --file=-
   # The pinned Actionlint image runs as an unprivileged user.
   chmod a+rx "$repo_root"

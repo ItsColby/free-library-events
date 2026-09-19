@@ -11,6 +11,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 BASH = shutil.which("bash")
@@ -74,6 +75,17 @@ sys.exit(23 if failure == lane else 0)
 class ParallelValidationTests(unittest.TestCase):
     """Use real shell jobs and snapshots with isolated external-tool stand-ins."""
 
+    def setUp(self) -> None:
+        environment = {
+            key: value
+            for key, value in os.environ.items()
+            if not key.upper().startswith("GIT_")
+        }
+        environment.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+        environment_patch = patch.dict(os.environ, environment, clear=True)
+        environment_patch.start()
+        self.addCleanup(environment_patch.stop)
+
     def run_matrix(
         self, failure: str = "", *, interrupt: bool = False
     ) -> tuple[subprocess.CompletedProcess[str], set[str], bool]:
@@ -83,6 +95,10 @@ class ParallelValidationTests(unittest.TestCase):
             (source / "scripts").mkdir(parents=True)
             runner = source / "scripts" / "verify-release-local.sh"
             shutil.copyfile(ROOT / "scripts/verify-release-local.sh", runner)
+            shutil.copyfile(
+                ROOT / "scripts/check_public_safety.py",
+                source / "scripts/check_public_safety.py",
+            )
             events = root / "events"
             events.mkdir()
             binary = root / "bin"
@@ -99,6 +115,7 @@ class ParallelValidationTests(unittest.TestCase):
                 "GIT_CONFIG_NOSYSTEM": "1",
                 "MATRIX_EVENTS": str(events),
                 "MATRIX_FAIL": failure,
+                "VALIDATION_PYTHON": sys.executable,
                 "MATRIX_INTERRUPT": "1" if interrupt else "",
             }
             for arguments in (

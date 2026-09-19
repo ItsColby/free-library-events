@@ -595,7 +595,7 @@ class DigestTests(unittest.TestCase):
             "title": "X" * (digest.MAX_EVENT_TITLE_LENGTH + 1),
             "link": "https://example.test/oversized",
         }
-        rows = [valid, oversized, *([oversized] * digest.MAX_PARSED_RSS_ITEMS)]
+        rows = [valid, oversized]
 
         events, source_count = digest.parse_feed(
             rss(rows), digest.BRANCHES["SWK"], "Baby"
@@ -605,6 +605,21 @@ class DigestTests(unittest.TestCase):
         self.assertEqual(
             [event.link for event in events], ["https://example.test/good"]
         )
+
+        for count in (100, 101):
+            with self.subTest(item_count=count):
+                rows = [
+                    valid | {"link": f"https://example.test/item-{index}"}
+                    for index in range(count)
+                ]
+                events, source_count = digest.parse_feed(
+                    rss(rows), digest.BRANCHES["SWK"], "Baby"
+                )
+                self.assertEqual(count, source_count)
+                self.assertEqual(
+                    [row["link"] for row in rows[:100]],
+                    [event.link for event in events],
+                )
 
     def test_parser_keeps_trusted_publisher_dotfile_image_names(self) -> None:
         item = {
