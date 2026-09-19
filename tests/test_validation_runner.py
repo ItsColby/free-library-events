@@ -5,9 +5,11 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -16,6 +18,15 @@ class ValidationRunnerTests(unittest.TestCase):
     """Exercise real Bash control flow with isolated executable stand-ins."""
 
     def setUp(self) -> None:
+        environment = {
+            key: value
+            for key, value in os.environ.items()
+            if not key.upper().startswith("GIT_")
+        }
+        environment.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+        environment_patch = patch.dict(os.environ, environment, clear=True)
+        environment_patch.start()
+        self.addCleanup(environment_patch.stop)
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
@@ -23,6 +34,10 @@ class ValidationRunnerTests(unittest.TestCase):
         (self.repo / "scripts").mkdir(parents=True)
         self.runner = self.repo / "scripts/verify-release-local.sh"
         shutil.copyfile(ROOT / "scripts/verify-release-local.sh", self.runner)
+        shutil.copyfile(
+            ROOT / "scripts/check_public_safety.py",
+            self.repo / "scripts/check_public_safety.py",
+        )
         self.bin = self.root / "bin"
         self.bin.mkdir()
         self.scratch = self.root / "scratch"
@@ -33,11 +48,13 @@ class ValidationRunnerTests(unittest.TestCase):
             "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}",
             "TMPDIR": str(self.scratch),
             "TRACE": str(self.trace),
+            "VALIDATION_PYTHON": sys.executable,
             "GIT_CONFIG_GLOBAL": os.devnull,
             "GIT_CONFIG_NOSYSTEM": "1",
         }
+        # Native validation verifies the source checkout before running a lane.
         subprocess.run(
-            ["git", "-C", str(self.repo), "init", "-q"],
+            ["git", "-c", "init.templateDir=", "init", "-q", str(self.repo)],
             env=self.env,
             check=True,
             capture_output=True,
@@ -77,6 +94,39 @@ class ValidationRunnerTests(unittest.TestCase):
             "fi\n",
         )
         self.executable("pytest", 'printf "pytest:%s\\n" "$*" >> "$TRACE"\n')
+
+    def test_linked_snapshot_input_is_refused_before_tar_or_lanes(self) -> None:
+        (self.repo / "nested").mkdir()
+        probe = self.repo / "nested/probe.txt"
+        probe.write_text("ordinary tracked fixture\n")
+        subprocess.run(
+            ["git", "-C", str(self.repo), "add", "."],
+            env=self.env,
+            check=True,
+            capture_output=True,
+        )
+        outside = self.root / "outside"
+        outside.mkdir()
+        (outside / "probe.txt").write_text("harmless outside fixture\n")
+        probe.unlink()
+        self.executable("tar", 'printf "tar\n" >> "$TRACE"; exit 99\n')
+        self.executable("podman", 'printf "lane\n" >> "$TRACE"; exit 99\n')
+        for linked_parent in (False, True):
+            with self.subTest(linked_parent=linked_parent):
+                if linked_parent:
+                    probe.unlink()
+                    probe.parent.rmdir()
+                    probe.parent.symlink_to(outside, target_is_directory=True)
+                else:
+                    probe.symlink_to(outside / "probe.txt")
+                result = self.run_lane("unit", "container")
+                self.assertNotEqual(0, result.returncode)
+                self.assertFalse(
+                    self.trace.exists(),
+                    self.trace.read_text() if self.trace.exists() else "",
+                )
+                self.assertIn("Source admission refused", result.stderr)
+                self.assertEqual([], list(self.scratch.iterdir()))
 
     def test_bad_arguments_and_help_do_not_create_snapshots_or_run_tools(self) -> None:
         for args, expected in (

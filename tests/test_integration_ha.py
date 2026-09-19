@@ -2348,6 +2348,7 @@ async def test_webcal_view_is_token_gated_dynamic_and_unloads(
     assert response.headers["Last-Modified"] == format_datetime(
         changed_at.replace(microsecond=0), usegmt=True
     )
+    renamed_etag = response.headers["ETag"]
     renamed_body = await response.text()
     assert "X-WR-CALNAME:Renamed Library Events" in renamed_body
     assert f"DTSTAMP:{changed_at:%Y%m%dT%H%M%SZ}" in renamed_body
@@ -2372,7 +2373,7 @@ async def test_webcal_view_is_token_gated_dynamic_and_unloads(
 
     response = await client.get(WEBCAL_PATH.format(token=token))
     assert response.status == 200
-    assert response.headers["ETag"] != first_etag
+    assert response.headers["ETag"] != renamed_etag
     assert response.headers["Last-Modified"] == format_datetime(
         (changed_at + timedelta(minutes=1)).replace(microsecond=0), usegmt=True
     )
@@ -2846,14 +2847,16 @@ async def test_diagnostics_include_all_structured_type_feed_blockers(
     diagnostics = await async_get_config_entry_diagnostics(hass, entry)
 
     source = next(iter(diagnostics["sources"].values()))
-    assert len(source["type_feed_blockers"]) == 4
-    assert source["type_feed_blockers"][0] == {
-        "event_type": "Type 0",
-        "reason": TYPE_SHARD_BLOCKER_CAPPED,
-        "published_item_count": 10,
-        "parsed_item_count": 10,
-        "last_event_date": "2026-07-24",
-    }
+    assert source["type_feed_blockers"] == [
+        {
+            "event_type": f"Type {index}",
+            "reason": TYPE_SHARD_BLOCKER_CAPPED,
+            "published_item_count": 10,
+            "parsed_item_count": 10,
+            "last_event_date": "2026-07-24",
+        }
+        for index in range(4)
+    ]
     assert source["base_prefix_recovered"] is True
 
 
@@ -3068,13 +3071,17 @@ async def test_client_rejects_untrusted_rss_redirects(location: str) -> None:
         async def __aexit__(self, *_args):
             return None
 
-    session = types.SimpleNamespace(get=lambda *_args, **_kwargs: ResponseContext())
+    session = types.SimpleNamespace(get=Mock(return_value=ResponseContext()))
     client = LibraryClient(session)
 
     with pytest.raises(LibraryApiError, match=SOURCE_ERROR_UNSAFE_REDIRECT):
         await client._async_get(
             "https://libwww.freelibrary.org/rss/eventsrss.cfm?location=CEN"
         )
+
+    assert [request.args[0] for request in session.get.call_args_list] == [
+        "https://libwww.freelibrary.org/rss/eventsrss.cfm?location=CEN",
+    ]
 
 
 async def test_coordinator_expands_every_current_age_source_before_supplemental_sources(
@@ -3676,7 +3683,15 @@ async def test_coordinator_bounds_expedited_retry_and_exposes_current_attempt(
     diagnostics = await async_get_config_entry_diagnostics(hass, entry)
 
     assert diagnostics["cached_event_count"] == 0
-    assert all(source["available"] for source in diagnostics["sources"].values())
+    assert {
+        name: source["available"] for name, source in diagnostics["sources"].items()
+    } == {
+        "Charles Santore Library — Baby": True,
+        "Charles Santore Library — Toddler": True,
+        "Charles Santore Library — Preschool": True,
+        "Charles Santore Library — School Age": True,
+        "Charles Santore Library — Young Adult": True,
+    }
     assert diagnostics["last_attempt"] == {
         "completed_at": coordinator.last_attempt.completed_at.isoformat(),
         "requested_source_count": 5,
