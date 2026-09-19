@@ -83,13 +83,100 @@ class WorkflowDependencyContentTests(unittest.TestCase):
 
 
 class ValidationSelectionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        environment = {
+            key: value
+            for key, value in os.environ.items()
+            if not key.upper().startswith("GIT_")
+        }
+        environment.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+        environment_patch = patch.dict(os.environ, environment, clear=True)
+        environment_patch.start()
+        self.addCleanup(environment_patch.stop)
+
+    @unittest.skipUnless(os.name == "posix", "requires symbolic links")
+    def test_linked_python_inputs_are_refused_before_any_source_read(self):
+        for linked_parent in (False, True):
+            with (
+                self.subTest(linked_parent=linked_parent),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                temporary = Path(directory)
+                root, outside = temporary / "candidate", temporary / "outside"
+                (root / "tests").mkdir(parents=True)
+                outside.mkdir()
+                (outside / "test_probe.py").write_text(
+                    "raise AssertionError('must not read')\n"
+                )
+                if linked_parent:
+                    (root / "tests/nested").symlink_to(
+                        outside, target_is_directory=True
+                    )
+                else:
+                    (root / "tests/test_probe.py").symlink_to(outside / "test_probe.py")
+                with (
+                    patch.object(planner, "ROOT", root),
+                    patch.object(
+                        Path,
+                        "read_text",
+                        side_effect=AssertionError("source read before admission"),
+                    ) as read,
+                ):
+                    with self.assertRaisesRegex(ValueError, "linked path"):
+                        planner.build_plan(["README.md"])
+                    read.assert_not_called()
+
+    @unittest.skipUnless(os.name == "posix", "requires symbolic links")
+    def test_linked_runner_and_workflow_are_refused_before_content_read(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "candidate"
+            (root / "scripts").mkdir(parents=True)
+            (root / ".github/workflows").mkdir(parents=True)
+            outside = Path(directory) / "outside.txt"
+            outside.write_text("must not read\n")
+            for relative in (
+                "scripts/verify-release-local.sh",
+                ".github/workflows/validate.yaml",
+            ):
+                (root / relative).symlink_to(outside)
+                with (
+                    patch.object(planner, "ROOT", root),
+                    patch.object(planner, "_git", return_value=""),
+                    patch.object(
+                        Path,
+                        "read_text",
+                        side_effect=AssertionError("linked input read"),
+                    ) as read,
+                ):
+                    plan = {"unresolved": []}
+                    planner._route_dependency_changes(
+                        [relative], "HEAD", None, set(), set(), set(), plan
+                    )
+                    self.assertTrue(
+                        any("linked path" in message for message in plan["unresolved"])
+                    )
+                    read.assert_not_called()
+            with (
+                patch.object(planner, "ROOT", root),
+                patch.object(
+                    Path, "read_text", side_effect=AssertionError("linked runner read")
+                ) as read,
+            ):
+                with self.assertRaisesRegex(ValueError, "linked path"):
+                    planner.lane_command({}, "unit")
+                read.assert_not_called()
+
     def runner_fixture(self):
         """Exercise CLI identity checks against an owned committed repository."""
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name)
         (root / "scripts").mkdir()
-        for name in ("plan_validation.py", "verify-release-local.sh"):
+        for name in (
+            "plan_validation.py",
+            "check_public_safety.py",
+            "verify-release-local.sh",
+        ):
             shutil.copyfile(ROOT / "scripts" / name, root / "scripts" / name)
         (root / "tests").mkdir()
         (root / "tests/test_integration_ha.py").write_text(
@@ -248,6 +335,36 @@ class ValidationSelectionTests(unittest.TestCase):
             planner.workflow_dependencies(
                 "jobs:\n  future_job:\n    uses: unknown/action@ref"
             )
+        workflow = (ROOT / ".github/workflows/validate.yaml").read_text()
+        for job_id in ("future_job", "extra-job", "job2", "FutureJob", "_job-2"):
+            for comment in ("", " # synthetic", " \t# synthetic"):
+                with (
+                    self.subTest(job_id=job_id, comment=comment),
+                    self.assertRaisesRegex(ValueError, "job dependency mapping"),
+                ):
+                    planner.workflow_dependencies(
+                        workflow.rstrip()
+                        + f"\n  {job_id}:{comment}\n"
+                        + "    runs-on: ubuntu-24.04\n"
+                        + "    steps:\n      - run: exit 1\n"
+                    )
+        commented = workflow
+        for job_id in (
+            "plan",
+            "unit",
+            "home_assistant_minimum",
+            "home_assistant_current",
+            "hassfest",
+            "hacs",
+            "release_gate",
+        ):
+            commented = commented.replace(
+                f"  {job_id}:\n", f"  {job_id}: # explanation\n"
+            )
+        self.assertEqual(
+            planner.workflow_dependencies(workflow),
+            planner.workflow_dependencies(commented),
+        )
 
     def test_retained_document_contracts_select_their_static_consumer(self):
         for path in ["docs/development.md"]:
@@ -379,7 +496,9 @@ class ValidationSelectionTests(unittest.TestCase):
             git("-c", "init.templateDir=", "init", "-q")
             (root / "scripts").mkdir()
             for relative in (
+                ".gitignore",
                 planner.PLANNER,
+                "scripts/check_public_safety.py",
                 "scripts/verify-release-local.ps1",
                 "scripts/verify-release-local.sh",
             ):

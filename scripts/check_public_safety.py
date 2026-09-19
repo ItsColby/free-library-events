@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import os
 import re
@@ -196,6 +197,31 @@ def _path_present(path: Path) -> bool:
     return True
 
 
+def _git_command(*arguments: str) -> list[str]:
+    local_names = {
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_CONFIG",
+        "GIT_CONFIG_PARAMETERS",
+        "GIT_CONFIG_COUNT",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_IMPLICIT_WORK_TREE",
+        "GIT_GRAFT_FILE",
+        "GIT_INDEX_FILE",
+        "GIT_REPLACE_REF_BASE",
+        "GIT_PREFIX",
+        "GIT_SHALLOW_FILE",
+        "GIT_COMMON_DIR",
+        "GIT_CEILING_DIRECTORIES",
+        "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+    }
+    # KEY/VALUE entries without COUNT are inert after native hook cleanup.
+    if any(name in os.environ for name in local_names):
+        raise PublicSafetyError("Inherited local Git overrides are not supported")
+    return ["git", "--no-replace-objects", "--no-optional-locks", *arguments]
+
+
 def _candidate_files(root: Path = ROOT) -> list[Path]:
     if not root.is_dir():
         raise PublicSafetyError("source root must be an existing directory")
@@ -203,7 +229,7 @@ def _candidate_files(root: Path = ROOT) -> list[Path]:
     has_git_marker = _path_present(git_marker)
     try:
         top_level = subprocess.run(
-            ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
+            _git_command("-C", str(root), "rev-parse", "--show-toplevel"),
             check=False,
             capture_output=True,
             timeout=30,
@@ -225,8 +251,7 @@ def _candidate_files(root: Path = ROOT) -> list[Path]:
         return sorted(_archive_files(root))
 
     tracked = subprocess.run(
-        [
-            "git",
+        _git_command(
             "-C",
             str(root),
             "ls-files",
@@ -234,7 +259,7 @@ def _candidate_files(root: Path = ROOT) -> list[Path]:
             "--cached",
             "--others",
             "--exclude-standard",
-        ],
+        ),
         check=False,
         capture_output=True,
         timeout=30,
@@ -260,24 +285,41 @@ def _text_failures(text: str) -> set[str]:
     return failures
 
 
+def is_linked_source(root: Path, path: Path) -> bool:
+    """Apply the working-tree guard's leaf and ancestor admission policy."""
+    return any(
+        candidate.is_symlink() or candidate.is_junction()
+        for candidate in (path, *path.parents)
+        if candidate != root and root in candidate.parents
+    )
+
+
+def require_source_paths(root: Path, paths) -> None:
+    """Refuse linked inputs before a consumer reads or copies their contents."""
+    for name in paths:
+        relative = Path(name)
+        if relative.is_absolute() or ".." in relative.parts:
+            raise ValueError("Source admission requires repository-relative paths")
+        if is_linked_source(root, root / relative):
+            raise ValueError("Source admission refused an unreviewed linked path")
+
+
 def run_guard(root: Path = ROOT) -> tuple[int, list[str]]:
     root = root.resolve()
     files = _candidate_files(root)
     failures: set[str] = set()
-    for path in files:
+    for index, path in enumerate(files, start=1):
         relative = path.relative_to(root)
         relative_posix = relative.as_posix()
-        for label in _text_failures(relative_posix):
-            failures.add(f"{relative}: {label} in file name")
-        if any(
-            candidate.is_symlink() or candidate.is_junction()
-            for candidate in (path, *path.parents)
-            if candidate != root and root in candidate.parents
-        ):
-            failures.add(f"{relative}: unreviewed symbolic link or junction")
+        filename_failures = _text_failures(relative_posix)
+        display_path = f"[file {index}]" if filename_failures else str(relative)
+        for label in filename_failures:
+            failures.add(f"{display_path}: {label} in file name")
+        if is_linked_source(root, path):
+            failures.add(f"{display_path}: unreviewed symbolic link or junction")
             continue
         if not stat.S_ISREG(path.stat().st_mode):
-            failures.add(f"{relative}: unsupported file type")
+            failures.add(f"{display_path}: unsupported file type")
             continue
         raw = path.read_bytes()
         is_binary = b"\0" in raw
@@ -289,19 +331,42 @@ def run_guard(root: Path = ROOT) -> tuple[int, list[str]]:
         if is_binary:
             expected_hash = REVIEWED_BINARY_SHA256.get(relative_posix)
             if expected_hash != hashlib.sha256(raw).hexdigest():
-                failures.add(f"{relative}: unreviewed binary content")
+                failures.add(f"{display_path}: unreviewed binary content")
             continue
 
         for label in _text_failures(text):
-            failures.add(f"{relative}: {label}")
+            failures.add(f"{display_path}: {label}")
     return len(files), sorted(failures)
 
 
-def main() -> int:
+def main(argv: tuple[str, ...] = ()) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--check-source-paths", action="store_true")
+    args = parser.parse_args(argv)
+    if args.check_source_paths:
+        try:
+            require_source_paths(
+                ROOT,
+                (
+                    os.fsdecode(path)
+                    for path in sys.stdin.buffer.read().split(b"\0")
+                    if path
+                ),
+            )
+        except OSError, ValueError:
+            print(
+                "Source admission refused an input or could not inspect it.",
+                file=sys.stderr,
+            )
+            return 1
+        return 0
     try:
         file_count, failures = run_guard()
     except (PublicSafetyError, OSError, subprocess.TimeoutExpired) as exc:
-        print(f"Public safety guard could not complete: {exc}", file=sys.stderr)
+        print(
+            f"Public safety guard could not complete ({type(exc).__name__}).",
+            file=sys.stderr,
+        )
         return 1
     if failures:
         raise SystemExit("Public safety guard failed:\n" + "\n".join(failures))
@@ -310,4 +375,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(tuple(sys.argv[1:])))
