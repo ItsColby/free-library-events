@@ -219,19 +219,20 @@ class ParallelValidationTests(unittest.TestCase):
         self.assertTrue({"unit.done", "minimum.done", "current.done"} <= events)
         self.assertFalse(remaining)
 
-    def test_affected_selection_preserves_order_overlap_and_exclusions(self) -> None:
-        for lanes, only in (
-            (("unit", "minimum", "current", "release"), ""),
-            (("minimum", "current"), ""),
-            (("unit",), ""),
-            (("minimum",), ""),
-            (("current",), ""),
-            (("release",), ""),
-            (("minimum", "current"), "current"),
+    def test_selection_preserves_order_overlap_and_exclusions(self) -> None:
+        for mode, lanes, only in (
+            ("all", ("unit", "minimum", "current", "release"), ""),
+            ("affected", ("unit", "minimum", "current", "release"), ""),
+            ("affected", ("minimum", "current"), ""),
+            ("affected", ("unit",), ""),
+            ("affected", ("minimum",), ""),
+            ("affected", ("current",), ""),
+            ("affected", ("release",), ""),
+            ("affected", ("minimum", "current"), "current"),
         ):
-            with self.subTest(lanes=lanes, only=only):
+            with self.subTest(mode=mode, lanes=lanes, only=only):
                 result, events, remaining = self.run_matrix(
-                    mode="affected", lanes=lanes, only=only
+                    mode=mode, lanes=lanes, only=only
                 )
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 expected = set((only,) if only else lanes)
@@ -245,58 +246,36 @@ class ParallelValidationTests(unittest.TestCase):
                 )
                 self.assertFalse(remaining)
 
-    def test_affected_failure_drains_selected_lanes_and_blocks_release(self) -> None:
-        for failure in ("unit", "minimum", "current"):
-            with self.subTest(failure=failure):
-                result, events, remaining = self.run_matrix(failure, mode="affected")
-                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
-                self.assertNotIn("release.done", events)
-                if failure == "unit":
-                    self.assertNotIn("minimum.started", events)
-                    self.assertNotIn("current.started", events)
-                else:
-                    self.assertTrue({"minimum.done", "current.done"} <= events)
-                self.assertFalse(remaining)
-
-    def test_affected_interrupt_drains_selected_lanes(self) -> None:
-        result, events, remaining = self.run_matrix(mode="affected", interrupt=True)
-        self.assertEqual(result.returncode, 128 + signal.SIGTERM)
-        self.assertTrue({"minimum.done", "current.done"} <= events)
-        self.assertNotIn("release.done", events)
-        self.assertFalse(remaining)
-
-    def test_support_lanes_overlap_between_unit_and_release(self) -> None:
-        result, events, remaining_payload = self.run_matrix()
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertTrue({"minimum.done", "current.done", "release.done"} <= events)
-        self.assertFalse(remaining_payload)
-
-    def test_either_failure_waits_for_both_lanes_and_blocks_release(self) -> None:
-        for failure in ("minimum", "current"):
-            with self.subTest(failure=failure):
-                result, events, remaining_payload = self.run_matrix(failure)
-                self.assertNotEqual(result.returncode, 0)
-                self.assertTrue({"minimum.done", "current.done"} <= events)
-                self.assertNotIn("release.done", events)
-                self.assertFalse(remaining_payload)
-
-    def test_unit_failure_does_not_start_support_lanes(self) -> None:
-        result, events, remaining_payload = self.run_matrix("unit")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertNotIn("minimum.started", events)
-        self.assertNotIn("current.started", events)
-        self.assertNotIn("release.done", events)
-        self.assertFalse(remaining_payload)
+    def test_failure_drains_selected_lanes_and_blocks_release(self) -> None:
+        for mode in ("all", "affected"):
+            for failure in ("unit", "minimum", "current"):
+                with self.subTest(mode=mode, failure=failure):
+                    result, events, remaining = self.run_matrix(failure, mode=mode)
+                    self.assertNotEqual(
+                        result.returncode, 0, result.stdout + result.stderr
+                    )
+                    self.assertNotIn("release.done", events)
+                    if failure == "unit":
+                        self.assertNotIn("minimum.started", events)
+                        self.assertNotIn("current.started", events)
+                    else:
+                        self.assertTrue({"minimum.done", "current.done"} <= events)
+                    self.assertFalse(remaining)
 
     def test_interrupt_waits_for_active_lanes_before_removing_payload(self) -> None:
-        result, events, remaining_payload = self.run_matrix(interrupt=True)
-        self.assertTrue(
-            {"minimum.done", "current.done"} <= events, result.stdout + result.stderr
-        )
-        self.assertNotIn("release.done", events)
-        self.assertNotIn("Local validation passed", result.stdout)
-        self.assertFalse(remaining_payload)
-        self.assertEqual(result.returncode, 128 + signal.SIGTERM)
+        for mode in ("all", "affected"):
+            with self.subTest(mode=mode):
+                result, events, remaining_payload = self.run_matrix(
+                    mode=mode, interrupt=True
+                )
+                self.assertTrue(
+                    {"minimum.done", "current.done"} <= events,
+                    result.stdout + result.stderr,
+                )
+                self.assertNotIn("release.done", events)
+                self.assertNotIn("Local validation passed", result.stdout)
+                self.assertFalse(remaining_payload)
+                self.assertEqual(result.returncode, 128 + signal.SIGTERM)
 
 
 if __name__ == "__main__":

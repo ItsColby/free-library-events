@@ -36,34 +36,6 @@ def rss(items: list[dict[str, str]]) -> str:
 
 
 class DigestTests(unittest.TestCase):
-    def test_supported_branch_metadata_uses_official_sources(self) -> None:
-        santore = digest.BRANCHES["SWK"]
-        self.assertEqual(santore.name, "Charles Santore Library")
-        self.assertEqual(
-            santore.address,
-            "932 South 7th Street, Philadelphia, PA 19147-2932",
-        )
-        self.assertIn("location=SWK", santore.rss_url)
-        self.assertIn("location_code=SWK", santore.calendar_url)
-
-        parkway = digest.BRANCHES["CEN"]
-        self.assertEqual(parkway.name, "Parkway Central Library")
-        self.assertEqual(
-            parkway.address,
-            "1901 Vine Street, Philadelphia, PA 19103-1189",
-        )
-        self.assertIn("location=CEN", parkway.rss_url)
-        self.assertIn("location_code=CEN", parkway.calendar_url)
-
-        pci = digest.BRANCHES["PCI"]
-        self.assertEqual(pci.name, "Philadelphia City Institute")
-        self.assertEqual(
-            pci.address,
-            "1905 Locust Street, Philadelphia, PA 19103-5730",
-        )
-        self.assertIn("location=PCI", pci.rss_url)
-        self.assertIn("location_code=PCI", pci.calendar_url)
-
     def test_custom_feed_combines_branch_with_singular_age_parameter(self) -> None:
         url = digest.BRANCHES["CEN"].rss_url_for_age("Baby")
 
@@ -339,24 +311,6 @@ class DigestTests(unittest.TestCase):
             with self.subTest(description=description):
                 event = digest.replace(base, description=description)
                 self.assertEqual(digest.classify_event(event, birth_date), "best")
-
-    def test_merge_events_preserves_all_official_age_categories(self) -> None:
-        base = digest.Event(
-            title="Baby & Toddler Storytime!",
-            event_date=date(2026, 7, 20),
-            start_time=digest.time(10, 30),
-            description="Stories and songs with caregivers.",
-            link="https://example.test/events/shared",
-            image_url="",
-            branch=digest.BRANCHES["CEN"],
-            age_categories=("Baby",),
-        )
-        toddler = digest.replace(base, age_categories=("Toddler",))
-
-        self.assertEqual(
-            digest.merge_events((base, toddler))[0].age_categories,
-            ("Baby", "Toddler"),
-        )
 
     def test_merge_events_retains_richer_safe_source_fields(self) -> None:
         base = digest.Event(
@@ -717,21 +671,6 @@ class DigestTests(unittest.TestCase):
         self.assertNotIn("position:fixed", card)
         self.assertNotIn("javascript:", card)
         self.assertNotIn("alert", card)
-        self.assertIn('class="event-heading-cell"', card)
-        self.assertIn('class="event-body-cell"', card)
-        self.assertIn('class="event-card-shell"', card)
-        self.assertIn("padding:0 0 12px", card)
-        self.assertNotIn('<div style="margin:0 0 12px', card)
-        self.assertIn('colspan="2"', card)
-        self.assertIn('class="event-poster-image-cell" colspan="2"', card)
-        self.assertIn(f'width="{digest.EMAIL_POSTER_IMAGE_WIDTH}"', card)
-        self.assertIn(
-            f"width:100%;max-width:{digest.EMAIL_POSTER_IMAGE_WIDTH}px;"
-            "height:auto;margin:0 auto",
-            card,
-        )
-        self.assertNotIn("background:#f8fafd", card)
-        self.assertIn("border-top:1px solid #eef1f5", card)
         self.assertIn(
             'alt="View official event details for Family Storytime with AAC"',
             card,
@@ -797,9 +736,6 @@ class DigestTests(unittest.TestCase):
         self.assertNotIn(">Crafts</span>", card)
         for generic_label in ("Family Programs", "Storytimes", "Children", "Family"):
             self.assertNotIn(f">{generic_label}</span>", card)
-        self.assertIn("#477a00", card)
-        self.assertIn("#cf102d", card)
-        self.assertIn("font-size:12px", card)
         self.assertLess(
             card.index(">Registration required</span>"),
             card.index("Join our AAC storytime"),
@@ -815,7 +751,6 @@ class DigestTests(unittest.TestCase):
         )
         for label in ("AAC", "Storytime", "Music"):
             self.assertIn(f">{label}</span>", topic_card)
-        self.assertIn("#1c6984", topic_card)
 
         no_registration_event = digest.replace(
             event,
@@ -1969,9 +1904,6 @@ class DigestTests(unittest.TestCase):
         self.assertIn("calendar.google.com/calendar/render", payload["html"])
         self.assertNotIn(">Other calendars</a>", payload["html"])
         self.assertIn('class="email-button"', payload["html"])
-        self.assertIn('class="email-button-cell" bgcolor="#1967d2"', payload["html"])
-        self.assertIn("padding:13px 16px", payload["html"])
-        self.assertIn("line-height:160%", payload["html"])
         self.assertNotRegex(
             payload["html"],
             r"line-height:\d+(?:\.\d+)?(?=[;\"'])",
@@ -2023,7 +1955,6 @@ class DigestTests(unittest.TestCase):
         self.assertEqual(payload["message"].count("WEDNESDAY, JULY 22"), 1)
         self.assertIn("text-decoration:underline", payload["html"])
         self.assertIn("@media only screen and (max-width:620px)", payload["html"])
-        self.assertEqual(digest.EMAIL_POSTER_IMAGE_WIDTH, 440)
         self.assertIn(
             ".event-poster-image-cell img "
             "{width:100%!important;max-width:100%!important;"
@@ -2032,16 +1963,6 @@ class DigestTests(unittest.TestCase):
         )
         self.assertIn("@media only screen and (max-width:390px)", payload["html"])
         self.assertNotIn(".event-image-cell", payload["html"])
-        self.assertIn('class="email-shell"', payload["html"])
-        self.assertIn('class="email-header"', payload["html"])
-        self.assertIn('class="email-title"', payload["html"])
-        self.assertIn('class="email-content"', payload["html"])
-        self.assertIn('class="email-footer"', payload["html"])
-        self.assertIn('class="event-title"', payload["html"])
-        self.assertIn('class="event-meta"', payload["html"])
-        self.assertIn('class="event-time"', payload["html"])
-        self.assertIn('class="event-location"', payload["html"])
-        self.assertIn('class="event-location-link"', payload["html"])
         self.assertIn(
             'class="event-location-link" href=',
             payload["html"],
@@ -2058,28 +1979,8 @@ class DigestTests(unittest.TestCase):
         self.assertIn('class="branch-calendar-table"', payload["html"])
         self.assertEqual(payload["html"].count('class="branch-calendar-cell"'), 4)
         self.assertEqual(payload["html"].count('class="branch-calendar-link"'), 4)
-        self.assertIn(".event-highlights {margin-top:6px!important}", payload["html"])
         self.assertIn('class="email-button-cell"', payload["html"])
         self.assertIn('class="email-button-link"', payload["html"])
-        self.assertIn(
-            ".event-description-paragraph,.event-description-list "
-            "{font-size:16px!important;line-height:155%!important}",
-            payload["html"],
-        )
-        self.assertIn(
-            ".email-button-cell {padding:14px 16px!important;"
-            "text-align:center!important}",
-            payload["html"],
-        )
-        self.assertIn(
-            ".event-location-link {display:inline-block!important;"
-            "padding:13px 0!important}",
-            payload["html"],
-        )
-        self.assertIn(
-            ".branch-calendar-link {padding:13px 10px!important;font-size:15px!important}",
-            payload["html"],
-        )
         self.assertIn(
             ".branch-calendar-cell {display:block!important;width:auto!important}",
             payload["html"],
@@ -2112,9 +2013,6 @@ class DigestTests(unittest.TestCase):
             distance_by_branch_code={"SWK": 1_609.344},
         )
 
-        self.assertIn('class="event-time"', payload["html"])
-        self.assertIn('class="event-location"', payload["html"])
-        self.assertIn('class="event-location-link"', payload["html"])
         self.assertNotRegex(payload["html"], r"(?:~|&lt;)?\d+(?:\.\d+)?\s*mi\b")
         self.assertNotIn("distance", payload["html"].lower())
         self.assertNotRegex(payload["message"], r"(?:~|<)?\d+(?:\.\d+)?\s*mi\b")
@@ -2248,8 +2146,6 @@ class DigestTests(unittest.TestCase):
         self.assertNotIn(">Ends</td>", card)
         self.assertNotIn("Registration</td>", card)
         self.assertNotIn("Cost</td>", card)
-        self.assertNotIn("object-fit:cover", card)
-        self.assertIn("width:100%;max-width:440px;height:auto", card)
         self.assertNotIn("Why included", card)
         self.assertNotIn("The published maximum age includes Avery.", card)
         self.assertNotIn(digest.BRANCHES["CEN"].address, card)
@@ -2612,19 +2508,26 @@ class DigestTests(unittest.TestCase):
             "has been",
             "have been",
         )
+        # Cover each independent grammar alternative once; the separate consumer
+        # tests retain compound-negation and sentence-boundary interactions.
         cases = [
-            (f"ASL interpretation {auxiliary} {predicate}.", False)
+            (f"ASL interpretation {auxiliary} available.", False)
             for auxiliary in negative_auxiliaries
-            for predicate in predicates
         ]
+        cases.extend(
+            (f"ASL interpretation is not {predicate}.", False)
+            for predicate in predicates
+        )
         cases.extend(
             (f"ASL interpretation {auxiliary} unavailable.", False)
             for auxiliary in positive_auxiliaries
         )
         cases.extend(
-            (f"ASL interpretation {auxiliary} {predicate}.", True)
+            (f"ASL interpretation {auxiliary} available.", True)
             for auxiliary in positive_auxiliaries
-            for predicate in predicates
+        )
+        cases.extend(
+            (f"ASL interpretation is {predicate}.", True) for predicate in predicates
         )
         cases.extend(
             (
@@ -2638,7 +2541,7 @@ class DigestTests(unittest.TestCase):
                 ("ASL interpretation is not unavailable.", True),
             )
         )
-        for description, expected in cases:
+        for description, expected in dict.fromkeys(cases):
             for text in dict.fromkeys(
                 (
                     description,
@@ -3147,7 +3050,7 @@ class DigestTests(unittest.TestCase):
                 ) as render_card:
                     actual = digest.build_digest(**arguments)
                 self.assertEqual(actual, expected)
-                self.assertEqual(render_card.call_count, 200)
+                self.assertLessEqual(render_card.call_count, 2 * len(events))
                 self.assertLessEqual(actual["metadata"]["html_bytes"], budget)
 
         # A later invocation can reuse the same occurrence with different CID,

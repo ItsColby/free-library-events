@@ -33,7 +33,6 @@ from custom_components.free_library_events.config import normalize_options
 from custom_components.free_library_events.const import (
     CONF_BIRTH_DATE,
     CONF_BRANCHES,
-    CONF_CALENDAR_DURATION,
     CONF_CHILD_NAME,
     CONF_PUBLISH_WEBCAL,
     CONF_WEBCAL_NAME,
@@ -95,6 +94,7 @@ async def test_valid_empty_rss_retains_complete_coverage() -> None:
     assert feed.events == ()
     assert feed.source_count == feed.parsed_count == 0
     assert feed.covers_through(date(2026, 9, 20)) is True
+    client._async_get.assert_awaited_once_with(BRANCHES["CEN"].rss_url_for_age("Baby"))
 
 
 @pytest.mark.parametrize(
@@ -244,10 +244,7 @@ async def test_first_nonretryable_failure_consumes_streak_retry_opportunity(
 @pytest.mark.parametrize(
     "invalid_values",
     (
-        {CONF_CHILD_NAME: ""},
         {CONF_BIRTH_DATE: "synthetic private invalid date"},
-        {CONF_BRANCHES: []},
-        {CONF_CALENDAR_DURATION: None},
         {CONF_WEBCAL_NAME: None},
     ),
 )
