@@ -368,13 +368,13 @@ def remove_stored_image_run(run_directory: Path) -> None:
 
 
 def _image_directory_children(root_directory: Path) -> tuple[Path, ...]:
-    """Snapshot stored paths while allowing another cleanup to remove the root."""
+    """Snapshot stored paths, skipping unavailable or concurrently removed roots."""
 
     if not root_directory.is_dir():
         return ()
     try:
         return tuple(root_directory.iterdir())
-    except FileNotFoundError, NotADirectoryError:
+    except OSError:
         return ()
 
 

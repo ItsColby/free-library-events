@@ -76,7 +76,7 @@ Expansion still contributes useful recovered rows when proof fails. Failures, ma
 
 ## Normalization and matching preserve source meaning
 
-`parse_feed` produces frozen `Event` records. It reads the publisher's event date and start time, extracts safe text and links from description HTML, and retains sanitized rich description markup for email. It recognizes explicit end times or durations, venue and room wording, and online or hybrid event wording. Unknown end times remain unknown until a calendar projection supplies a labeled placeholder.
+`parse_feed` produces frozen `Event` records. It reads the publisher's event date and start time, extracts safe text and links from description HTML, and retains sanitized rich description markup for email. It recognizes explicit end times or durations, venue and room wording, and positive online or hybrid event wording. Recognized negations, such as “not a virtual program,” do not supply online attendance evidence. Unknown end times remain unknown until a calendar projection supplies a labeled placeholder.
 
 The parser requires an RSS document with exactly one channel, so XML error or challenge pages cannot become successful empty feeds. A valid channel with no items remains a valid empty feed. The parser skips individual rows with unusable dates, times, or oversized fields while retaining the original published count. It limits processing to 100 RSS items and rejects XML DTD and entity declarations, including multibyte encodings. Content limits and skipped rows therefore remain visible as incomplete parsing rather than silently becoming a complete smaller feed.
 
@@ -98,11 +98,15 @@ The date and time distinguish occurrences that reuse a recurring-series URL. Bra
 
 Display truncation is downstream of this identity. Shortened email copy must not change the underlying occurrence, calendar UID, or inclusion metadata.
 
+Email highlights are derived from the complete source description before display truncation. Registration, weather, and other bounded highlights retain their full-source negation and qualification rules even when the supporting wording falls outside the excerpt.
+
 ### Age fit
 
 Matching is deterministic and evaluates age **on the event date**. It first considers explicit numeric age wording, then matching publisher categories and specific audience wording, followed by explicit inclusive language. A nonmatching publisher category blocks generic family-oriented inference, while explicit inclusive wording can support a match. Events before the birth date are excluded.
 
 Age-group words match whole words. Baby and infant wording must describe an audience or a recognizable program, so incidental animal references and unrelated words do not supply age evidence. Publisher categories and explicit numeric age ranges retain their precedence.
+
+Explicit numeric ranges joined directly by `or`, such as “ages 3 to 5 or ages 6 to 8,” can describe alternative eligible ages. Each range must state its age context or units; intervening roles, session qualifiers, and paragraph breaks do not extend the first audience range. This conservative rule does not infer a combined range from unrelated ages elsewhere in the description.
 
 The publisher supplies category names; the numeric windows below are local interpretation rules, not publisher guarantees. Lower bounds are inclusive and upper bounds exclusive.
 
@@ -175,6 +179,8 @@ The response's `subject`, plain-text `message`, `html`, and `metadata` serve dif
 
 Email is limited to 100 candidate events and an 80,000-byte HTML budget. The renderer compacts cards and, if necessary, omits lower-priority events with disclosure. Home Assistant's coordinates can locally prioritize nearer branches for richer cards and retention; coordinates and distance values are not printed in the digest. This presentation priority does not alter age fit or the calendar projection. Public event details, registration links, directions, and Google Calendar creation links remain user-followed links rather than automatic registrations or calendar writes.
 
+Google Calendar creation links retain the official listing and required location and fallback-duration context within their 4,096-character URL budget. Optional related links and description text yield space first. If the required content alone cannot fit, the creation action is omitted while the official listing remains available.
+
 The email uses presentation tables, percentage line heights, and cell spacing, with a stacked layout that remains usable when a client ignores responsive CSS. Posters retain their aspect ratio and use a 440-pixel fallback width, expanding responsively where supported; branch-calendar columns stack below 390 pixels. These are intentional markup constraints, not a claim that every mail client has been visually verified.
 
 With `embed_images: false`, safe publisher image URLs remain in HTML. With embedding enabled, `email_images.py` deduplicates image requests, downloads at most 12 images with concurrency 4, and bounds each file to 3 MiB and the batch to 15 MiB. Requests have a 15-second timeout and a revalidated, at-most-two-redirect chain. Supported image signatures are checked rather than trusting the response content type.
@@ -185,7 +191,7 @@ Downloaded images are written to a unique marked `run-...` directory under the i
 
 If storage creation or writing fails, rollback can remove only a run directory created by that invocation. A name collision or failed directory creation must leave pre-existing data intact.
 
-Cleanup is scheduled one hour after a run is stored. An independently tracked storage task registers that cleanup even if the digest caller cancels while files are being written. Later embedded renders also purge stale runs, and integration startup purges previously managed runs from current and legacy locations. Cleanup requires both the expected run name and ownership marker. It preserves unrelated files and directories. Process downtime can delay removal, while a restart can remove images before the nominal expiry. A recipient's retained email or attachment is outside this cleanup lifecycle. Delivery must consume the returned files while they exist, and a failed delivery is the caller's recovery responsibility.
+Cleanup is scheduled one hour after a run is stored. An independently tracked storage task registers that cleanup even if the digest caller cancels while files are being written. Later embedded renders also attempt to purge stale runs, and integration startup attempts to purge previously managed runs from current and legacy locations. Cleanup requires both the expected run name and ownership marker. It preserves unrelated files and directories; an unreadable image directory does not block integration setup or rendering. Filesystem errors or process downtime can delay removal, while a restart can remove images before the nominal expiry. A recipient's retained email or attachment is outside this cleanup lifecycle. Delivery must consume the returned files while they exist, and a failed delivery is the caller's recovery responsibility.
 
 ## WebCal is a revocable read capability
 

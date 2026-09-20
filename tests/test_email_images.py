@@ -403,6 +403,56 @@ class EmailImageTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(stale.run_directory.exists())
             self.assertTrue(fresh.run_directory.exists())
 
+    def test_cleanup_preserves_files_when_enumeration_is_unavailable(self) -> None:
+        batch = email_images.ImageDownloadBatch(
+            images=(email_images.DownloadedImage("source", _PNG, ".png"),),
+            requested_count=1,
+            failure_count=0,
+            failure_examples=(),
+        )
+        for stale_only in (False, True):
+            for error_type in (PermissionError, OSError):
+                for partial in (False, True):
+                    with (
+                        self.subTest(
+                            stale_only=stale_only,
+                            error_type=error_type,
+                            partial=partial,
+                        ),
+                        tempfile.TemporaryDirectory() as temporary_directory,
+                    ):
+                        root = Path(temporary_directory) / "email-images"
+                        bundle = email_images.store_downloaded_images(root, batch)
+                        run_directory = bundle.run_directory
+                        assert run_directory is not None
+                        marker = run_directory / ".managed-by-free-library-events"
+                        os.utime(marker, (100, 100))
+                        unmanaged = root / "retain.txt"
+                        unmanaged.write_text("Unrelated data", encoding="utf-8")
+
+                        def unavailable_children(
+                            partial: bool = partial,
+                            run_directory: Path = run_directory,
+                            error_type: type[OSError] = error_type,
+                        ):
+                            if partial:
+                                yield run_directory
+                            raise error_type("Image directory is unavailable")
+
+                        with patch.object(
+                            Path, "iterdir", return_value=unavailable_children()
+                        ):
+                            if stale_only:
+                                email_images.purge_stale_image_runs(root, 200)
+                            else:
+                                email_images.purge_stored_image_runs(root)
+
+                        self.assertEqual(Path(bundle.paths[0]).read_bytes(), _PNG)
+                        self.assertTrue(marker.is_file())
+                        self.assertEqual(
+                            unmanaged.read_text(encoding="utf-8"), "Unrelated data"
+                        )
+
 
 if __name__ == "__main__":
     unittest.main()
