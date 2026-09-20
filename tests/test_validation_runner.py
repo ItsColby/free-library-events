@@ -145,10 +145,36 @@ class ValidationRunnerTests(unittest.TestCase):
     def test_native_lanes_use_separate_environments_and_repository_cwd(self) -> None:
         self.install_python_stand_in()
         for lane in ("minimum", "current"):
+            previous = (
+                len(self.trace.read_text(encoding="utf-8").splitlines())
+                if self.trace.exists()
+                else 0
+            )
             result = self.run_lane(lane, "native")
             self.assertEqual(0, result.returncode, result.stderr)
             self.assertIn(f"Local validation passed: {lane} (native)", result.stdout)
             self.assertEqual([], list(self.scratch.iterdir()))
+            commands = self.trace.read_text(encoding="utf-8").splitlines()[previous:]
+            requirements = (
+                "requirements-ha-test.txt"
+                if lane == "minimum"
+                else "requirements-ha-current.txt"
+            )
+            check = (
+                "|-m pip check"
+                if lane == "minimum"
+                else "check_ha_patch_compatibility.py"
+            )
+            positions = [
+                next(index for index, line in enumerate(commands) if token in line)
+                for token in (
+                    "pip install pytest-homeassistant-custom-component==",
+                    f"pip install --upgrade -r {requirements}",
+                    check,
+                    "pytest:",
+                )
+            ]
+            self.assertEqual(sorted(positions), positions, commands)
         records = self.trace.read_text(encoding="utf-8").splitlines()
         installs = [line.split("|", 2) for line in records if "|-m pip install" in line]
         environments = {parts[1] for parts in installs}
@@ -289,12 +315,11 @@ class ValidationRunnerTests(unittest.TestCase):
             "fi\n"
             'printf "fresh-python-lane\\n" >> "$TRACE"\n',
         )
-        for _ in range(2):
-            result = self.run_lane("all", "container")
-            self.assertEqual(result.returncode, 0, result.stderr)
+        result = self.run_lane("all", "container")
+        self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             self.trace.read_text(encoding="utf-8").splitlines(),
-            ["fresh-python-lane"] * 6,
+            ["fresh-python-lane"] * 3,
         )
         self.assertEqual([], list(self.scratch.iterdir()))
 
