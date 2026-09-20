@@ -21,12 +21,18 @@ import json
 import os
 import sys
 
+if "--snapshot-plan" in sys.argv and os.environ.get("MATRIX_MUTATE_SOURCE"):
+    from pathlib import Path
+    source = Path(os.environ["MATRIX_MUTATE_SOURCE"])
+    (source / "scripts/plan_validation.py").write_text("raise RuntimeError('changed original')")
 if "--command" in sys.argv:
-    print(":")
+    raise RuntimeError("Lane command must come from the captured plan")
 else:
     selected = os.environ["MATRIX_PLAN_LANES"].split()
     print(json.dumps({"jobs": {lane: lane in selected for lane in
-          ("unit", "minimum", "current", "release", "hacs")}, "workflow": True}))
+          ("unit", "minimum", "current", "release", "hacs")}, "workflow": True,
+          "safety": True, "paths": [], "base": "HEAD",
+          "commands": {lane: "echo snapshot-command" for lane in selected}}))
 """
 
 PODMAN_STAND_IN = r"""
@@ -47,6 +53,8 @@ if any("hassfest@" in arg for arg in args):
         assert (events / (lane + ".done")).exists()
     (events / "release.done").touch()
     sys.exit(0)
+if os.environ.get("MATRIX_MUTATE_SOURCE"):
+    assert "snapshot-command" in args[-1], "Commands did not come from captured plan"
 lane = ("current" if "requirements-ha-current.txt" in args[-1] else
         "minimum" if "requirements-ha-test.txt" in args[-1] else "unit")
 mount = next(args[index + 1] for index, arg in enumerate(args[:-1])
@@ -109,6 +117,7 @@ class ParallelValidationTests(unittest.TestCase):
         mode: str = "all",
         lanes: tuple[str, ...] = ("unit", "minimum", "current", "release"),
         only: str = "",
+        mutate_source: bool = False,
     ) -> tuple[subprocess.CompletedProcess[str], set[str], bool]:
         with tempfile.TemporaryDirectory(prefix="parallel validation ") as temporary:
             root = Path(temporary)
@@ -143,6 +152,7 @@ class ParallelValidationTests(unittest.TestCase):
                 "MATRIX_FAIL": failure,
                 "VALIDATION_PYTHON": sys.executable,
                 "MATRIX_INTERRUPT": "1" if interrupt else "",
+                "MATRIX_MUTATE_SOURCE": str(source) if mutate_source else "",
             }
             for arguments in (
                 ("init", "-q"),
@@ -199,6 +209,15 @@ class ParallelValidationTests(unittest.TestCase):
                 Path(path.read_text()).exists() for path in events.glob("*.mount")
             )
             return result, {path.name for path in events.iterdir()}, remaining_payload
+
+    def test_captured_commands_survive_original_planner_changes(self) -> None:
+        result, events, remaining = self.run_matrix(
+            mode="affected",
+            mutate_source=True,
+        )
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertTrue({"unit.done", "minimum.done", "current.done"} <= events)
+        self.assertFalse(remaining)
 
     def test_affected_selection_preserves_order_overlap_and_exclusions(self) -> None:
         for lanes, only in (

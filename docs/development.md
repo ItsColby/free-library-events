@@ -50,6 +50,13 @@ metadata checks are selected independently of product tests. Configuration
 changes without a reviewed tool-specific mapping need explicit review, rather
 than an automatic complete run.
 
+Container execution rebuilds the affected plan from the captured payload, retaining
+the preview's resolved dependency baseline and selected paths. That plan contains
+the exact lane commands, which are reused without reading original source files
+again. Ref comparisons also require the captured files to match the clean candidate.
+Keep edits stable while the payload is being copied. Native execution uses one
+captured plan and requires its working tree to remain stable for the run.
+
 Pull requests and main pushes use this same selection. The stable Release gate
 requires the planning job and every selected job to succeed, and accepts skipped
 jobs only when the plan excludes them. Manual workflow dispatch explicitly runs
