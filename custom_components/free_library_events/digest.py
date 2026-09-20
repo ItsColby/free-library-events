@@ -157,6 +157,7 @@ class Event:
     image_layout: Literal["side", "hero"] = "side"
     description_truncated: bool = False
     weather_location_conditional: bool = False
+    display_highlights: tuple[tuple[str, str], ...] | None = None
 
     @property
     def starts_at(self) -> datetime:
@@ -772,11 +773,12 @@ def event_modality(
     """Return modality only when the publisher uses explicit event wording."""
 
     searchable = f"{title}\n{description}"
-    if re.search(r"\bhybrid\b", searchable, re.IGNORECASE) or (
-        _ONLINE_EVENT_RE.search(searchable) and _IN_PERSON_EVENT_RE.search(searchable)
+    online = _has_positive_claim(_ONLINE_EVENT_RE.pattern, searchable)
+    if _has_positive_claim(r"\bhybrid\b", searchable) or (
+        online and _has_positive_claim(_IN_PERSON_EVENT_RE.pattern, searchable)
     ):
         return "hybrid"
-    if _ONLINE_EVENT_RE.search(searchable):
+    if online:
         return "online"
     return "in_person"
 
@@ -1025,8 +1027,17 @@ AGE_RANGE_RE = re.compile(
     r"children(?:\s+(?P<children_age_context>ages?|aged))?)\s*"
     r"(?P<low>\d{1,3})\s*"
     r"(?P<low_unit>months?|mos?|years?|yrs?)?\s*"
-    r"(?:-|\u2013|to|through)\s*(?P<high>\d{1,3})\s*"
-    r"(?P<high_unit>months?|mos?|years?|yrs?)?\b",
+    r"(?:-|\u2013|to|through)\s*(?P<high>\d{1,3})"
+    r"(?:\s*(?P<high_unit>months?|mos?|years?|yrs?))?\b",
+    re.IGNORECASE,
+)
+_AGE_RANGE_OR_RE = re.compile(r"[ \t]+(?:old[ \t]+)?or[ \t]+", re.IGNORECASE)
+_AGE_RANGE_LIST_END_RE = re.compile(
+    r"[ \t]*(?:old\b[ \t]*)?"
+    r"(?:(?:(?:are|is)[ \t]+(?:welcome|invited|eligible)"
+    r"(?:[ \t]+to[ \t]+(?:attend|join|participate))?|"
+    r"(?:can|may)[ \t]+(?:attend|join|participate))[ \t]*)?"
+    r"(?=$|[.!?;\n]|\bor\b)",
     re.IGNORECASE,
 )
 NEWBORN_RANGE_RE = re.compile(
@@ -1064,6 +1075,27 @@ def _is_broad_years_only_upper_limit(
     return child_months < 36 and is_years and value >= 6
 
 
+def _has_age_range_evidence(match: re.Match[str]) -> bool:
+    return any(
+        match.group(field)
+        for field in (
+            "age_context",
+            "children_age_context",
+            "low_unit",
+            "high_unit",
+        )
+    )
+
+
+def _age_range_contains(match: re.Match[str], child_months: float) -> bool:
+    low_unit = match.group("low_unit") or match.group("high_unit")
+    high_unit = match.group("high_unit") or match.group("low_unit")
+    low = _to_months(int(match.group("low")), low_unit)
+    high = _to_months(int(match.group("high")), high_unit)
+    margin = 1 if high_unit and high_unit.lower().startswith(("month", "mo")) else 12
+    return low <= child_months < high + margin
+
+
 def _explicit_age_fit(text: str, child_months: float) -> FitRank | None:
     match = NEWBORN_RANGE_RE.search(text)
     if match:
@@ -1075,25 +1107,25 @@ def _explicit_age_fit(text: str, child_months: float) -> FitRank | None:
         return "best" if child_months < high + margin else "exclude"
 
     for match in AGE_RANGE_RE.finditer(text):
-        if not any(
-            match.group(field)
-            for field in (
-                "age_context",
-                "children_age_context",
-                "low_unit",
-                "high_unit",
-            )
-        ):
+        if not _has_age_range_evidence(match):
             continue
-        low_unit = match.group("low_unit") or match.group("high_unit")
-        high_unit = match.group("high_unit") or match.group("low_unit")
-        low = _to_months(int(match.group("low")), low_unit)
-        high = _to_months(int(match.group("high")), high_unit)
-        margin = (
-            1 if high_unit and high_unit.lower().startswith(("month", "mo")) else 12
-        )
-        if low <= child_months < high + margin:
+        if _age_range_contains(match, child_months):
             return "best"
+        # Only an immediate, explicit alternative can extend this audience.
+        # Other prose, role labels, and session/time qualifiers keep the first
+        # range authoritative rather than combining unrelated ages.
+        current_range = match
+        while connector := _AGE_RANGE_OR_RE.match(text, current_range.end()):
+            alternative = AGE_RANGE_RE.match(text, connector.end())
+            if (
+                alternative is None
+                or not _has_age_range_evidence(alternative)
+                or not _AGE_RANGE_LIST_END_RE.match(text, alternative.end())
+            ):
+                break
+            if _age_range_contains(alternative, child_months):
+                return "best"
+            current_range = alternative
         return "exclude"
 
     match = AGE_AND_UNDER_RE.search(text)
@@ -1487,23 +1519,17 @@ def google_calendar_url(
     *,
     compact: bool = False,
 ) -> str:
+    """Return a bounded creation URL, or omit it if required context cannot fit."""
+
     end = event.end_at or event.starts_at + timedelta(minutes=duration_minutes)
     location_note = event_location_note(event)
-    detail_parts = (
+    context_parts = (
         [location_note, f"Hosted by {event.branch.name}"] if location_note else []
     )
-    if not compact:
-        detail_parts.extend(
-            [
-                _bounded_text(event.description, MAX_CALENDAR_DETAILS_CHARS),
-                *related_link_lines(event),
-            ]
-        )
-    details = "\n\n".join(part for part in detail_parts if part)
-    details += f"\n\nOfficial event details: {event_details_url(event)}"
+    required_parts = [f"Official event details: {event_details_url(event)}"]
     if event.end_at is None:
-        details += (
-            f"\n\nNo end time was found in the parsed feed. This link uses "
+        required_parts.append(
+            "No end time was found in the parsed feed. This link uses "
             f"{duration_minutes} minutes as a fallback; check the listing before saving."
         )
     parameters = {
@@ -1512,15 +1538,39 @@ def google_calendar_url(
         "dates": f"{event.starts_at:%Y%m%dT%H%M%S}/{end:%Y%m%dT%H%M%S}",
         "ctz": TIMEZONE,
         "location": event_calendar_location(event),
-        "details": details,
+        "details": "",
     }
     base = "https://calendar.google.com/calendar/render?"
-    url = base + urllib.parse.urlencode(parameters)
-    while len(url) > MAX_CALENDAR_URL_LENGTH and parameters["details"]:
+
+    def render_url(description: str, links: Sequence[str] = ()) -> str:
+        parameters["details"] = "\n\n".join(
+            part
+            for part in (*context_parts, description, *links, *required_parts)
+            if part
+        )
+        return base + urllib.parse.urlencode(parameters)
+
+    url = render_url("")
+    if len(url) > MAX_CALENDAR_URL_LENGTH:
+        return ""
+    if compact:
+        return url
+
+    description = _bounded_text(event.description, MAX_CALENDAR_DETAILS_CHARS)
+    url = render_url(description)
+    while len(url) > MAX_CALENDAR_URL_LENGTH and description:
         overflow = len(url) - MAX_CALENDAR_URL_LENGTH
-        target = max(0, len(parameters["details"]) - overflow - 32)
-        parameters["details"] = _bounded_text(parameters["details"], target)
-        url = base + urllib.parse.urlencode(parameters)
+        description = _bounded_text(
+            description, max(0, len(description) - overflow - 32)
+        )
+        url = render_url(description)
+    links: list[str] = []
+    for link in related_link_lines(event):
+        candidate = render_url(description, (*links, link))
+        if len(candidate) > MAX_CALENDAR_URL_LENGTH:
+            break
+        links.append(link)
+        url = candidate
     return url
 
 
@@ -1604,9 +1654,9 @@ def _description_paragraphs_html(event: Event) -> str:
 
 _NEGATED_CLAIM_END_RE = re.compile(
     r"^\s*(?:"
-    r"(?:not|(?:is|are|was|were)\s+not|"
+    r"(?:not|no\s+longer|(?:is|are|was|were)\s+(?:not|no\s+longer)|"
     r"(?:isn|aren|wasn|weren)['\u2019]t|"
-    r"(?:will not|won['\u2019]t|cannot|can['\u2019]t)\s+be|"
+    r"(?:will (?:not|no\s+longer)|won['\u2019]t|cannot|can['\u2019]t)\s+be|"
     r"(?:has|have)\s+not\s+been|(?:hasn|haven)['\u2019]t\s+been)\s+"
     r"(?:available|provided|required|offered|welcome|included|planned)|"
     r"(?:(?:is|are|was|were|will be|has been|have been)\s+)?unavailable)\b",
@@ -1622,7 +1672,7 @@ def _has_positive_claim(pattern: str, text: str) -> bool:
         after = text[match.end() : match.end() + 60]
         if (
             re.search(
-                r"\b(?:no|not|without|never|cannot|"
+                r"\b(?:no(?:\s+longer)?|not|without|never|cannot|"
                 r"(?:isn|aren|wasn|weren|won|can)['\u2019]t)\s+"
                 r"(?:(?:an?|any|be|being|have|having|for|offer(?:ing)?|"
                 r"provid(?:e|ing))\s+){0,3}$",
@@ -1630,7 +1680,7 @@ def _has_positive_claim(pattern: str, text: str) -> bool:
                 re.IGNORECASE,
             )
             or re.search(
-                r"\b(?:no|not|without|never|cannot|"
+                r"\b(?:no(?:\s+longer)?|not|without|never|cannot|"
                 r"(?:isn|aren|wasn|weren|won|can)['\u2019]t)\b[^.;!?\n]{0,45}"
                 r"\b(?:or|nor)\s+(?:an?\s+)?$",
                 before,
@@ -1696,6 +1746,9 @@ def _logistics_chip_specs(
 
 def _event_chip_specs(event: Event) -> tuple[tuple[str, str], ...]:
     """Return bounded, prioritized highlights provable from publisher wording."""
+
+    if event.display_highlights is not None:
+        return event.display_highlights
 
     topic_chips: list[tuple[str, str]] = []
     action_chips: list[tuple[str, str]] = []
@@ -1932,10 +1985,24 @@ def _source_note(
     return ""
 
 
-def _calendar_placeholder_note(events: Sequence[Event], duration_minutes: int) -> str:
+def _calendar_placeholder_note(
+    events: Sequence[Event],
+    duration_minutes: int,
+    *,
+    calendar_link_ids: frozenset[str] | None = None,
+) -> str:
     """Return one precise note for Google links that need placeholder end times."""
 
-    missing_count = sum(event.end_at is None for event in events)
+    linked_events = [
+        event
+        for event in events
+        if (
+            event_identity(event) in calendar_link_ids
+            if calendar_link_ids is not None
+            else bool(google_calendar_url(event, duration_minutes, compact=True))
+        )
+    ]
+    missing_count = sum(event.end_at is None for event in linked_events)
     if not missing_count:
         return ""
     if missing_count == len(events):
@@ -1966,10 +2033,17 @@ def _render_event_card(
 ) -> str:
     event_url = html.escape(event_details_url(event), quote=True)
     display_title = _bounded_text(event.title, MAX_DISPLAY_TITLE_LENGTH)
+    calendar_url = google_calendar_url(event, duration_minutes, compact=compact)
     if compact:
         location_html = _event_location_html(event)
-        calendar_url = html.escape(
-            google_calendar_url(event, duration_minutes, compact=True), quote=True
+        calendar_link = (
+            '<div class="compact-calendar-link" style="margin:8px 0 0;'
+            'font-size:14px;font-weight:700;line-height:145%">'
+            f'<a href="{html.escape(calendar_url, quote=True)}" '
+            'style="display:inline-block;padding:5px 0;color:#1967d2;'
+            'text-decoration:underline">Add to Google Calendar</a></div>'
+            if calendar_url
+            else ""
         )
         return f"""
     <table class="event-card-shell compact-event-card" role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse">
@@ -1981,7 +2055,7 @@ def _render_event_card(
       </div>
       {_event_audience_html(event)}
       {_event_chips_html(event)}
-      <div class="compact-calendar-link" style="margin:8px 0 0;font-size:14px;font-weight:700;line-height:145%"><a href="{calendar_url}" style="display:inline-block;padding:5px 0;color:#1967d2;text-decoration:underline">Add to Google Calendar</a></div>
+      {calendar_link}
     </td></tr><tr><td height="10" style="height:10px;font-size:1px;line-height:10px">&nbsp;</td></tr>
     </table>
     """
@@ -2024,7 +2098,7 @@ def _render_event_card(
       <td class="event-body-cell" colspan="2" style="padding:16px 20px 18px;border-top:1px solid #eef1f5;overflow-wrap:anywhere;word-break:break-word">
         <div>{_description_paragraphs_html(event)}</div>
         {shortened_note}
-        {_button("Add to Google Calendar", google_calendar_url(event, duration_minutes), primary=True)}
+        {_button("Add to Google Calendar", calendar_url, primary=True) if calendar_url else ""}
       </td>
       </tr>"""
     return f"""
@@ -2063,16 +2137,28 @@ def _render_html(
     source_warnings: Sequence[str],
     full_event_ids: frozenset[str] | None = None,
     email_omitted_count: int = 0,
+    rendered_cards: Mapping[tuple[Event, bool], str] | None = None,
+    calendar_link_ids: frozenset[str] | None = None,
 ) -> str:
     if full_event_ids is None:
         full_event_ids = frozenset(event_identity(event) for event in events)
+    if calendar_link_ids is None:
+        calendar_link_ids = frozenset(
+            event_identity(event)
+            for event in events
+            if google_calendar_url(event, duration_minutes, compact=True)
+        )
     day_sections: list[str] = []
     for event_date, day_items in groupby(events, key=lambda event: event.event_date):
         day_cards = "".join(
-            _render_event_card(
-                event,
-                duration_minutes=duration_minutes,
-                compact=event_identity(event) not in full_event_ids,
+            (
+                rendered_cards[(event, event_identity(event) not in full_event_ids)]
+                if rendered_cards is not None
+                else _render_event_card(
+                    event,
+                    duration_minutes=duration_minutes,
+                    compact=event_identity(event) not in full_event_ids,
+                )
             )
             for event in day_items
         )
@@ -2126,7 +2212,9 @@ def _render_html(
             f"{_email_omission_note(email_omitted_count)}</p>"
         )
     source_note = "".join(source_note_parts)
-    calendar_note_text = _calendar_placeholder_note(events, duration_minutes)
+    calendar_note_text = _calendar_placeholder_note(
+        events, duration_minutes, calendar_link_ids=calendar_link_ids
+    )
     calendar_note = ""
     if calendar_note_text:
         calendar_note = (
@@ -2151,19 +2239,16 @@ def _render_html(
             preheader_features.append("age notes")
         if any(event_directions_url(event) for event in events):
             preheader_features.append("directions")
-        preheader_features.append("calendar links")
-        if len(preheader_features) == 1:
-            feature_summary = preheader_features[0]
-        elif len(preheader_features) == 2:
+        if any(event_identity(event) in calendar_link_ids for event in events):
+            preheader_features.append("calendar links")
+        if len(preheader_features) <= 2:
             feature_summary = " and ".join(preheader_features)
         else:
             feature_summary = (
                 ", ".join(preheader_features[:-1]) + f", and {preheader_features[-1]}"
             )
-        preheader = (
-            f"{event_day_range} from {event_branch_count} {library_noun}, "
-            f"with {feature_summary}."
-        )
+        feature_suffix = f", with {feature_summary}" if feature_summary else ""
+        preheader = f"{event_day_range} from {event_branch_count} {library_noun}{feature_suffix}."
     else:
         preheader = (
             "No matching entries in this digest. The official branch calendars "
@@ -2264,6 +2349,7 @@ def _render_plain_text(
             age_categories = event_age_categories(event)
             directions = event_directions_url(event)
             location_line = event_location_summary(event)
+            calendar_url = google_calendar_url(event, duration_minutes)
             if directions:
                 location_line += f": {directions}"
             lines.extend(
@@ -2294,7 +2380,11 @@ def _render_plain_text(
                 lines.append("")
             lines.extend(
                 [
-                    f"Add to Google Calendar: {google_calendar_url(event, duration_minutes)}",
+                    *(
+                        [f"Add to Google Calendar: {calendar_url}"]
+                        if calendar_url
+                        else []
+                    ),
                     f"Event details: {event_details_url(event)}",
                     "",
                 ]
@@ -2355,6 +2445,7 @@ def _display_event(event: Event) -> Event:
         description_html="" if truncated else event.description_html,
         description_truncated=truncated,
         weather_location_conditional=bool(event_location_note(event)),
+        display_highlights=_event_chip_specs(event),
     )
 
 
@@ -2388,6 +2479,23 @@ def _render_budgeted_html(
         key=lambda event: _distance_priority(event, distance_by_branch_code),
     )
     omitted_count = initially_omitted_count
+    # The caller caps candidates at MAX_EMAIL_EVENTS. Keep both representations
+    # only for this invocation, keyed by the complete displayed event (including
+    # image/CID overrides), rather than its source identity alone.
+    rendered_cards = {
+        (event, compact): _render_event_card(
+            event, duration_minutes=duration_minutes, compact=compact
+        )
+        for event in rendered_events
+        for compact in (False, True)
+    }
+    # URL eligibility is stable for this invocation. Reuse it when trying smaller
+    # event sets instead of rebuilding each URL for every footer and preheader.
+    calendar_link_ids = frozenset(
+        event_identity(event)
+        for event in rendered_events
+        if google_calendar_url(event, duration_minutes, compact=True)
+    )
 
     def render(full_ids: frozenset[str]) -> str:
         return _render_html(
@@ -2402,15 +2510,13 @@ def _render_budgeted_html(
             source_warnings=source_warnings,
             full_event_ids=full_ids,
             email_omitted_count=omitted_count,
+            rendered_cards=rendered_cards,
+            calendar_link_ids=calendar_link_ids,
         )
 
     def full_card_delta(event: Event) -> int:
-        return len(
-            _render_event_card(event, duration_minutes=duration_minutes).encode("utf-8")
-        ) - len(
-            _render_event_card(
-                event, duration_minutes=duration_minutes, compact=True
-            ).encode("utf-8")
+        return len(rendered_cards[(event, False)].encode("utf-8")) - len(
+            rendered_cards[(event, True)].encode("utf-8")
         )
 
     compact_html = render(frozenset())

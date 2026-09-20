@@ -22,6 +22,7 @@ if str(ROOT) not in sys.path:
 
 import aiohttp
 import pytest
+from homeassistant.components.calendar import CalendarEvent
 from homeassistant.components.smtp.helpers import _build_html_msg
 from homeassistant.config_entries import (
     SOURCE_RECONFIGURE,
@@ -43,6 +44,9 @@ from pytest_homeassistant_custom_component.typing import ClientSessionGenerator
 from custom_components.free_library_events import (
     _async_render_digest,
     async_migrate_entry,
+)
+from custom_components.free_library_events import (
+    async_setup_entry as native_setup_entry,
 )
 from custom_components.free_library_events.api import (
     MAX_RSS_REQUEST_CONCURRENCY,
@@ -394,6 +398,113 @@ async def test_options_flow_enables_and_rotates_webcal_feed(
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert entry.options[CONF_WEBCAL_TOKEN] == second_token
     assert entry.options["future_behavior"] == future_option["future_behavior"]
+
+
+@pytest.mark.parametrize("outcome", ("save", "cancel", "disable", "options", "profile"))
+async def test_webcal_rotation_survives_url_recovery(
+    hass: HomeAssistant, outcome: str
+) -> None:
+    old_token = "old-synthetic-recovery-token"
+    new_token = "new-synthetic-recovery-token"
+    original_options = {
+        **BEHAVIOR_INPUT,
+        CONF_PUBLISH_WEBCAL: True,
+        CONF_WEBCAL_TOKEN: old_token,
+        CONF_WEBCAL_NAME: "Library Events",
+        "future_behavior": {"enabled": True},
+    }
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Free Library Events",
+        unique_id=DOMAIN,
+        data=PROFILE_DATA,
+        options=original_options,
+        version=1,
+        minor_version=2,
+    )
+    entry.add_to_hass(hass)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "regenerate_webcal"}
+    )
+    retry_input = {
+        CONF_PUBLISH_WEBCAL: True,
+        CONF_WEBCAL_NAME: "Recovered Library Events",
+    }
+    with (
+        patch(
+            "custom_components.free_library_events.config_flow.token_urlsafe",
+            return_value=new_token,
+        ) as generate_token,
+        patch.object(
+            hass.config_entries, "async_reload", new_callable=AsyncMock
+        ) as async_reload,
+    ):
+        with patch(
+            "custom_components.free_library_events.webcal.get_url",
+            side_effect=NoURLAvailableError,
+        ):
+            result = await hass.config_entries.options.async_configure(
+                result["flow_id"], {}
+            )
+            assert result["step_id"] == "webcal"
+            assert result["errors"] == {"base": "webcal_url_unavailable"}
+            result = await hass.config_entries.options.async_configure(
+                result["flow_id"], retry_input
+            )
+            assert result["step_id"] == "webcal"
+            assert result["errors"] == {"base": "webcal_url_unavailable"}
+            assert old_token not in str(result)
+            assert new_token not in str(result)
+        assert entry.options == original_options
+        async_reload.assert_not_awaited()
+
+        if outcome == "options":
+            hass.config_entries.async_update_entry(
+                entry, options={**entry.options, CONF_FILTER_MODE: "Strict"}
+            )
+        elif outcome == "profile":
+            hass.config_entries.async_update_entry(
+                entry, data={**entry.data, CONF_CHILD_NAME: "Jordan"}
+            )
+        accepted_owner = (dict(entry.data), dict(entry.options))
+        hass.config.external_url = "https://ha.example.test"
+        if outcome == "disable":
+            retry_input[CONF_PUBLISH_WEBCAL] = False
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], retry_input
+        )
+
+        if outcome in ("options", "profile"):
+            assert result["type"] is FlowResultType.ABORT
+            assert result["reason"] == "options_changed"
+            assert (entry.data, entry.options) == accepted_owner
+            async_reload.assert_not_awaited()
+        elif outcome == "disable":
+            assert result["type"] is FlowResultType.CREATE_ENTRY
+            assert entry.options[CONF_PUBLISH_WEBCAL] is False
+            assert CONF_WEBCAL_TOKEN not in entry.options
+            assert async_reload.await_count == 1
+        else:
+            assert result["step_id"] == "webcal_url"
+            assert new_token in result["description_placeholders"]["webcal_url"]
+            assert old_token not in result["description_placeholders"]["webcal_url"]
+            assert entry.options == original_options
+            async_reload.assert_not_awaited()
+            if outcome == "cancel":
+                hass.config_entries.options.async_abort(result["flow_id"])
+                assert entry.options == original_options
+                async_reload.assert_not_awaited()
+            else:
+                result = await hass.config_entries.options.async_configure(
+                    result["flow_id"], {}
+                )
+                assert result["type"] is FlowResultType.CREATE_ENTRY
+                assert entry.options[CONF_WEBCAL_TOKEN] == new_token
+                assert entry.options[CONF_WEBCAL_NAME] == retry_input[CONF_WEBCAL_NAME]
+                assert async_reload.await_count == 1
+        generate_token.assert_called_once_with(32)
+        assert entry.options["future_behavior"] == {"enabled": True}
 
 
 async def test_webcal_preview_rejects_competing_options_update(
@@ -1197,15 +1308,26 @@ async def test_status_publishes_each_consecutive_failure_attempt(
         assert await hass.config_entries.async_unload(entry.entry_id)
 
 
-@pytest.mark.parametrize("stage", ("first_refresh", "platforms"))
+@pytest.mark.parametrize(
+    ("stage", "rollback_error"),
+    (
+        ("first_refresh", None),
+        ("platforms", None),
+        ("platforms", RuntimeError("rollback failed")),
+        ("platforms", asyncio.CancelledError("rollback cancelled")),
+    ),
+)
 async def test_cancelled_setup_releases_runtime_and_platforms_before_retry(
-    hass: HomeAssistant, stage: str
+    hass: HomeAssistant, stage: str, rollback_error: BaseException | None
 ) -> None:
     entry = _entry()
     entry.add_to_hass(hass)
     setup_started = asyncio.Event()
     release_setup = asyncio.Event()
     forward_platforms = hass.config_entries.async_forward_entry_setups
+    unload_platforms = hass.config_entries.async_unload_platforms
+    forwarding_errors: list[asyncio.CancelledError] = []
+    setup_errors: list[BaseException] = []
 
     async def fetch_feed(_branch, age_category):
         if stage == "first_refresh":
@@ -1216,36 +1338,71 @@ async def test_cancelled_setup_releases_runtime_and_platforms_before_retry(
     async def forward_then_wait(config_entry, platforms):
         await forward_platforms(config_entry, platforms)
         if stage == "platforms":
+            # Shared Core components have finished loading. Cancel this entry's
+            # acquired platforms, not Core's cached global component setup.
             setup_started.set()
-            await release_setup.wait()
+            try:
+                await release_setup.wait()
+            except asyncio.CancelledError as err:
+                forwarding_errors.append(err)
+                raise
 
-    with (
-        patch(
-            "custom_components.free_library_events.api.LibraryClient.async_fetch_feed",
-            side_effect=fetch_feed,
-        ),
-        patch.object(
-            hass.config_entries,
-            "async_forward_entry_setups",
-            side_effect=forward_then_wait,
-        ),
-    ):
-        setup_task = asyncio.create_task(
-            hass.config_entries.async_setup(entry.entry_id)
-        )
+    async def unload_then_fail(*args):
+        result = await unload_platforms(*args)
+        if rollback_error is not None:
+            raise rollback_error
+        return result
+
+    async def record_setup_failure(*args):
         try:
-            await setup_started.wait()
-            coordinator = entry.runtime_data
-            setup_task.cancel()
-            with pytest.raises(asyncio.CancelledError):
-                await setup_task
-        finally:
-            release_setup.set()
-            if not setup_task.done():
+            return await native_setup_entry(*args)
+        except (Exception, asyncio.CancelledError) as err:
+            setup_errors.append(err)
+            raise
+
+    with patch(
+        "custom_components.free_library_events.api.LibraryClient.async_fetch_feed",
+        side_effect=fetch_feed,
+    ):
+        with (
+            patch.object(
+                hass.config_entries,
+                "async_forward_entry_setups",
+                side_effect=forward_then_wait,
+            ),
+            patch.object(
+                hass.config_entries, "async_unload_platforms", unload_then_fail
+            ),
+            patch(
+                "custom_components.free_library_events.async_setup_entry",
+                record_setup_failure,
+            ),
+        ):
+            setup_task = asyncio.create_task(
+                hass.config_entries.async_setup(entry.entry_id)
+            )
+            try:
+                await setup_started.wait()
+                coordinator = entry.runtime_data
                 setup_task.cancel()
-            await asyncio.gather(setup_task, return_exceptions=True)
+                with pytest.raises(asyncio.CancelledError):
+                    await setup_task
+            finally:
+                release_setup.set()
+                if not setup_task.done():
+                    setup_task.cancel()
+                await asyncio.gather(setup_task, return_exceptions=True)
 
         assert entry.state is ConfigEntryState.SETUP_ERROR
+        assert len(setup_errors) == 1
+        assert setup_errors[0] is not rollback_error
+        if stage == "platforms":
+            assert len(forwarding_errors) == 1
+            assert setup_errors[0] is forwarding_errors[0]
+            assert all(
+                entry.entry_id not in component._platforms
+                for component in hass.data["entity_components"].values()
+            )
         assert coordinator._shutdown_requested is True
         assert not coordinator._listeners
         assert not coordinator._attempt_listeners
@@ -1261,36 +1418,78 @@ async def test_cancelled_setup_releases_runtime_and_platforms_before_retry(
         assert await hass.config_entries.async_unload(entry.entry_id)
 
 
+@pytest.mark.parametrize(
+    "rollback_error",
+    (
+        None,
+        RuntimeError("rollback failed"),
+        asyncio.CancelledError("rollback cancelled"),
+    ),
+)
 async def test_failed_platform_forwarding_releases_entities_before_retry(
     hass: HomeAssistant,
+    rollback_error: BaseException | None,
 ) -> None:
     entry = _entry()
     entry.add_to_hass(hass)
     forward_platforms = hass.config_entries.async_forward_entry_setups
+    unload_platforms = hass.config_entries.async_unload_platforms
+    forwarding_error = RuntimeError("platform forwarding failed")
+    setup_errors: list[BaseException] = []
 
     async def forward_then_fail(config_entry, platforms):
         await forward_platforms(config_entry, platforms)
-        raise RuntimeError("platform forwarding failed")
+        raise forwarding_error
+
+    async def unload_then_fail(*args):
+        result = await unload_platforms(*args)
+        if rollback_error is not None:
+            raise rollback_error
+        return result
+
+    async def record_setup_failure(*args):
+        try:
+            return await native_setup_entry(*args)
+        except (Exception, asyncio.CancelledError) as err:
+            setup_errors.append(err)
+            raise
 
     with patch(
         "custom_components.free_library_events.api.LibraryClient.async_fetch_feed",
         side_effect=lambda _branch, age_category: _empty_feed(age_category),
     ):
-        with patch.object(
-            hass.config_entries,
-            "async_forward_entry_setups",
-            side_effect=forward_then_fail,
+        with (
+            patch.object(
+                hass.config_entries,
+                "async_forward_entry_setups",
+                side_effect=forward_then_fail,
+            ),
+            patch.object(
+                hass.config_entries, "async_unload_platforms", unload_then_fail
+            ),
+            patch(
+                "custom_components.free_library_events.async_setup_entry",
+                record_setup_failure,
+            ),
         ):
             assert not await hass.config_entries.async_setup(entry.entry_id)
         coordinator = entry.runtime_data
         assert entry.state is ConfigEntryState.SETUP_ERROR
+        assert len(setup_errors) == 1
+        assert setup_errors[0] is forwarding_error
+        assert all(
+            entry.entry_id not in component._platforms
+            for component in hass.data["entity_components"].values()
+        )
         assert coordinator._shutdown_requested is True
         assert not coordinator._listeners
         assert not coordinator._attempt_listeners
         assert coordinator._unsub_refresh is None
+        assert coordinator._refresh_completion is None
 
         assert await hass.config_entries.async_reload(entry.entry_id)
         await hass.async_block_till_done()
+        assert entry.state is ConfigEntryState.LOADED
         assert entry.runtime_data is not coordinator
         assert len(entry.runtime_data._listeners) == 3
         assert len(entry.runtime_data._attempt_listeners) == 1
@@ -1880,7 +2079,138 @@ def test_stored_cid_images_match_home_assistant_smtp_mime_contract(
         remove_stored_image_run(bundle.run_directory)
 
 
-def test_calendar_keeps_recurring_series_occurrences_distinct() -> None:
+@pytest.fixture
+def selection_calendar() -> LibraryCalendar:
+    """Three real source events, including one with a fallback duration."""
+
+    events = tuple(
+        Event(
+            title=f"Storytime {hour}",
+            event_date=date(2026, 7, 22),
+            start_time=time(hour),
+            description="Stories and songs.",
+            link=f"https://example.test/events/storytime-{hour}",
+            image_url="",
+            branch=BRANCHES["IND"],
+            age_categories=("Baby",),
+            end_at=datetime.combine(date(2026, 7, 22), time(hour + 1))
+            if hour != 12
+            else None,
+        )
+        for hour in (10, 11, 12)
+    )
+    calendar = LibraryCalendar.__new__(LibraryCalendar)
+    calendar._entry = types.SimpleNamespace(
+        data=USER_INPUT | {CONF_BIRTH_DATE: "2025-11-15"}, options={}
+    )
+    calendar.coordinator = types.SimpleNamespace(
+        data=types.SimpleNamespace(events=events)
+    )
+    return calendar
+
+
+@pytest.mark.parametrize(
+    ("hour", "expected_hour"), ((9, 10), (11, 11), (12, 12), (13, None))
+)
+def test_calendar_constructs_only_the_current_or_next_native_event(
+    selection_calendar: LibraryCalendar, hour: int, expected_hour: int | None
+) -> None:
+    with (
+        patch(
+            "custom_components.free_library_events.calendar.dt_util.now",
+            return_value=datetime(2026, 7, 22, hour, tzinfo=LOCAL_TIME_ZONE),
+        ),
+        patch(
+            "custom_components.free_library_events.calendar.CalendarEvent",
+            wraps=CalendarEvent,
+        ) as construct,
+    ):
+        event = selection_calendar.event
+
+    assert construct.call_count == (0 if expected_hour is None else 1)
+    if expected_hour is None:
+        assert event is None
+    else:
+        assert isinstance(event, CalendarEvent)
+        assert event.start == datetime(
+            2026, 7, 22, expected_hour, tzinfo=LOCAL_TIME_ZONE
+        )
+        assert event.end == datetime(
+            2026, 7, 22, expected_hour + 1, tzinfo=LOCAL_TIME_ZONE
+        )
+        assert event.uid == event_identity(
+            selection_calendar.coordinator.data.events[expected_hour - 10]
+        )
+        if expected_hour == 12:
+            assert "60 minutes as a fallback" in event.description
+
+
+@pytest.mark.parametrize(
+    ("start_hour", "end_hour", "expected_hours"),
+    (
+        (9, 10, []),
+        (10, 11, [10]),
+        (11, 12, [11]),
+        (12, 14, [12]),
+        (13, 14, []),
+        (9, 14, [10, 11, 12]),
+    ),
+)
+async def test_calendar_converts_only_events_overlapping_the_requested_range(
+    hass: HomeAssistant,
+    selection_calendar: LibraryCalendar,
+    start_hour: int,
+    end_hour: int,
+    expected_hours: list[int],
+) -> None:
+    with patch(
+        "custom_components.free_library_events.calendar.CalendarEvent",
+        wraps=CalendarEvent,
+    ) as construct:
+        events = await selection_calendar.async_get_events(
+            hass,
+            datetime(2026, 7, 22, start_hour, tzinfo=LOCAL_TIME_ZONE).astimezone(UTC),
+            datetime(2026, 7, 22, end_hour, tzinfo=LOCAL_TIME_ZONE).astimezone(UTC),
+        )
+
+    assert construct.call_count == len(expected_hours)
+    assert [event.start.hour for event in events] == expected_hours
+    assert all(isinstance(event, CalendarEvent) for event in events)
+
+
+async def test_calendar_preserves_source_order_and_handles_missing_snapshot(
+    hass: HomeAssistant, selection_calendar: LibraryCalendar
+) -> None:
+    selection_calendar.coordinator.data.events = tuple(
+        reversed(selection_calendar.coordinator.data.events)
+    )
+    with patch(
+        "custom_components.free_library_events.calendar.dt_util.now",
+        return_value=datetime(2026, 7, 22, 9, tzinfo=LOCAL_TIME_ZONE),
+    ):
+        assert selection_calendar.event.start.hour == 12
+    events = await selection_calendar.async_get_events(
+        hass, datetime(2026, 7, 1, tzinfo=UTC), datetime(2026, 8, 1, tzinfo=UTC)
+    )
+    assert [event.start.hour for event in events] == [12, 11, 10]
+    selection_calendar.coordinator.data = None
+    with patch(
+        "custom_components.free_library_events.calendar.CalendarEvent",
+        wraps=CalendarEvent,
+    ) as construct:
+        assert selection_calendar.event is None
+        assert (
+            await selection_calendar.async_get_events(
+                hass, datetime(2026, 7, 1, tzinfo=UTC), datetime(2026, 8, 1, tzinfo=UTC)
+            )
+            == []
+        )
+    construct.assert_not_called()
+
+
+async def test_calendar_keeps_recurring_series_occurrences_distinct(
+    hass: HomeAssistant,
+) -> None:
     first = Event(
         title="Weekly Storytime",
         event_date=date(2026, 7, 20),
@@ -1911,7 +2241,9 @@ def test_calendar_keeps_recurring_series_occurrences_distinct() -> None:
     calendar._entry = entry
     calendar.coordinator = coordinator
 
-    rendered = calendar._calendar_events()
+    rendered = await calendar.async_get_events(
+        hass, datetime(2026, 7, 1, tzinfo=UTC), datetime(2026, 8, 1, tzinfo=UTC)
+    )
 
     assert [item.uid for item in rendered] == [
         event_identity(first),
@@ -1953,7 +2285,8 @@ def test_calendar_keeps_recurring_series_occurrences_distinct() -> None:
         ),
     ),
 )
-def test_calendar_and_webcal_preserve_publisher_context_without_changing_location(
+async def test_calendar_and_webcal_preserve_publisher_context_without_changing_location(
+    hass: HomeAssistant,
     venue: str,
     modality: Literal["in_person", "online", "hybrid"],
     categories: tuple[str, ...],
@@ -1980,7 +2313,9 @@ def test_calendar_and_webcal_preserve_publisher_context_without_changing_locatio
     calendar.coordinator = types.SimpleNamespace(
         data=types.SimpleNamespace(events=(event,))
     )
-    ha_items = calendar._calendar_events()
+    ha_items = await calendar.async_get_events(
+        hass, datetime(2026, 7, 1, tzinfo=UTC), datetime(2026, 8, 1, tzinfo=UTC)
+    )
     rendered = render_icalendar(
         items,
         fetched_at=datetime(2026, 7, 19, 16, 15, tzinfo=UTC),

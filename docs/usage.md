@@ -34,7 +34,7 @@ Event times use Philadelphia's `America/New_York` time zone. A recognized source
 
 When the publisher gives weather-dependent venues, the calendar labels the location as conditional and preserves the alternatives and hosting library in its description. Directions are omitted; check the official listing before traveling.
 
-The digest's Google Calendar links open a prefilled event form; an event is copied into that calendar only after you save it. That copy does not track later source updates. Use the subscription below to let a calendar app reread the integration's cache.
+The digest's Google Calendar links open a prefilled event form; an event is copied into that calendar only after you save it. That copy does not track later source updates. A creation link is omitted if its official listing and required context cannot fit the link's size limit; the official listing remains available. Use the subscription below to let a calendar app reread the integration's cache.
 
 ## Subscribe from another calendar app
 
@@ -135,7 +135,7 @@ Pass the returned list as a whole; it already contains the media-source referenc
 
 Images are stored in a managed `.free_library_events_email` directory under Local Media. If a directory with ID `local` exists, it is used; otherwise the first configured media-directory ID in alphabetical order is used. With no Local Media configured, the integration falls back to its directory under Home Assistant's `www`, and the SMTP `attachments` list is empty. Use Local Media for the SMTP example; unlike `www`, it protects served files with Home Assistant authentication.
 
-Send immediately after rendering. Image cleanup is scheduled for one hour later, and integration startup removes its managed image runs. `metadata.image_expires_at` reports the scheduled expiry when files were stored; it is not a delivery guarantee.
+Send immediately after rendering. Image cleanup is scheduled for one hour later, and integration startup attempts to remove its managed image runs. Filesystem errors can delay cleanup. `metadata.image_expires_at` reports the scheduled expiry when files were stored; it is not a delivery guarantee.
 
 At most 12 unique images are embedded, with limits of 3 MiB per image and 15 MiB in total. GIF, JPEG, PNG, and WebP are supported. Some download failures or limits leave a remote publisher image in the HTML; unsafe or invalid images are omitted. A successful digest does not guarantee that every image embedded or that the mail client displays it. With embedding off, supported images remain remote links that a mail client may fetch.
 
@@ -159,7 +159,7 @@ Use these metadata groups according to the decision you need to make:
 
 With image embedding requested, metadata also includes `embedded_image_count`, `smtp_attachment_count`, `image_download_count`, `image_download_failure_count`, `image_download_failure_examples`, and `image_expires_at`. Compare embedded and attachment counts if SMTP images are missing; they can differ when Local Media is unavailable.
 
-The email is limited to 80,000 HTML bytes and at most 100 events. It may shorten descriptions, compact cards, or omit matched events, with the omission disclosed in the body. When space is constrained, distance from Home Assistant's configured location helps prioritize branches locally. The subject's count and `included_count` still describe all matches; the calendars are not reduced by the email budget.
+The email is limited to 80,000 HTML bytes and at most 100 events. It may shorten descriptions, compact cards, or omit matched events, with the omission disclosed in the body. Highlights use the complete source description, so shortening the excerpt preserves recognized registration and weather warnings. When space is constrained, distance from Home Assistant's configured location helps prioritize branches locally. The subject's count and `included_count` still describe all matches; the calendars are not reduced by the email budget.
 
 ## Check coverage and recover
 
