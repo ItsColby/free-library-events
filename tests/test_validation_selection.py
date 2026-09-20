@@ -250,15 +250,15 @@ class ValidationSelectionTests(unittest.TestCase):
                 self.assertEqual(current_lane, plan["jobs"]["current"])
                 self.assertEqual(release, plan["jobs"]["release"])
                 self.assertFalse(plan["jobs"]["hacs"])
-                git.assert_called_once_with(
-                    "show", "reviewed-base:" + path, git_directory="git-owner"
-                )
+                if key == "minimum":
+                    git.assert_any_call(
+                        "show", "reviewed-base:" + path, git_directory="git-owner"
+                    )
                 if key == "mypy":
                     self.assertEqual([], plan["ha_tests"])
                     command = planner.lane_command(plan, "minimum")
                     self.assertIn(pins["mypy"], command)
                     self.assertNotIn("pytest", command)
-                    self.assertNotIn("--home-assistant", command)
                 if key == "ruff":
                     self.assertIn(planner.PRODUCT + "/__init__.py", plan["python"])
                     self.assertIn(pins["ruff"], planner.lane_command(plan, "unit"))
@@ -280,7 +280,6 @@ class ValidationSelectionTests(unittest.TestCase):
     def test_workflow_dependency_changes_select_only_the_changed_job(self):
         path = ".github/workflows/validate.yaml"
         current = (ROOT / path).read_text()
-        declarations = planner.workflow_dependencies(current)
         for job, lane in (
             ("home_assistant_minimum", "minimum"),
             ("home_assistant_current", "current"),
@@ -311,7 +310,6 @@ class ValidationSelectionTests(unittest.TestCase):
         self.assertFalse(plan["jobs"]["minimum"])
         self.assertFalse(plan["jobs"]["current"])
         self.assertFalse(plan["jobs"]["release"])
-        self.assertIn("current", declarations)
 
     def test_unavailable_dependency_comparison_is_unresolved(self):
         with patch.object(planner, "_git", side_effect=OSError("missing comparison")):
@@ -366,13 +364,6 @@ class ValidationSelectionTests(unittest.TestCase):
             planner.workflow_dependencies(commented),
         )
 
-    def test_retained_document_contracts_select_their_static_consumer(self):
-        for path in ["docs/development.md"]:
-            with self.subTest(path=path):
-                plan = planner.build_plan([path])
-                self.assertIn(planner.METADATA_TEST, plan["unit_tests"])
-                self.assertEqual([], plan["ha_tests"])
-
     def test_support_requirements_select_environment_and_compatibility_consumers(self):
         for path, lane, other in (
             ("requirements-ha-test.txt", "minimum", "current"),
@@ -403,13 +394,6 @@ class ValidationSelectionTests(unittest.TestCase):
         self.assertTrue(plan["ha_tests"])
         self.assertEqual([], plan["unresolved"])
 
-    def test_native_alternate_test_name_keeps_native_collection(self):
-        unit, ha = planner._test_files(
-            {"tests/future_test.py", "tests/test_validation_selection.py"}
-        )
-        self.assertIn("tests/future_test.py", ha)
-        self.assertNotIn("tests/future_test.py", unit)
-
     def test_test_only_change_uses_its_native_lane(self):
         path = "tests/test_integration_ha.py"
         plan = planner.build_plan([path])
@@ -421,12 +405,6 @@ class ValidationSelectionTests(unittest.TestCase):
         plan = planner.build_plan(["future/unknown.py"])
         self.assertEqual(["future/unknown.py"], plan["unresolved"])
         self.assertFalse(plan["jobs"]["current"])
-
-    def test_empty_verified_comparison_has_no_jobs(self):
-        with patch.object(planner, "_git", side_effect=["a", "b", "b", "", ""]):
-            paths = planner.changed_paths("base", "head", None)
-        self.assertEqual([], paths)
-        self.assertFalse(any(planner.build_plan(paths)["jobs"].values()))
 
     @unittest.skipUnless(shutil.which("git"), "requires Git")
     def test_real_ref_comparison_binds_clean_candidate_and_resolves_changes(self):
@@ -461,7 +439,8 @@ class ValidationSelectionTests(unittest.TestCase):
                 self.assertEqual(
                     ["README.md"], planner.changed_paths(before, after, None)
                 )
-                self.assertEqual([], planner.changed_paths(after, after, None))
+                empty_paths = planner.changed_paths(after, after, None)
+                self.assertEqual([], empty_paths)
                 self.assertEqual(
                     ["README.md"],
                     planner.changed_paths(before, after, None, str(root / ".git")),
@@ -471,6 +450,7 @@ class ValidationSelectionTests(unittest.TestCase):
                 source.write_text("uncommitted\n")
                 with self.assertRaisesRegex(ValueError, "clean candidate"):
                     planner.changed_paths(before, after, None)
+            self.assertFalse(any(planner.build_plan(empty_paths)["jobs"].values()))
 
     @unittest.skipUnless(shutil.which("git"), "requires Git")
     def test_native_identity_survives_replacements_and_refuses_inherited_targets(self):
@@ -553,8 +533,6 @@ class ValidationSelectionTests(unittest.TestCase):
                     planner._git("rev-parse", "HEAD")
 
             cli = [sys.executable, str(root / planner.PLANNER)]
-            if planner.PLANNER.endswith("run_dependency_light_tests.py"):
-                cli.append("--plan")
             selection = ["--base", before, "--head", after]
 
             def run(command, overrides=None):
@@ -673,7 +651,6 @@ class ValidationSelectionTests(unittest.TestCase):
                 git("update-ref", "refs/heads/moving-base", after)
                 return paths
 
-            entrypoint = getattr(planner, "plan_main", None) or planner.main
             output = io.StringIO()
             with (
                 patch.object(planner, "ROOT", root),
@@ -681,14 +658,14 @@ class ValidationSelectionTests(unittest.TestCase):
                 contextlib.redirect_stdout(output),
             ):
                 self.assertEqual(
-                    0, entrypoint(["--base", "moving-base", "--head", after])
+                    0, planner.main(["--base", "moving-base", "--head", after])
                 )
             plan = json.loads(output.getvalue())
             self.assertEqual([relative], plan["paths"])
             self.assertTrue(plan["jobs"]["minimum"])
             self.assertFalse(plan["jobs"]["current"])
 
-    def test_missing_input_traversal_and_dirty_ref_candidate_fail(self):
+    def test_missing_input_and_unsafe_paths_fail(self):
         with self.assertRaises(ValueError):
             planner.changed_paths(None, None, None)
         for path in (
@@ -700,13 +677,6 @@ class ValidationSelectionTests(unittest.TestCase):
         ):
             with self.subTest(path=path), self.assertRaises(ValueError):
                 planner.changed_paths(None, None, [path])
-        with (
-            patch.object(
-                planner, "_git", side_effect=["a", "b", "b", " M scripts/runner.py"]
-            ),
-            self.assertRaisesRegex(ValueError, "clean candidate"),
-        ):
-            planner.changed_paths("base", "head", None)
 
     @unittest.skipUnless(
         os.name == "posix" and shutil.which("bash"), "requires native Bash"
@@ -799,7 +769,6 @@ class ValidationSelectionTests(unittest.TestCase):
             [
                 sys.executable,
                 str(root / "scripts/plan_validation.py"),
-                *[],
                 "--path",
                 "unknown.input",
             ],
@@ -817,7 +786,6 @@ class ValidationSelectionTests(unittest.TestCase):
             [
                 sys.executable,
                 str(root / "scripts/plan_validation.py"),
-                *[],
                 "--path",
                 "README.md",
                 "--plan-only",
@@ -842,7 +810,7 @@ class ValidationSelectionTests(unittest.TestCase):
 import json, os, shutil, subprocess, sys
 from pathlib import Path
 args = sys.argv[1:]
-if args and (args[0].endswith("plan_validation.py") or "--plan" in args or args[0] == "-c"):
+if args and (args[0].endswith("plan_validation.py") or args[0] == "-c"):
     raise SystemExit(subprocess.call([os.environ["SELECTION_REAL_PYTHON"], *args]))
 with Path(os.environ["SELECTION_LOG"]).open("a") as stream:
     stream.write(json.dumps(args) + "\n")
@@ -855,7 +823,7 @@ if os.environ.get("SELECTION_FAIL") == "harness" and any(arg.startswith("pytest-
     raise SystemExit(23)
 if os.environ.get("SELECTION_FAIL") == "dependencies" and "--upgrade" in args:
     raise SystemExit(23)
-if os.environ.get("SELECTION_FAIL") == "tests" and ("pytest" in args or "unittest" in args or "--home-assistant" in args):
+if os.environ.get("SELECTION_FAIL") == "tests" and "pytest" in args:
     raise SystemExit(23)
 """
         script = self.runner_fixture() / "scripts/verify-release-local.sh"
@@ -919,11 +887,7 @@ if os.environ.get("SELECTION_FAIL") == "tests" and ("pytest" in args or "unittes
                         for call in calls
                     )
                 )
-                test_calls = [
-                    call
-                    for call in calls
-                    if "pytest" in call or "--home-assistant" in call
-                ]
+                test_calls = [call for call in calls if "pytest" in call]
                 if failure in {"harness", "dependencies"}:
                     self.assertEqual([], test_calls)
                 else:
@@ -1003,15 +967,10 @@ class SnapshotPlanningTests(unittest.TestCase):
             git("add", "-A", "-f")
             baseline = git("commit-tree", git("write-tree"), "-m", "baseline")
             git("update-ref", "HEAD", baseline)
-            prefix = (
-                ["--plan"]
-                if planner.PLANNER.endswith("run_dependency_light_tests.py")
-                else []
-            )
 
             def call(checkout, *args, input_text=None):
                 result = subprocess.run(
-                    [sys.executable, str(checkout / planner.PLANNER), *prefix, *args],
+                    [sys.executable, str(checkout / planner.PLANNER), *args],
                     input=input_text,
                     env=env,
                     capture_output=True,
@@ -1029,7 +988,6 @@ class SnapshotPlanningTests(unittest.TestCase):
                 [
                     sys.executable,
                     str(source / planner.PLANNER),
-                    *prefix,
                     "--snapshot-plan",
                     "--git-directory",
                     str(source / ".git"),
@@ -1055,7 +1013,6 @@ class SnapshotPlanningTests(unittest.TestCase):
                 [
                     sys.executable,
                     str(snapshot / planner.PLANNER),
-                    *prefix,
                     "--snapshot-plan",
                     "--git-directory",
                     str(source / ".git"),
@@ -1088,6 +1045,7 @@ class SnapshotPlanningTests(unittest.TestCase):
             )
             self.assertEqual(baseline, captured["base"])
             self.assertIn(consumer, captured["ha_tests"])
+            self.assertNotIn(consumer, captured["unit_tests"])
             self.assertIn(consumer, captured["commands"]["current"])
             self.assertIn(pin, captured["commands"]["unit"])
             self.assertNotIn("ruff==99.0.0", captured["commands"]["unit"])

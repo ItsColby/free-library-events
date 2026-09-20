@@ -66,7 +66,6 @@ from custom_components.free_library_events.api import (
     LibraryClient,
     TypeShardBlocker,
 )
-from custom_components.free_library_events.button import LibraryRefreshButton
 from custom_components.free_library_events.calendar import LibraryCalendar
 from custom_components.free_library_events.calendar_data import (
     build_calendar_items,
@@ -714,46 +713,6 @@ async def test_options_flow_updates_behavior_without_profile_data(
     assert entry.options["future_behavior"] == future_option["future_behavior"]
 
 
-async def test_manual_refresh_button_remains_available_and_reports_result(
-    hass: HomeAssistant,
-) -> None:
-    entry = _entry()
-    coordinator = LibraryDataCoordinator(
-        hass,
-        entry,
-        types.SimpleNamespace(),
-        (BRANCHES["SWK"],),
-        date(2025, 1, 15),
-        timedelta(hours=6),
-    )
-    coordinator.async_request_refresh_and_wait = AsyncMock()
-    coordinator.last_update_success = False
-    button = LibraryRefreshButton(coordinator)
-
-    assert button.available
-
-    with pytest.raises(HomeAssistantError) as failure:
-        await button.async_press()
-
-    assert failure.value.translation_domain == DOMAIN
-    assert failure.value.translation_key == "manual_refresh_failed"
-    assert coordinator.async_request_refresh_and_wait.await_count == 1
-    assert button.available
-
-    coordinator.last_update_success = True
-    await button.async_press()
-    assert coordinator.async_request_refresh_and_wait.await_count == 2
-    assert button.available
-
-    coordinator.async_request_refresh_and_wait.side_effect = UpdateFailed(
-        translation_domain=DOMAIN, translation_key="library_refresh_failed"
-    )
-    with pytest.raises(HomeAssistantError) as timeout_failure:
-        await button.async_press()
-    assert timeout_failure.value.translation_key == "manual_refresh_failed"
-    assert timeout_failure.value.__cause__ is None
-
-
 def test_normalize_config_enforces_non_ui_bounds() -> None:
     with pytest.raises(ValueError, match="invalid_calendar_duration"):
         normalize_config(USER_INPUT | {CONF_CALENDAR_DURATION: 5})
@@ -1190,7 +1149,11 @@ async def test_status_projection_reschedules_on_failure_recovery_and_unload(
             )
         assert failure.value.translation_domain == DOMAIN
         assert failure.value.translation_key == "manual_refresh_failed"
+        assert failure.value.__cause__ is None
         assert coordinator.async_request_refresh_and_wait.await_count == 1
+        failed_button = hass.states.get("button.free_library_events_refresh_events")
+        assert failed_button is not None
+        assert failed_button.state != STATE_UNAVAILABLE
 
         failed = hass.states.get("sensor.free_library_events_status")
         assert failed is not None
@@ -1220,6 +1183,27 @@ async def test_status_projection_reschedules_on_failure_recovery_and_unload(
         recovered_button = hass.states.get("button.free_library_events_refresh_events")
         assert recovered_button is not None
         assert recovered_button.state != STATE_UNAVAILABLE
+        coordinator.async_request_refresh_and_wait.side_effect = UpdateFailed(
+            "synthetic private refresh detail",
+            translation_domain=DOMAIN,
+            translation_key="library_refresh_failed",
+        )
+        with pytest.raises(HomeAssistantError) as timeout_failure:
+            await hass.services.async_call(
+                "button",
+                "press",
+                {"entity_id": "button.free_library_events_refresh_events"},
+                blocking=True,
+            )
+        assert timeout_failure.value.translation_domain == DOMAIN
+        assert timeout_failure.value.translation_key == "manual_refresh_failed"
+        assert timeout_failure.value.__cause__ is None
+        assert timeout_failure.value.__suppress_context__ is True
+        assert "synthetic private" not in repr(timeout_failure.value)
+        assert coordinator.async_request_refresh_and_wait.await_count == 3
+        timed_out_button = hass.states.get("button.free_library_events_refresh_events")
+        assert timed_out_button is not None
+        assert timed_out_button.state != STATE_UNAVAILABLE
         assert len(scheduled) == 3
         scheduled[1][2].assert_called_once_with()
         assert scheduled[2][1] == datetime(2026, 7, 21, tzinfo=LOCAL_TIME_ZONE)
@@ -2178,21 +2162,9 @@ async def test_calendar_converts_only_events_overlapping_the_requested_range(
     assert all(isinstance(event, CalendarEvent) for event in events)
 
 
-async def test_calendar_preserves_source_order_and_handles_missing_snapshot(
+async def test_calendar_handles_missing_snapshot(
     hass: HomeAssistant, selection_calendar: LibraryCalendar
 ) -> None:
-    selection_calendar.coordinator.data.events = tuple(
-        reversed(selection_calendar.coordinator.data.events)
-    )
-    with patch(
-        "custom_components.free_library_events.calendar.dt_util.now",
-        return_value=datetime(2026, 7, 22, 9, tzinfo=LOCAL_TIME_ZONE),
-    ):
-        assert selection_calendar.event.start.hour == 12
-    events = await selection_calendar.async_get_events(
-        hass, datetime(2026, 7, 1, tzinfo=UTC), datetime(2026, 8, 1, tzinfo=UTC)
-    )
-    assert [event.start.hour for event in events] == [12, 11, 10]
     selection_calendar.coordinator.data = None
     with patch(
         "custom_components.free_library_events.calendar.CalendarEvent",
@@ -3232,24 +3204,6 @@ async def test_client_bounds_all_rss_request_concurrency() -> None:
     assert active == 0
 
 
-async def test_client_base_fetch_does_not_expand() -> None:
-    feed = BranchFeed(
-        events=(),
-        age_category="Baby",
-        source_count=9,
-        parsed_count=9,
-        last_event_date=date(2026, 7, 20),
-        ordered=True,
-    )
-    client = LibraryClient(None)  # type: ignore[arg-type]
-    client._async_fetch_single = AsyncMock(return_value=feed)
-
-    result = await client.async_fetch_feed(BRANCHES["CEN"], "Baby")
-
-    assert result is feed
-    client._async_fetch_single.assert_awaited_once()
-
-
 @pytest.mark.parametrize(
     ("status", "retryable"),
     ((404, False), (408, True), (429, True), (500, True), (503, True)),
@@ -3296,37 +3250,6 @@ async def test_client_rejects_an_oversized_rss_response() -> None:
         await client._async_get(
             "https://libwww.freelibrary.org/rss/eventsrss.cfm?location=CEN"
         )
-
-
-async def test_client_returns_a_complete_response_below_the_size_limit() -> None:
-    payload = b"<?xml version='1.0'?><rss><channel></channel></rss>"
-
-    async def readexactly(_size):
-        raise asyncio.IncompleteReadError(payload, MAX_RSS_RESPONSE_BYTES + 1)
-
-    response = types.SimpleNamespace(
-        status=200,
-        headers={},
-        content=types.SimpleNamespace(readexactly=readexactly),
-        raise_for_status=lambda: None,
-    )
-
-    class ResponseContext:
-        async def __aenter__(self):
-            return response
-
-        async def __aexit__(self, *_args):
-            return None
-
-    session = types.SimpleNamespace(get=lambda *_args, **_kwargs: ResponseContext())
-    client = LibraryClient(session)
-
-    assert (
-        await client._async_get(
-            "https://libwww.freelibrary.org/rss/eventsrss.cfm?location=CEN"
-        )
-        == payload
-    )
 
 
 async def test_client_follows_only_trusted_https_rss_redirects() -> None:

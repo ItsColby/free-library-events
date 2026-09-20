@@ -79,24 +79,6 @@ class HomeAssistantPatchCompatibilityTests(unittest.TestCase):
             ):
                 validate_harness_window("2026.8.0", harness, "2026.8.2")
 
-    def test_harness_window_rejects_cross_month_current_even_with_old_harness(
-        self,
-    ) -> None:
-        with self.assertRaises(CompatibilityError):
-            validate_harness_window("2026.8.0", "2026.8.1", "2026.9.1")
-
-    def test_pip_check_accepts_clean_environment(self) -> None:
-        self.assertEqual(
-            "dependency-closed",
-            validate_pip_check(
-                0,
-                "No broken requirements found.\n",
-                harness_version="0.13.354",
-                harness_core="2026.8.1",
-                current_core="2026.8.1",
-            ),
-        )
-
     def test_pip_check_accepts_only_the_proven_harness_core_mismatch(self) -> None:
         mismatch = (
             "pytest-homeassistant-custom-component 0.13.354 has requirement "

@@ -29,12 +29,6 @@ TOOL_TESTS = {
     "tests/test_validation_runner.py",
 }
 METADATA_TEST = "tests/test_metadata.py"
-EXTRA_DEPENDENCIES: dict[str, set[str]] = {
-    "tests/test_metadata.py": {
-        f"{PRODUCT}/{name}.py" for name in ("__init__", "coordinator", "sensor")
-    }
-    | {"docs/development.md"},
-}
 JOBS = ("unit", "minimum", "current", "release", "hacs")
 
 
@@ -196,7 +190,6 @@ def _imports(path: str, files: set[str]) -> set[str]:
             candidate = f"{PRODUCT}/{node.args[0].value}.py"
             if candidate in files:
                 result.add(candidate)
-    result.update(EXTRA_DEPENDENCIES.get(path, set()))
     return result
 
 

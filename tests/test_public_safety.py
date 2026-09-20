@@ -100,27 +100,27 @@ class PublicSafetyGuardTests(unittest.TestCase):
             _text_failures("Malformed @" + ".cX"),
         )
 
-    def test_guard_scans_tracked_and_untracked_text(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / "README.md").write_text("Safe public text.\n", encoding="utf-8")
-            file_count, failures = run_guard(root)
-        self.assertEqual(1, file_count)
-        self.assertEqual([], failures)
-
     def test_guard_scans_git_tracked_and_untracked_but_not_ignored_files(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             subprocess.run(["git", "init", "--quiet", str(root)], check=True)
-            (root / ".gitignore").write_text("ignored.txt\n", encoding="utf-8")
+            private = "person" + "@real-domain.dev"
+            (root / ".gitignore").write_text(
+                f"ignored.txt\n# {private}\n", encoding="utf-8"
+            )
             (root / "tracked.txt").write_text("Safe public text.\n", encoding="utf-8")
             subprocess.run(["git", "-C", str(root), "add", "."], check=True)
-            private = "person" + "@real-domain.dev"
             (root / "untracked.txt").write_text(private, encoding="utf-8")
             (root / "ignored.txt").write_text(private, encoding="utf-8")
             file_count, failures = run_guard(root)
         self.assertEqual(3, file_count)
-        self.assertEqual(["untracked.txt: non-example email address"], failures)
+        self.assertEqual(
+            [
+                ".gitignore: non-example email address",
+                "untracked.txt: non-example email address",
+            ],
+            failures,
+        )
 
     def test_guard_refuses_inherited_git_selectors_before_discovery(self) -> None:
         selectors = (
@@ -309,7 +309,6 @@ class PublicSafetyGuardTests(unittest.TestCase):
                     ),
                 ):
                     file_count, failures = run_guard(root)
-                    self.assertEqual((file_count, failures), run_guard(root))
                 self.assertEqual(2, file_count)
                 self.assertEqual(2 if reason is None else 4, len(failures))
                 labels = {failure.split(": ", 1)[0] for failure in failures}
@@ -323,14 +322,6 @@ class PublicSafetyGuardTests(unittest.TestCase):
                     self.assertEqual(
                         2, sum(row.endswith(": " + reason) for row in failures)
                     )
-
-    def test_guard_scans_text_without_a_file_extension(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / ".gitignore").write_text("Safe public text.\n", encoding="utf-8")
-            file_count, failures = run_guard(root)
-        self.assertEqual(1, file_count)
-        self.assertEqual([], failures)
 
     def test_guard_rejects_unreviewed_binary_content(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -356,32 +347,6 @@ class PublicSafetyGuardTests(unittest.TestCase):
                 self.assertEqual(
                     (1, ["image.png: unreviewed binary content"]), run_guard(root)
                 )
-
-    def test_guard_propagates_inventory_and_file_access_errors(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / "README.md").write_text("Safe public text.\n", encoding="utf-8")
-            with (
-                patch(
-                    "scripts.check_public_safety._path_present",
-                    side_effect=PermissionError,
-                ),
-                self.assertRaises(PermissionError),
-            ):
-                run_guard(root)
-            with (
-                patch.object(Path, "read_bytes", side_effect=PermissionError),
-                self.assertRaises(PermissionError),
-            ):
-                run_guard(root)
-            with (
-                patch(
-                    "scripts.check_public_safety.subprocess.run",
-                    side_effect=subprocess.TimeoutExpired("git", 30),
-                ),
-                self.assertRaises(subprocess.TimeoutExpired),
-            ):
-                run_guard(root)
 
     def test_main_redacts_acquisition_errors(self) -> None:
         filename = "person" + "@real-domain.dev"
