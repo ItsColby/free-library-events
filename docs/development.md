@@ -20,16 +20,20 @@ For a working edit, use `-ChangedPath scripts/verify-release-local.sh` instead o
 refs. On Linux, use `bash scripts/verify-release-local.sh affected container ""`
 with `--base <base-commit> --head HEAD`, or repeated `--path <relative-path>`;
 add `--plan-only` to inspect the JSON plan without snapshots or installations.
-Planning and container snapshot admission use an existing host Python 3.14
-(`python3.14`, an installed uv runtime, or `VALIDATION_PYTHON`). The public-safety
-guard's link policy runs before planning reads input sources and before snapshot
+The PowerShell `-PlanOnly` preview uses `python` from PATH, which must be Python
+3.14. Bash planning and container snapshot admission find an existing host
+Python 3.14 through `python3.14`, an installed uv runtime, or
+`VALIDATION_PYTHON`. The public-safety guard
+checks link policy before planning reads input sources and before snapshot
 copying. The planner, guard, and interpreter remain trusted executable tooling.
 Planning parses input source without importing the integration. Neither step
 downloads a runtime; HA execution keeps its isolated Python 3.14 lane.
-Explicit paths describe the complete change being accepted. The refs mode
-requires the checked-out candidate as its head; it does not include uncommitted
-edits. An empty verified comparison selects no jobs. Missing comparison input
-and unmapped changes fail with an unresolved applicability message.
+Explicit paths describe the complete change being accepted; they select checks,
+not the files read. Planning parses all Python sources under `custom_components`,
+`tests`, and `scripts`; container execution snapshots tracked and nonignored files.
+The refs mode requires a clean checkout with the candidate as its head and rejects
+uncommitted edits. An empty verified comparison selects no jobs. Missing
+comparison input and unmapped changes fail with an unresolved applicability message.
 
 The product-owned planner traces local Python imports and reviewed direct-file
 consumers. Changed tests run in their native collector; runtime changes include
