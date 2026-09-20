@@ -116,6 +116,12 @@ if [[ "$backend" == container ]]; then
   git -C "$repo_root" add --force --all
 fi
 
+if [[ "$mode" == affected && "$backend" == container ]]; then
+  planning_git_dir="$("${source_git[@]}" rev-parse --absolute-git-dir)"
+  affected_plan="$(printf '%s' "$affected_plan" |
+    "$validation_python" "$repo_root/scripts/plan_validation.py" --snapshot-plan --git-directory "$planning_git_dir")"
+fi
+
 python_image="docker.io/library/python@sha256:a7fb1e634c4a578f9e0bd6327f11a3cde11b7a9395f48e24360c0988bcc5c2bc"
 actionlint_image="docker.io/rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667"
 hassfest_image="ghcr.io/home-assistant/hassfest@sha256:8cd7bdb8f82430c2c13703290b1fc38dcc99957dd76ad3f230035ecee70b672d"
@@ -181,7 +187,7 @@ run_minimum() {
     python -m mypy custom_components/free_library_events
     pytest tests -q --ignore=tests/test_digest.py --ignore=tests/test_metadata.py --ignore=tests/test_public_safety.py --ignore=tests/test_ha_patch_compatibility.py --ignore=tests/test_validation_runner.py --ignore=tests/test_parallel_validation.py --ignore=tests/test_validation_selection.py'
   if [[ "$mode" == affected ]]; then
-    checks="$("$validation_python" "$source_root/scripts/plan_validation.py"  "${affected_args[@]}" --command minimum)"
+    checks="$(printf '%s' "$affected_plan" | "$validation_python" -c 'import json,sys; print(json.load(sys.stdin)["commands"][sys.argv[1]])' minimum)"
   fi
   run_python '
     python -m pip install "pytest-homeassistant-custom-component==0.13.354" || exit "$?"
@@ -192,7 +198,7 @@ run_current() {
   local checks='    python scripts/check_ha_patch_compatibility.py --minimum requirements-ha-test.txt --current requirements-ha-current.txt
     pytest tests -q --ignore=tests/test_digest.py --ignore=tests/test_metadata.py --ignore=tests/test_public_safety.py --ignore=tests/test_ha_patch_compatibility.py --ignore=tests/test_validation_runner.py --ignore=tests/test_parallel_validation.py --ignore=tests/test_validation_selection.py'
   if [[ "$mode" == affected ]]; then
-    checks="$("$validation_python" "$source_root/scripts/plan_validation.py"  "${affected_args[@]}" --command current)"
+    checks="$(printf '%s' "$affected_plan" | "$validation_python" -c 'import json,sys; print(json.load(sys.stdin)["commands"][sys.argv[1]])' current)"
   fi
   run_python '
     python -m pip install "pytest-homeassistant-custom-component==0.13.366" || exit "$?"
@@ -245,7 +251,7 @@ run_affected() {
         if [[ "$(printf '%s' "$affected_plan" | "$validation_python" -c 'import json,sys; print(str(json.load(sys.stdin)["workflow"]).lower())')" == true ]]; then
           run_actionlint
         fi
-        command="$("$validation_python" "$source_root/scripts/plan_validation.py"  "${affected_args[@]}" --command unit)"
+        command="$(printf '%s' "$affected_plan" | "$validation_python" -c 'import json,sys; print(json.load(sys.stdin)["commands"][sys.argv[1]])' unit)"
         run_python "$command"
         ;;
       minimum) run_minimum ;;
