@@ -1,3 +1,36 @@
+# Free Library Events v2026.9.19
+
+## Fixed
+
+- Preserve registration and weather highlights from the complete event text
+  when email descriptions are shortened, including their qualifications and
+  negations.
+- Match explicitly stated alternative age ranges while keeping audience and
+  session boundaries intact. Do not classify negated online or hybrid wording
+  as an online event or remove valid physical directions.
+- Keep official event links, conditional venues, and fallback-duration context
+  in length-limited Google Calendar links. Omit the calendar-creation action
+  when required context cannot fit; retain access to the official event.
+- Tolerate image-directory enumeration failures during expiry and stale-file
+  cleanup while preserving existing images and unrelated files.
+- Preserve the original setup error if platform rollback also fails. Keep a
+  pending subscription-token rotation through external-URL recovery and reject
+  conflicting settings changes.
+
+## Improved
+
+- Select requested native-calendar events before constructing their display
+  objects, and reuse calendar-link eligibility within each email render.
+- Validate current Home Assistant compatibility against Core 2026.9.3 while
+  retaining Core 2026.8.0 as the distribution minimum.
+
+## Validation
+
+- Affected local checks passed: 81 digest tests, nine metadata tests, and
+  161 Home Assistant tests plus ten subtests on each supported Core version.
+- Both supported environments passed strict typing and dependency checks;
+  affected formatting, lint, public-content checks, and Hassfest passed.
+
 # Free Library Events v2026.9.10.2
 
 ## Fixed
