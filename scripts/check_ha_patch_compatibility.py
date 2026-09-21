@@ -146,8 +146,8 @@ def run(minimum_path: Path, current_path: Path) -> str:
 
     minimum_core = exact_core_pin(minimum_path)
     current_core = exact_core_pin(current_path)
-    if stable_version(current_core) <= stable_version(minimum_core):
-        raise CompatibilityError("current Core must be later than minimum Core")
+    if stable_version(current_core) < stable_version(minimum_core):
+        raise CompatibilityError("current Core must not precede minimum Core")
 
     installed_core = metadata.version(CORE_DISTRIBUTION)
     if installed_core != current_core:
