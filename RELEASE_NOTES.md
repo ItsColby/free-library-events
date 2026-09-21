@@ -1,3 +1,14 @@
+# Free Library Events v2026.9.21
+
+- Use one compact immutable source-expansion diagnostic snapshot for status
+  and digest reporting while preserving public attributes, bounded diagnostic
+  fields, source-coverage decisions, and change detection.
+- Share the Git override policy between validation tools. Route semantic
+  `pyproject.toml` changes to the tools that consume them, while leaving
+  unsupported or unavailable comparisons unresolved.
+- Retain Home Assistant Core 2026.8.0 as the minimum and Core 2026.9.3 as the
+  current tested version.
+
 # Free Library Events v2026.9.19
 
 ## Fixed

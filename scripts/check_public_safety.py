@@ -13,6 +13,26 @@ from collections.abc import Iterator
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+LOCAL_GIT_OVERRIDE_NAMES = frozenset(
+    {
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_CONFIG",
+        "GIT_CONFIG_PARAMETERS",
+        "GIT_CONFIG_COUNT",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_IMPLICIT_WORK_TREE",
+        "GIT_GRAFT_FILE",
+        "GIT_INDEX_FILE",
+        "GIT_REPLACE_REF_BASE",
+        "GIT_PREFIX",
+        "GIT_SHALLOW_FILE",
+        "GIT_COMMON_DIR",
+        "GIT_CEILING_DIRECTORIES",
+        "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+    }
+)
 ALLOWED_EMAILS = {"noreply@github.com"}
 ALLOWED_EMAIL_DOMAINS = {
     "example.com",
@@ -198,26 +218,8 @@ def _path_present(path: Path) -> bool:
 
 
 def _git_command(*arguments: str) -> list[str]:
-    local_names = {
-        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-        "GIT_CONFIG",
-        "GIT_CONFIG_PARAMETERS",
-        "GIT_CONFIG_COUNT",
-        "GIT_OBJECT_DIRECTORY",
-        "GIT_DIR",
-        "GIT_WORK_TREE",
-        "GIT_IMPLICIT_WORK_TREE",
-        "GIT_GRAFT_FILE",
-        "GIT_INDEX_FILE",
-        "GIT_REPLACE_REF_BASE",
-        "GIT_PREFIX",
-        "GIT_SHALLOW_FILE",
-        "GIT_COMMON_DIR",
-        "GIT_CEILING_DIRECTORIES",
-        "GIT_DISCOVERY_ACROSS_FILESYSTEM",
-    }
     # KEY/VALUE entries without COUNT are inert after native hook cleanup.
-    if any(name in os.environ for name in local_names):
+    if any(name in os.environ for name in LOCAL_GIT_OVERRIDE_NAMES):
         raise PublicSafetyError("Inherited local Git overrides are not supported")
     return ["git", "--no-replace-objects", "--no-optional-locks", *arguments]
 
