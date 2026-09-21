@@ -16,15 +16,15 @@ from homeassistant.helpers.event import async_track_point_in_time
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
-from .api import BranchFeed
 from .config import entry_config
 from .const import CONF_BIRTH_DATE, CONF_FILTER_MODE, DOMAIN
 from .coordinator import (
     LibraryData,
     LibraryDataCoordinator,
     RefreshAttempt,
+    SourceExpansionDetails,
     coverage_warnings,
-    source_expansion_details,
+    source_expansion_snapshots,
     source_keys_for_window,
     source_label,
     supplemental_coverage,
@@ -69,14 +69,9 @@ class _StatusProjection:
     current_age_coverage_warnings: tuple[str, ...] = ()
     supplemental_age_failures: tuple[str, ...] = ()
     supplemental_age_limitations: tuple[str, ...] = ()
-    expanded_capped_sources: tuple[tuple[str, BranchFeed], ...] = ()
+    expanded_capped_sources: tuple[tuple[str, SourceExpansionDetails], ...] = ()
     unavailable_current_age_sources: tuple[str, ...] = ()
     last_attempt: _AttemptProjection | None = None
-
-    def matches(self, other: _StatusProjection) -> bool:
-        """Compare published state, excluding unexposed source details."""
-
-        return self.state == other.state and self.attributes() == other.attributes()
 
     def attributes(self) -> dict[str, object]:
         """Return fresh Home Assistant attributes from the immutable snapshot."""
@@ -118,9 +113,10 @@ class _StatusProjection:
                 ),
                 "supplemental_age_failures": list(self.supplemental_age_failures),
                 "supplemental_age_limitations": list(self.supplemental_age_limitations),
-                "expanded_capped_sources": source_expansion_details(
-                    dict(self.expanded_capped_sources)
-                ),
+                "expanded_capped_sources": {
+                    label: details.attributes()
+                    for label, details in self.expanded_capped_sources
+                },
                 "unavailable_current_age_sources": list(
                     self.unavailable_current_age_sources
                 ),
@@ -208,11 +204,7 @@ def _build_status_projection(
         current_age_coverage_warnings=tuple(warnings),
         supplemental_age_failures=tuple(supplemental_failures),
         supplemental_age_limitations=tuple(supplemental_limitations),
-        expanded_capped_sources=tuple(
-            (key, feed)
-            for key, feed in data.source_statuses.items()
-            if feed.type_shards_queried
-        ),
+        expanded_capped_sources=source_expansion_snapshots(data.source_statuses),
         unavailable_current_age_sources=tuple(
             source_label(key) for key in relevant_error_keys
         ),
@@ -352,7 +344,7 @@ class LibraryStatusSensor(CoordinatorEntity[LibraryDataCoordinator], SensorEntit
             self._filter_mode,
             evaluation_time,
         )
-        if projection.matches(self._projection):
+        if projection == self._projection:
             return False
         self._projection = projection
         return True

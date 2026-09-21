@@ -3154,7 +3154,7 @@ def test_state_expansion_details_bound_failure_examples() -> None:
         "Recommended",
         datetime(2026, 7, 18, tzinfo=LOCAL_TIME_ZONE),
     )
-    assert equivalent.matches(projection)
+    assert equivalent == projection
 
 
 async def test_diagnostics_include_all_structured_type_feed_blockers(
