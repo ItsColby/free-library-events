@@ -166,7 +166,9 @@ class HomeAssistantPatchCompatibilityTests(unittest.TestCase):
             ("2026.8.2", "2026.8.0", "2026.8.2", 1, True),
             ("2026.9.1", "2026.8.0", "2026.9.1", 1, False),
             ("2026.9.1", "2026.9.1", "2026.9.0", 0, False),
-            ("2026.8.0", "2026.8.0", "2026.8.0", 0, False),
+            ("2026.8.0", "2026.8.0", "2026.8.0", 0, True),
+            ("2026.7.9", "2026.7.9", "2026.7.9", 0, False),
+            ("2026.8.0", "2026.7.9", "2026.8.0", 1, False),
         )
         for current, harness_core, installed, returncode, accepted in cases:
             with (

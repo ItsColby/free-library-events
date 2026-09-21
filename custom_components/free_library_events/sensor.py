@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, tzinfo
-from typing import Any, cast
+from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.const import EVENT_CORE_CONFIG_UPDATE, EntityCategory
@@ -22,8 +22,9 @@ from .coordinator import (
     LibraryData,
     LibraryDataCoordinator,
     RefreshAttempt,
+    SourceExpansionDetails,
     coverage_warnings,
-    source_expansion_details,
+    source_expansion_snapshots,
     source_keys_for_window,
     source_label,
     supplemental_coverage,
@@ -39,43 +40,6 @@ from .entity import service_device_info
 from .runtime import LibraryConfigEntry
 
 PARALLEL_UPDATES = 0
-
-
-@dataclass(frozen=True, slots=True)
-class _TypeFeedBlockerProjection:
-    """Immutable status fields for one bounded type-feed blocker example."""
-
-    event_type: str
-    reason: str
-    published_item_count: int
-    parsed_item_count: int
-    last_event_date: str | None
-
-    def attributes(self) -> dict[str, object]:
-        """Return fresh Home Assistant attributes for this blocker."""
-
-        return {
-            "event_type": self.event_type,
-            "reason": self.reason,
-            "published_item_count": self.published_item_count,
-            "parsed_item_count": self.parsed_item_count,
-            "last_event_date": self.last_event_date,
-        }
-
-
-@dataclass(frozen=True, slots=True)
-class _ExpandedSourceProjection:
-    """Immutable status fields for one expanded capped source."""
-
-    label: str
-    discovered_event_count: int
-    type_feeds_queried: int
-    type_feed_failure_count: int
-    type_feed_failure_examples: tuple[str, ...]
-    type_feed_blocker_count: int
-    type_feed_blocker_examples: tuple[_TypeFeedBlockerProjection, ...]
-    base_prefix_recovered: bool | None
-    coverage_through: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,7 +69,7 @@ class _StatusProjection:
     current_age_coverage_warnings: tuple[str, ...] = ()
     supplemental_age_failures: tuple[str, ...] = ()
     supplemental_age_limitations: tuple[str, ...] = ()
-    expanded_capped_sources: tuple[_ExpandedSourceProjection, ...] = ()
+    expanded_capped_sources: tuple[tuple[str, SourceExpansionDetails], ...] = ()
     unavailable_current_age_sources: tuple[str, ...] = ()
     last_attempt: _AttemptProjection | None = None
 
@@ -150,22 +114,8 @@ class _StatusProjection:
                 "supplemental_age_failures": list(self.supplemental_age_failures),
                 "supplemental_age_limitations": list(self.supplemental_age_limitations),
                 "expanded_capped_sources": {
-                    source.label: {
-                        "discovered_event_count": source.discovered_event_count,
-                        "type_feeds_queried": source.type_feeds_queried,
-                        "type_feed_failure_count": source.type_feed_failure_count,
-                        "type_feed_failure_examples": list(
-                            source.type_feed_failure_examples
-                        ),
-                        "type_feed_blocker_count": source.type_feed_blocker_count,
-                        "type_feed_blocker_examples": [
-                            blocker.attributes()
-                            for blocker in source.type_feed_blocker_examples
-                        ],
-                        "base_prefix_recovered": source.base_prefix_recovered,
-                        "coverage_through": source.coverage_through,
-                    }
-                    for source in self.expanded_capped_sources
+                    label: details.attributes()
+                    for label, details in self.expanded_capped_sources
                 },
                 "unavailable_current_age_sources": list(
                     self.unavailable_current_age_sources
@@ -184,47 +134,6 @@ def _next_projection_deadline(now: datetime, time_zone: tzinfo) -> datetime:
         days_until_tuesday = 7
     boundary_date = local_now.date() + timedelta(days=days_until_tuesday)
     return datetime.combine(boundary_date, time.min, tzinfo=time_zone)
-
-
-def _expanded_source_projection(
-    data: LibraryData,
-) -> tuple[_ExpandedSourceProjection, ...]:
-    """Freeze expanded-source details used by the status attributes."""
-
-    details_by_source = source_expansion_details(data)
-
-    def blocker_projection(
-        details: dict[str, object],
-    ) -> _TypeFeedBlockerProjection:
-        return _TypeFeedBlockerProjection(
-            event_type=cast(str, details["event_type"]),
-            reason=cast(str, details["reason"]),
-            published_item_count=cast(int, details["published_item_count"]),
-            parsed_item_count=cast(int, details["parsed_item_count"]),
-            last_event_date=cast(str | None, details["last_event_date"]),
-        )
-
-    return tuple(
-        _ExpandedSourceProjection(
-            label=label,
-            discovered_event_count=cast(int, details["discovered_event_count"]),
-            type_feeds_queried=cast(int, details["type_feeds_queried"]),
-            type_feed_failure_count=cast(int, details["type_feed_failure_count"]),
-            type_feed_failure_examples=tuple(
-                cast(list[str], details["type_feed_failure_examples"])
-            ),
-            type_feed_blocker_count=cast(int, details["type_feed_blocker_count"]),
-            type_feed_blocker_examples=tuple(
-                blocker_projection(blocker)
-                for blocker in cast(
-                    list[dict[str, object]], details["type_feed_blocker_examples"]
-                )
-            ),
-            base_prefix_recovered=cast(bool | None, details["base_prefix_recovered"]),
-            coverage_through=cast(str | None, details["coverage_through"]),
-        )
-        for label, details in details_by_source.items()
-    )
 
 
 def _build_status_projection(
@@ -295,7 +204,7 @@ def _build_status_projection(
         current_age_coverage_warnings=tuple(warnings),
         supplemental_age_failures=tuple(supplemental_failures),
         supplemental_age_limitations=tuple(supplemental_limitations),
-        expanded_capped_sources=_expanded_source_projection(data),
+        expanded_capped_sources=source_expansion_snapshots(data.source_statuses),
         unavailable_current_age_sources=tuple(
             source_label(key) for key in relevant_error_keys
         ),

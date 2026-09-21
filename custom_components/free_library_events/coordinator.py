@@ -167,29 +167,75 @@ def supplemental_source_keys(
     return [key for key in keys if key.split(":", 1)[1] not in relevant]
 
 
-def source_expansion_details(data: LibraryData) -> dict[str, dict[str, object]]:
+@dataclass(frozen=True, slots=True)
+class SourceExpansionDetails:
+    """Compact immutable diagnostics, independent of the feed's event payload."""
+
+    discovered_event_count: int
+    type_feeds_queried: int
+    type_feed_failure_count: int
+    type_feed_failure_examples: tuple[str, ...]
+    type_feed_blocker_count: int
+    type_feed_blocker_examples: tuple[TypeShardBlocker, ...]
+    base_prefix_recovered: bool | None
+    coverage_through: date | None
+
+    def attributes(self) -> dict[str, object]:
+        """Return fresh mutable containers for the shared public representation."""
+
+        return {
+            "discovered_event_count": self.discovered_event_count,
+            "type_feeds_queried": self.type_feeds_queried,
+            "type_feed_failure_count": self.type_feed_failure_count,
+            "type_feed_failure_examples": list(self.type_feed_failure_examples),
+            "type_feed_blocker_count": self.type_feed_blocker_count,
+            "type_feed_blocker_examples": [
+                type_shard_blocker_data(blocker)
+                for blocker in self.type_feed_blocker_examples
+            ],
+            "base_prefix_recovered": self.base_prefix_recovered,
+            "coverage_through": self.coverage_through.isoformat()
+            if self.coverage_through
+            else None,
+        }
+
+
+def source_expansion_snapshots(
+    feeds: Mapping[str, BranchFeed],
+) -> tuple[tuple[str, SourceExpansionDetails], ...]:
+    """Capture only published evidence for adaptively expanded capped sources."""
+
+    return tuple(
+        (
+            source_label(key),
+            SourceExpansionDetails(
+                discovered_event_count=len(feed.events),
+                type_feeds_queried=feed.type_shards_queried,
+                type_feed_failure_count=len(feed.type_shard_failures),
+                type_feed_failure_examples=(
+                    feed.type_shard_failures[:MAX_TYPE_FAILURE_EXAMPLES]
+                ),
+                type_feed_blocker_count=len(feed.type_shard_blockers),
+                type_feed_blocker_examples=(
+                    feed.type_shard_blockers[:MAX_TYPE_FAILURE_EXAMPLES]
+                ),
+                base_prefix_recovered=feed.base_prefix_recovered,
+                coverage_through=feed.expanded_through,
+            ),
+        )
+        for key, feed in feeds.items()
+        if feed.type_shards_queried
+    )
+
+
+def source_expansion_details(
+    feeds: Mapping[str, BranchFeed],
+) -> dict[str, dict[str, object]]:
     """Return compact diagnostics for adaptively expanded capped sources."""
 
     return {
-        source_label(key): {
-            "discovered_event_count": len(feed.events),
-            "type_feeds_queried": feed.type_shards_queried,
-            "type_feed_failure_count": len(feed.type_shard_failures),
-            "type_feed_failure_examples": list(
-                feed.type_shard_failures[:MAX_TYPE_FAILURE_EXAMPLES]
-            ),
-            "type_feed_blocker_count": len(feed.type_shard_blockers),
-            "type_feed_blocker_examples": [
-                type_shard_blocker_data(blocker)
-                for blocker in feed.type_shard_blockers[:MAX_TYPE_FAILURE_EXAMPLES]
-            ],
-            "base_prefix_recovered": feed.base_prefix_recovered,
-            "coverage_through": feed.expanded_through.isoformat()
-            if feed.expanded_through
-            else None,
-        }
-        for key, feed in data.source_statuses.items()
-        if feed.type_shards_queried
+        label: details.attributes()
+        for label, details in source_expansion_snapshots(feeds)
     }
 
 
