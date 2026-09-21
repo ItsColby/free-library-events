@@ -416,7 +416,7 @@ async def _async_render_digest(call: ServiceCall) -> ServiceResponse:
         distance_by_branch_code=distance_by_branch_code,
     )
     metadata = cast(dict[str, Any], response["metadata"])
-    metadata["expanded_capped_sources"] = source_expansion_details(data)
+    metadata["expanded_capped_sources"] = source_expansion_details(data.source_statuses)
     metadata["fetched_at"] = data.fetched_at.isoformat()
     if call.data[ATTR_EMBED_IMAGES]:
         embedded_image_paths = _referenced_embedded_image_paths(
