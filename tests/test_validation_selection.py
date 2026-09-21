@@ -525,6 +525,15 @@ class ValidationSelectionTests(unittest.TestCase):
         self.assertTrue(plan["jobs"]["current"])
         self.assertTrue(plan["jobs"]["minimum"])
         self.assertTrue(plan["ha_tests"])
+        self.assertTrue(plan["lane_typing"]["minimum"])
+        self.assertEqual([], plan["lane_typing"]["current"])
+        self.assertTrue(plan["lane_tests"]["minimum"])
+        self.assertEqual(plan["lane_tests"]["minimum"], plan["lane_tests"]["current"])
+        self.assertIn("python -m mypy", planner.lane_command(plan, "minimum"))
+        current_command = planner.lane_command(plan, "current")
+        self.assertNotIn("mypy", current_command)
+        self.assertIn("scripts/check_ha_patch_compatibility.py", current_command)
+        self.assertIn("python -m pytest", current_command)
         self.assertEqual([], plan["unresolved"])
 
     def test_test_only_change_uses_its_native_lane(self):
