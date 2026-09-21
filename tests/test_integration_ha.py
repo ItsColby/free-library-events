@@ -127,6 +127,7 @@ from custom_components.free_library_events.email_images import (
 )
 from custom_components.free_library_events.sensor import (
     LibraryStatusSensor,
+    _build_status_projection,
     _next_projection_deadline,
 )
 from custom_components.free_library_events.webcal import (
@@ -3095,7 +3096,7 @@ def test_state_expansion_details_bound_failure_examples() -> None:
     )
     data = types.SimpleNamespace(source_statuses={"CEN:Young Adult": feed})
 
-    details = next(iter(source_expansion_details(data).values()))
+    details = next(iter(source_expansion_details(data.source_statuses).values()))
 
     assert details["type_feed_failure_count"] == 19
     assert details["type_feed_failure_examples"] == list(failures[:3])
@@ -3112,6 +3113,48 @@ def test_state_expansion_details_bound_failure_examples() -> None:
         for index in range(3)
     ]
     assert details["base_prefix_recovered"] is False
+
+    snapshot = LibraryData(
+        events=(),
+        source_counts={},
+        source_statuses=data.source_statuses,
+        source_errors={},
+        fetched_at=datetime(2026, 7, 18, tzinfo=UTC),
+    )
+    projection = _build_status_projection(
+        snapshot,
+        None,
+        True,
+        date(2025, 11, 7),
+        "Recommended",
+        datetime(2026, 7, 18, tzinfo=LOCAL_TIME_ZONE),
+    )
+    data.source_statuses.clear()
+    first = projection.attributes()["expanded_capped_sources"]
+    assert next(iter(first.values())) == details
+    first_details = next(iter(first.values()))
+    first_details["type_feed_failure_examples"].clear()
+    first_details["type_feed_blocker_examples"][0]["event_type"] = "Changed"
+    second = projection.attributes()["expanded_capped_sources"]
+    assert next(iter(second.values())) == details
+    changed_hidden_blocker = replace(blockers[-1], event_type="Unexposed change")
+    equivalent = _build_status_projection(
+        replace(
+            snapshot,
+            source_statuses={
+                "CEN:Young Adult": replace(
+                    feed,
+                    type_shard_blockers=(*blockers[:-1], changed_hidden_blocker),
+                )
+            },
+        ),
+        None,
+        True,
+        date(2025, 11, 7),
+        "Recommended",
+        datetime(2026, 7, 18, tzinfo=LOCAL_TIME_ZONE),
+    )
+    assert equivalent.matches(projection)
 
 
 async def test_diagnostics_include_all_structured_type_feed_blockers(
@@ -3636,6 +3679,10 @@ async def test_status_separates_a_healthy_supplemental_limit_from_partial_failur
     assert response["metadata"]["supplemental_age_failures"] == []
     assert len(response["metadata"]["supplemental_age_limitations"]) == 4
     assert len(response["metadata"]["expanded_capped_sources"]) == 4
+    assert (
+        response["metadata"]["expanded_capped_sources"]
+        == status.attributes["expanded_capped_sources"]
+    )
     assert "later broadly inclusive events may be missing" not in response["message"]
 
 

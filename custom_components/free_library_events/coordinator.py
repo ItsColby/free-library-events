@@ -167,7 +167,9 @@ def supplemental_source_keys(
     return [key for key in keys if key.split(":", 1)[1] not in relevant]
 
 
-def source_expansion_details(data: LibraryData) -> dict[str, dict[str, object]]:
+def source_expansion_details(
+    feeds: Mapping[str, BranchFeed],
+) -> dict[str, dict[str, object]]:
     """Return compact diagnostics for adaptively expanded capped sources."""
 
     return {
@@ -188,7 +190,7 @@ def source_expansion_details(data: LibraryData) -> dict[str, dict[str, object]]:
             if feed.expanded_through
             else None,
         }
-        for key, feed in data.source_statuses.items()
+        for key, feed in feeds.items()
         if feed.type_shards_queried
     }
 
