@@ -230,6 +230,17 @@ class FreeLibraryEventsOptionsFlow(config_entries.OptionsFlowWithReload):
         self._pending_owner = None
         self._pending_options = None
 
+    def _webcal_placeholders(self, options: dict[str, Any]) -> dict[str, str]:
+        """Describe the private calendar feed state without exposing its token."""
+
+        return {
+            "webcal_status": webcal_status(
+                self.hass,
+                bool(options[CONF_PUBLISH_WEBCAL]),
+                options.get(CONF_WEBCAL_TOKEN),
+            )
+        }
+
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
@@ -243,13 +254,7 @@ class FreeLibraryEventsOptionsFlow(config_entries.OptionsFlowWithReload):
         return self.async_show_menu(
             step_id="init",
             menu_options=menu_options,
-            description_placeholders={
-                "webcal_status": webcal_status(
-                    self.hass,
-                    bool(current[CONF_PUBLISH_WEBCAL]),
-                    current.get(CONF_WEBCAL_TOKEN),
-                )
-            },
+            description_placeholders=self._webcal_placeholders(current),
         )
 
     async def async_step_behavior(
@@ -307,13 +312,7 @@ class FreeLibraryEventsOptionsFlow(config_entries.OptionsFlowWithReload):
             step_id="webcal",
             data_schema=_webcal_schema({**current, **(user_input or {})}),
             errors=errors,
-            description_placeholders={
-                "webcal_status": webcal_status(
-                    self.hass,
-                    bool(current[CONF_PUBLISH_WEBCAL]),
-                    current.get(CONF_WEBCAL_TOKEN),
-                )
-            },
+            description_placeholders=self._webcal_placeholders(current),
         )
 
     async def async_step_regenerate_webcal(
@@ -356,13 +355,7 @@ class FreeLibraryEventsOptionsFlow(config_entries.OptionsFlowWithReload):
                 step_id="webcal",
                 data_schema=_webcal_schema(pending_options),
                 errors={"base": "webcal_url_unavailable"},
-                description_placeholders={
-                    "webcal_status": webcal_status(
-                        self.hass,
-                        bool(pending_options[CONF_PUBLISH_WEBCAL]),
-                        pending_options.get(CONF_WEBCAL_TOKEN),
-                    )
-                },
+                description_placeholders=self._webcal_placeholders(pending_options),
             )
         return self.async_show_form(
             step_id="webcal_url",

@@ -302,10 +302,7 @@ class LibraryStatusSensor(CoordinatorEntity[LibraryDataCoordinator], SensorEntit
         """Rebuild and reschedule the snapshot after a source refresh."""
 
         evaluation_time = dt_util.now(self._time_zone)
-        projection_changed = self._update_projection(evaluation_time)
-        self._schedule_projection_deadline(evaluation_time)
-        if projection_changed:
-            self.async_write_ha_state()
+        self._refresh_projection(evaluation_time)
 
     @callback
     def _handle_core_config_update(self, _event: Event[dict[str, Any]]) -> None:
@@ -316,10 +313,7 @@ class LibraryStatusSensor(CoordinatorEntity[LibraryDataCoordinator], SensorEntit
         self._time_zone_name = self.hass.config.time_zone
         self._time_zone = dt_util.get_default_time_zone()
         evaluation_time = dt_util.now(self._time_zone)
-        projection_changed = self._update_projection(evaluation_time)
-        self._schedule_projection_deadline(evaluation_time)
-        if projection_changed:
-            self.async_write_ha_state()
+        self._refresh_projection(evaluation_time)
 
     @callback
     def _handle_projection_deadline(self, now: datetime) -> None:
@@ -327,6 +321,12 @@ class LibraryStatusSensor(CoordinatorEntity[LibraryDataCoordinator], SensorEntit
 
         self._cancel_projection_deadline = None
         evaluation_time = now.astimezone(self._time_zone)
+        self._refresh_projection(evaluation_time)
+
+    @callback
+    def _refresh_projection(self, evaluation_time: datetime) -> None:
+        """Rebuild, reschedule, and publish only HA-visible projection changes."""
+
         projection_changed = self._update_projection(evaluation_time)
         self._schedule_projection_deadline(evaluation_time)
         if projection_changed:
