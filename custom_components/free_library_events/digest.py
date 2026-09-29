@@ -191,7 +191,7 @@ def _safe_http_url(value: str, base_url: str = "") -> str:
 
 
 class _HTMLTextExtractor(HTMLParser):
-    def __init__(self, base_url: str = "") -> None:
+    def __init__(self, base_url: str) -> None:
         super().__init__(convert_charrefs=True)
         self.base_url = base_url
         self.parts: list[str] = []
@@ -274,7 +274,7 @@ class _HTMLDescriptionSanitizer(HTMLParser):
         'text-decoration-color:#a8c7fa;text-underline-offset:3px"'
     )
 
-    def __init__(self, base_url: str = "") -> None:
+    def __init__(self, base_url: str) -> None:
         super().__init__(convert_charrefs=True)
         self.base_url = base_url
         self.parts: list[str] = []
@@ -1910,19 +1910,17 @@ def _event_audience_html(event: Event) -> str:
     )
 
 
-def _button(label: str, url: str, primary: bool = False) -> str:
-    background = "#1967d2" if primary else "#ffffff"
-    color = "#ffffff" if primary else "#1967d2"
+def _button(label: str, url: str) -> str:
     return (
         '<table class="email-button" role="presentation" border="0" '
         'cellpadding="0" cellspacing="0" '
         'style="border-collapse:separate;margin:12px 0 0">'
-        f'<tr><td class="email-button-cell" bgcolor="{background}" '
+        '<tr><td class="email-button-cell" bgcolor="#1967d2" '
         'style="padding:13px 16px;'
-        f'border:1px solid #1967d2;border-radius:8px;background:{background}">'
+        'border:1px solid #1967d2;border-radius:8px;background:#1967d2">'
         f'<a class="email-button-link" href="{html.escape(url, quote=True)}" '
         'style="display:block;'
-        f"color:{color};font-weight:700;text-decoration:none;font-size:15px;"
+        "color:#ffffff;font-weight:700;text-decoration:none;font-size:15px;"
         f'line-height:140%">{html.escape(label)}</a></td></tr></table>'
     )
 
@@ -2060,7 +2058,7 @@ def _render_event_card(
     </table>
     """
     event_image = ""
-    if event.image_url and not compact and event.image_layout == "hero":
+    if event.image_url and event.image_layout == "hero":
         event_image = (
             '<tr><td class="event-hero-image-cell" colspan="2" style="padding:0;'
             'background:#ffffff;text-align:center">'
@@ -2071,7 +2069,7 @@ def _render_event_card(
             'style="display:block;width:100%;max-width:100%;height:auto;margin:0;'
             'border:0;border-radius:13px 13px 0 0"></a></td></tr>'
         )
-    elif event.image_url and not compact:
+    elif event.image_url:
         event_image = (
             '<tr><td class="event-poster-image-cell" colspan="2" '
             'style="padding:0;background:#ffffff;text-align:center">'
@@ -2098,7 +2096,7 @@ def _render_event_card(
       <td class="event-body-cell" colspan="2" style="padding:16px 20px 18px;border-top:1px solid #eef1f5;overflow-wrap:anywhere;word-break:break-word">
         <div>{_description_paragraphs_html(event)}</div>
         {shortened_note}
-        {_button("Add to Google Calendar", calendar_url, primary=True) if calendar_url else ""}
+        {_button("Add to Google Calendar", calendar_url) if calendar_url else ""}
       </td>
       </tr>"""
     return f"""

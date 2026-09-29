@@ -236,10 +236,6 @@ async def _async_download_one(
                             allow_remote_fallback=False,
                         )
                     break
-            else:
-                raise _ImageDownloadError(
-                    "excessive image redirects", allow_remote_fallback=False
-                )
     except TimeoutError, aiohttp.ClientError:
         raise _ImageDownloadError(
             "publisher image request failed", allow_remote_fallback=True
