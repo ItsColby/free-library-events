@@ -826,7 +826,7 @@ def parse_feed(
             event_date = date.strptime(start_date_text, "%m/%d/%y")
             normalized_time = start_time_text.replace(".", "").strip()
             start_time = time.strptime(normalized_time, "%I:%M %p")
-        except TypeError, ValueError:
+        except ValueError:
             continue
         link = _safe_http_url(item.findtext("link") or "") or _safe_http_url(
             item.findtext("guid") or ""

@@ -73,11 +73,8 @@ def _type_shard_blocker_description(blocker: TypeShardBlocker) -> str:
     """Return a bounded operator-facing description of one type-feed blocker."""
 
     if blocker.reason == TYPE_SHARD_BLOCKER_CAPPED:
-        boundary = (
-            f"{blocker.last_event_date:%B} {blocker.last_event_date.day}"
-            if blocker.last_event_date
-            else "an unknown date"
-        )
+        assert blocker.last_event_date is not None
+        boundary = f"{blocker.last_event_date:%B} {blocker.last_event_date.day}"
         return (
             f"{blocker.event_type} returned {blocker.source_count} items "
             f"through {boundary}"
