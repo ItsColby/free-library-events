@@ -177,12 +177,6 @@ def _normalize_integer(value: object, error: str) -> int:
         raise ValueError(error) from None
 
 
-def normalize_config(values: Mapping[str, Any]) -> dict[str, Any]:
-    """Normalize legacy or combined values to the safe runtime config."""
-
-    return entry_config(values, {})
-
-
 def entry_profile(
     entry_data: Mapping[str, Any], entry_option_values: Mapping[str, Any]
 ) -> dict[str, Any]:
