@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import re
 import shutil
 import urllib.parse
@@ -23,6 +24,7 @@ MAX_EMBEDDED_IMAGES = 12
 MAX_IMAGE_BYTES = 3 * 1024 * 1024
 MAX_TOTAL_IMAGE_BYTES = 15 * 1024 * 1024
 MAX_IMAGE_REQUEST_CONCURRENCY = 4
+MAX_IMAGE_REDIRECTS = 2
 REMOTE_FALLBACK_HTTP_STATUSES = frozenset({403, 408, 425, 429})
 MAX_FAILURE_EXAMPLES = 3
 
@@ -189,7 +191,7 @@ async def _async_download_one(
     current_url = source_url
     try:
         async with semaphore:
-            for redirect_count in range(3):
+            for redirect_count in range(MAX_IMAGE_REDIRECTS + 1):
                 async with session.get(
                     current_url,
                     allow_redirects=False,
@@ -201,7 +203,7 @@ async def _async_download_one(
                         redirected_url = clean_image_url(
                             urllib.parse.urljoin(current_url, location)
                         )
-                        if not redirected_url or redirect_count == 2:
+                        if not redirected_url or redirect_count == MAX_IMAGE_REDIRECTS:
                             raise _ImageDownloadError(
                                 "unsafe or excessive image redirect",
                                 allow_remote_fallback=False,
@@ -236,10 +238,6 @@ async def _async_download_one(
                             allow_remote_fallback=False,
                         )
                     break
-            else:
-                raise _ImageDownloadError(
-                    "excessive image redirects", allow_remote_fallback=False
-                )
     except TimeoutError, aiohttp.ClientError:
         raise _ImageDownloadError(
             "publisher image request failed", allow_remote_fallback=True
@@ -361,17 +359,13 @@ def remove_stored_image_run(run_directory: Path) -> None:
     if not (run_directory / _MANAGED_MARKER).is_file():
         return
     shutil.rmtree(run_directory, ignore_errors=True)
-    try:
+    with contextlib.suppress(OSError):
         run_directory.parent.rmdir()
-    except OSError:
-        pass
 
 
 def _image_directory_children(root_directory: Path) -> tuple[Path, ...]:
     """Snapshot stored paths, skipping unavailable or concurrently removed roots."""
 
-    if not root_directory.is_dir():
-        return ()
     try:
         return tuple(root_directory.iterdir())
     except OSError:
@@ -384,10 +378,8 @@ def purge_stored_image_runs(root_directory: Path) -> None:
     for candidate in _image_directory_children(root_directory):
         if candidate.is_dir():
             remove_stored_image_run(candidate)
-    try:
+    with contextlib.suppress(OSError):
         root_directory.rmdir()
-    except OSError:
-        pass
 
 
 def purge_stale_image_runs(root_directory: Path, cutoff_timestamp: float) -> None:
@@ -401,7 +393,5 @@ def purge_stale_image_runs(root_directory: Path, cutoff_timestamp: float) -> Non
             continue
         if is_stale:
             remove_stored_image_run(candidate)
-    try:
+    with contextlib.suppress(OSError):
         root_directory.rmdir()
-    except OSError:
-        pass

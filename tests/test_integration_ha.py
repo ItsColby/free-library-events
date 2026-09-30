@@ -72,7 +72,7 @@ from custom_components.free_library_events.calendar_data import (
 )
 from custom_components.free_library_events.config import (
     LEGACY_BRANCH_CONFIG_KEYS,
-    normalize_config,
+    entry_config,
     normalize_options,
     normalize_profile,
     selected_branches,
@@ -714,11 +714,11 @@ async def test_options_flow_updates_behavior_without_profile_data(
     assert entry.options["future_behavior"] == future_option["future_behavior"]
 
 
-def test_normalize_config_enforces_non_ui_bounds() -> None:
+def test_entry_config_enforces_non_ui_bounds() -> None:
     with pytest.raises(ValueError, match="invalid_calendar_duration"):
-        normalize_config(USER_INPUT | {CONF_CALENDAR_DURATION: 5})
+        entry_config(USER_INPUT | {CONF_CALENDAR_DURATION: 5}, {})
     with pytest.raises(ValueError, match="invalid_scan_interval"):
-        normalize_config(USER_INPUT | {CONF_SCAN_INTERVAL: 30})
+        entry_config(USER_INPUT | {CONF_SCAN_INTERVAL: 30}, {})
 
 
 @pytest.mark.parametrize(
@@ -790,7 +790,7 @@ def test_profile_and_webcal_validation_reject_unknown_or_unsafe_values() -> None
     assert private_detail not in repr(invalid_birth_date.value)
 
 
-def test_normalize_config_coerces_non_ui_boolean_strings() -> None:
+def test_entry_config_coerces_non_ui_boolean_strings() -> None:
     disabled = dict.fromkeys(
         (
             CONF_INCLUDE_SANTORE,
@@ -802,12 +802,12 @@ def test_normalize_config_coerces_non_ui_boolean_strings() -> None:
     )
 
     with pytest.raises(ValueError, match="branch_required"):
-        normalize_config(USER_INPUT | disabled)
+        entry_config(USER_INPUT | disabled, {})
 
 
-def test_normalize_config_rejects_non_string_child_name() -> None:
+def test_entry_config_rejects_non_string_child_name() -> None:
     with pytest.raises(TypeError, match="invalid_child_name"):
-        normalize_config(USER_INPUT | {CONF_CHILD_NAME: None})
+        entry_config(USER_INPUT | {CONF_CHILD_NAME: None}, {})
 
 
 def test_all_sources_default_on_for_legacy_and_new_entries() -> None:
@@ -816,7 +816,7 @@ def test_all_sources_default_on_for_legacy_and_new_entries() -> None:
         for key, value in USER_INPUT.items()
         if key not in {CONF_INCLUDE_PARKWAY_CENTRAL, CONF_INCLUDE_PCI}
     }
-    legacy_config = normalize_config(legacy_input)
+    legacy_config = entry_config(legacy_input, {})
     assert legacy_config[CONF_BRANCHES] == ["SWK", "IND", "CEN", "PCI"]
     assert [branch.code for branch in selected_branches(legacy_config)] == [
         "SWK",

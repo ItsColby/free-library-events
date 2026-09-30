@@ -131,10 +131,7 @@ def _smtp_attachments(
     attachments: list[dict[str, object]] = []
     for image_path in image_paths:
         path = Path(image_path)
-        try:
-            relative_path = Path(EMAIL_IMAGE_DIRECTORY) / path.relative_to(image_root)
-        except ValueError:
-            continue
+        relative_path = Path(EMAIL_IMAGE_DIRECTORY) / path.relative_to(image_root)
         attachments.append(
             {
                 "media_source": {

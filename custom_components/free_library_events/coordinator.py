@@ -55,6 +55,12 @@ EXPEDITED_RETRY_SECONDS = 5 * 60
 REQUEST_REFRESH_TIMEOUT_SECONDS = 10 * 60
 
 
+def _month_day(value: date) -> str:
+    """Return the operator-facing month and day without a leading zero."""
+
+    return f"{value:%B} {value.day}"
+
+
 def type_shard_blocker_data(blocker: TypeShardBlocker) -> dict[str, object]:
     """Return privacy-safe structured evidence for one type-feed blocker."""
 
@@ -73,14 +79,10 @@ def _type_shard_blocker_description(blocker: TypeShardBlocker) -> str:
     """Return a bounded operator-facing description of one type-feed blocker."""
 
     if blocker.reason == TYPE_SHARD_BLOCKER_CAPPED:
-        boundary = (
-            f"{blocker.last_event_date:%B} {blocker.last_event_date.day}"
-            if blocker.last_event_date
-            else "an unknown date"
-        )
+        assert blocker.last_event_date is not None
         return (
             f"{blocker.event_type} returned {blocker.source_count} items "
-            f"through {boundary}"
+            f"through {_month_day(blocker.last_event_date)}"
         )
     if blocker.reason == TYPE_SHARD_BLOCKER_PARSE_INCOMPLETE:
         return (
@@ -120,12 +122,12 @@ def _type_expansion_limitation_reason(feed: BranchFeed, end_date: date) -> str:
         reasons.append("the official event types did not recover every base-feed item")
     if not reasons:
         return (
-            f"coverage through {end_date:%B} {end_date.day} could not be proven "
+            f"coverage through {_month_day(end_date)} could not be proven "
             f"after querying {feed.type_shards_queried} official event types"
         )
     return (
         "; ".join(reasons)
-        + f"; proving coverage through {end_date:%B} {end_date.day} requires "
+        + f"; proving coverage through {_month_day(end_date)} requires "
         "later complete publisher evidence"
     )
 
@@ -402,8 +404,6 @@ def coverage_warnings(
             )
         elif not feed.ordered:
             warnings.append(f"{label} was not ordered by event date")
-        elif feed.last_event_date is None:
-            warnings.append(f"{label} did not expose a usable coverage boundary")
         elif feed.type_shard_failures:
             warnings.append(
                 f"{label} event-type expansion failed for "
@@ -427,9 +427,11 @@ def coverage_warnings(
                 "in this digest week may be missing"
             )
         else:
+            # An uncovered, fully parsed feed holds at least RSS_ITEM_LIMIT events.
+            assert feed.last_event_date is not None
             warnings.append(
                 f"{label} reached its {feed.source_count}-item limit through "
-                f"{feed.last_event_date:%B} {feed.last_event_date.day}; later events "
+                f"{_month_day(feed.last_event_date)}; later events "
                 "in this digest week may be missing"
             )
     return warnings
@@ -477,20 +479,21 @@ def supplemental_coverage(
                 f"evidence for {len(integrity_blockers)} official feeds ({examples})"
             )
         elif not feed.covers_through(end_date):
-            boundary = (
-                f"{feed.last_event_date:%B} {feed.last_event_date.day}"
-                if feed.last_event_date
-                else "an unknown date"
-            )
-            limitations.append(
-                f"{source_label(key)} "
-                + (
+            if feed.type_shards_queried:
+                limitation = (
                     "remained limited because "
                     f"{_type_expansion_limitation_reason(feed, end_date)}"
-                    if feed.type_shards_queried
-                    else f"reached its {feed.source_count}-item limit through {boundary}"
                 )
-                + "; later broadly inclusive events may be missing"
+            else:
+                # An uncovered, fully parsed feed holds at least RSS_ITEM_LIMIT events.
+                assert feed.last_event_date is not None
+                limitation = (
+                    f"reached its {feed.source_count}-item limit through "
+                    f"{_month_day(feed.last_event_date)}"
+                )
+            limitations.append(
+                f"{source_label(key)} {limitation}"
+                "; later broadly inclusive events may be missing"
             )
     return failures, limitations
 

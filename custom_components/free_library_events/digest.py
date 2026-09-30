@@ -7,7 +7,7 @@ import html
 import re
 import urllib.parse
 import xml.etree.ElementTree as ET
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timedelta
 from html.parser import HTMLParser
@@ -191,7 +191,7 @@ def _safe_http_url(value: str, base_url: str = "") -> str:
 
 
 class _HTMLTextExtractor(HTMLParser):
-    def __init__(self, base_url: str = "") -> None:
+    def __init__(self, base_url: str) -> None:
         super().__init__(convert_charrefs=True)
         self.base_url = base_url
         self.parts: list[str] = []
@@ -274,7 +274,7 @@ class _HTMLDescriptionSanitizer(HTMLParser):
         'text-decoration-color:#a8c7fa;text-underline-offset:3px"'
     )
 
-    def __init__(self, base_url: str = "") -> None:
+    def __init__(self, base_url: str) -> None:
         super().__init__(convert_charrefs=True)
         self.base_url = base_url
         self.parts: list[str] = []
@@ -286,15 +286,21 @@ class _HTMLDescriptionSanitizer(HTMLParser):
             self.parts.append(f"</{output_tag}>")
         del self._stack[index:]
 
-    def _close_open_paragraph(self) -> None:
-        matching_index = next(
+    def _last_stack_index(
+        self, matches: Callable[[tuple[str, str]], bool], *, after: int = -1
+    ) -> int:
+        """Return the innermost matching open element above ``after``, or -1."""
+        return next(
             (
                 index
-                for index in range(len(self._stack) - 1, -1, -1)
-                if self._stack[index][1] == "p"
+                for index in range(len(self._stack) - 1, after, -1)
+                if matches(self._stack[index])
             ),
             -1,
         )
+
+    def _close_open_paragraph(self) -> None:
+        matching_index = self._last_stack_index(lambda entry: entry[1] == "p")
         if matching_index >= 0:
             self._close_from(matching_index)
 
@@ -340,25 +346,13 @@ class _HTMLDescriptionSanitizer(HTMLParser):
             self.parts.append(f"<{tag}{self._LIST}>")
         elif tag == "li":
             self._close_open_paragraph()
-            list_index = next(
-                (
-                    index
-                    for index in range(len(self._stack) - 1, -1, -1)
-                    if self._stack[index][1] in {"ul", "ol"}
-                ),
-                -1,
-            )
-            open_item_index = next(
-                (
-                    index
-                    for index in range(len(self._stack) - 1, list_index, -1)
-                    if self._stack[index][1] == "li"
-                ),
-                -1,
+            list_index = self._last_stack_index(lambda entry: entry[1] in {"ul", "ol"})
+            open_item_index = self._last_stack_index(
+                lambda entry: entry[1] == "li", after=list_index
             )
             if open_item_index >= 0:
                 self._close_from(open_item_index)
-            if not any(output in {"ul", "ol"} for _source, output in self._stack):
+            if list_index < 0:
                 self.parts.append(f"<ul{self._LIST}>")
                 self._stack.append(("__implicit_list__", "ul"))
             output_tag = "li"
@@ -388,14 +382,7 @@ class _HTMLDescriptionSanitizer(HTMLParser):
         if tag in {"p", "div"}:
             self._close_open_paragraph()
             return
-        matching_index = next(
-            (
-                index
-                for index in range(len(self._stack) - 1, -1, -1)
-                if self._stack[index][0] == tag
-            ),
-            -1,
-        )
+        matching_index = self._last_stack_index(lambda entry: entry[0] == tag)
         if matching_index < 0:
             return
         self._close_from(matching_index)
@@ -409,8 +396,7 @@ class _HTMLDescriptionSanitizer(HTMLParser):
         self.parts.append(html.escape(data))
 
     def rendered_html(self) -> str:
-        if self._stack:
-            self._close_from(0)
+        self._close_from(0)
         return "".join(self.parts).strip()
 
 
@@ -826,7 +812,7 @@ def parse_feed(
             event_date = date.strptime(start_date_text, "%m/%d/%y")
             normalized_time = start_time_text.replace(".", "").strip()
             start_time = time.strptime(normalized_time, "%I:%M %p")
-        except TypeError, ValueError:
+        except ValueError:
             continue
         link = _safe_http_url(item.findtext("link") or "") or _safe_http_url(
             item.findtext("guid") or ""
@@ -1058,12 +1044,12 @@ UNDER_AGE_RE = re.compile(
 )
 
 
+def _is_month_unit(unit: str | None) -> bool:
+    return bool(unit and unit.lower().startswith(("month", "mo")))
+
+
 def _to_months(value: int, unit: str | None) -> float:
-    return (
-        float(value)
-        if unit and unit.lower().startswith(("month", "mo"))
-        else value * 12.0
-    )
+    return float(value) if _is_month_unit(unit) else value * 12.0
 
 
 def _is_broad_years_only_upper_limit(
@@ -1092,7 +1078,7 @@ def _age_range_contains(match: re.Match[str], child_months: float) -> bool:
     high_unit = match.group("high_unit") or match.group("low_unit")
     low = _to_months(int(match.group("low")), low_unit)
     high = _to_months(int(match.group("high")), high_unit)
-    margin = 1 if high_unit and high_unit.lower().startswith(("month", "mo")) else 12
+    margin = 1 if _is_month_unit(high_unit) else 12
     return low <= child_months < high + margin
 
 
@@ -1101,9 +1087,7 @@ def _explicit_age_fit(text: str, child_months: float) -> FitRank | None:
     if match:
         high_unit = match.group("high_unit")
         high = _to_months(int(match.group("high")), high_unit)
-        margin = (
-            1 if high_unit and high_unit.lower().startswith(("month", "mo")) else 12
-        )
+        margin = 1 if _is_month_unit(high_unit) else 12
         return "best" if child_months < high + margin else "exclude"
 
     for match in AGE_RANGE_RE.finditer(text):
@@ -1133,9 +1117,7 @@ def _explicit_age_fit(text: str, child_months: float) -> FitRank | None:
         upper_value = int(match.group(1))
         upper_unit = match.group(2)
         upper = _to_months(upper_value, upper_unit)
-        margin = (
-            1 if upper_unit and upper_unit.lower().startswith(("month", "mo")) else 12
-        )
+        margin = 1 if _is_month_unit(upper_unit) else 12
         if child_months < upper + margin:
             if _is_broad_years_only_upper_limit(upper_value, upper_unit, child_months):
                 return "broad"
@@ -1574,10 +1556,14 @@ def google_calendar_url(
     return url
 
 
-def directions_url(branch: Branch) -> str:
+def _maps_search_url(query: str) -> str:
     return "https://www.google.com/maps/search/?" + urllib.parse.urlencode(
-        {"api": "1", "query": f"{branch.name}, {branch.address}"}
+        {"api": "1", "query": query}
     )
+
+
+def directions_url(branch: Branch) -> str:
+    return _maps_search_url(f"{branch.name}, {branch.address}")
 
 
 def event_directions_url(event: Event) -> str:
@@ -1587,9 +1573,7 @@ def event_directions_url(event: Event) -> str:
         return ""
     if not event.venue:
         return directions_url(event.branch)
-    return "https://www.google.com/maps/search/?" + urllib.parse.urlencode(
-        {"api": "1", "query": f"{event.venue}, Philadelphia, PA"}
-    )
+    return _maps_search_url(f"{event.venue}, Philadelphia, PA")
 
 
 def _bounded_text(value: str, maximum: int) -> str:
@@ -1910,19 +1894,17 @@ def _event_audience_html(event: Event) -> str:
     )
 
 
-def _button(label: str, url: str, primary: bool = False) -> str:
-    background = "#1967d2" if primary else "#ffffff"
-    color = "#ffffff" if primary else "#1967d2"
+def _button(label: str, url: str) -> str:
     return (
         '<table class="email-button" role="presentation" border="0" '
         'cellpadding="0" cellspacing="0" '
         'style="border-collapse:separate;margin:12px 0 0">'
-        f'<tr><td class="email-button-cell" bgcolor="{background}" '
+        '<tr><td class="email-button-cell" bgcolor="#1967d2" '
         'style="padding:13px 16px;'
-        f'border:1px solid #1967d2;border-radius:8px;background:{background}">'
+        'border:1px solid #1967d2;border-radius:8px;background:#1967d2">'
         f'<a class="email-button-link" href="{html.escape(url, quote=True)}" '
         'style="display:block;'
-        f"color:{color};font-weight:700;text-decoration:none;font-size:15px;"
+        "color:#ffffff;font-weight:700;text-decoration:none;font-size:15px;"
         f'line-height:140%">{html.escape(label)}</a></td></tr></table>'
     )
 
@@ -2034,8 +2016,8 @@ def _render_event_card(
     event_url = html.escape(event_details_url(event), quote=True)
     display_title = _bounded_text(event.title, MAX_DISPLAY_TITLE_LENGTH)
     calendar_url = google_calendar_url(event, duration_minutes, compact=compact)
+    location_html = _event_location_html(event)
     if compact:
-        location_html = _event_location_html(event)
         calendar_link = (
             '<div class="compact-calendar-link" style="margin:8px 0 0;'
             'font-size:14px;font-weight:700;line-height:145%">'
@@ -2060,7 +2042,7 @@ def _render_event_card(
     </table>
     """
     event_image = ""
-    if event.image_url and not compact and event.image_layout == "hero":
+    if event.image_url and event.image_layout == "hero":
         event_image = (
             '<tr><td class="event-hero-image-cell" colspan="2" style="padding:0;'
             'background:#ffffff;text-align:center">'
@@ -2071,7 +2053,7 @@ def _render_event_card(
             'style="display:block;width:100%;max-width:100%;height:auto;margin:0;'
             'border:0;border-radius:13px 13px 0 0"></a></td></tr>'
         )
-    elif event.image_url and not compact:
+    elif event.image_url:
         event_image = (
             '<tr><td class="event-poster-image-cell" colspan="2" '
             'style="padding:0;background:#ffffff;text-align:center">'
@@ -2085,7 +2067,6 @@ def _render_event_card(
             'height:auto;margin:0 auto;border:0;border-radius:13px 13px 0 0">'
             "</a></td></tr>"
         )
-    location_html = _event_location_html(event)
     shortened_note = ""
     if event.description_truncated:
         shortened_note = (
@@ -2098,7 +2079,7 @@ def _render_event_card(
       <td class="event-body-cell" colspan="2" style="padding:16px 20px 18px;border-top:1px solid #eef1f5;overflow-wrap:anywhere;word-break:break-word">
         <div>{_description_paragraphs_html(event)}</div>
         {shortened_note}
-        {_button("Add to Google Calendar", calendar_url, primary=True) if calendar_url else ""}
+        {_button("Add to Google Calendar", calendar_url) if calendar_url else ""}
       </td>
       </tr>"""
     return f"""
