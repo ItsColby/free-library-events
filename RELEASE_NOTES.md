@@ -1,3 +1,12 @@
+# Free Library Events v2026.10.1
+
+- Simplify the integration's internals: share repeated rendering, projection
+  and coverage helpers, and remove a test-only wrapper and branches the
+  integration's own code rules out. Sensors, options, the digest action, email
+  content and images, and diagnostics behave as before.
+- Retain Home Assistant Core 2026.8.0 as the minimum and Core 2026.9.3 as the
+  current tested version.
+
 # Free Library Events v2026.9.21
 
 - Use one compact immutable source-expansion diagnostic snapshot for status
