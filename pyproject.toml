@@ -79,3 +79,6 @@ show_error_codes = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+
+[tool.pyright]
+typeCheckingMode = "basic"
