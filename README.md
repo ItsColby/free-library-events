@@ -44,4 +44,4 @@ Events refresh every six hours by default. Start with the default **Recommended*
 
 For data handling and uninstall steps, see [privacy and removal](docs/usage.md#privacy-and-removal). Developers can start with [architecture](docs/architecture.md) and [development](docs/development.md). Report reproducible integration problems in the [issue tracker](https://github.com/ItsColby/free-library-events/issues), without names, birth dates, subscription URLs, or private Home Assistant details.
 
-Licensed under the [MIT License](LICENSE). Previous changes and recorded release evidence are in [Release notes](RELEASE_NOTES.md).
+Licensed under the [MIT License](LICENSE). Changes in each version are in [GitHub Releases](https://github.com/ItsColby/free-library-events/releases).
