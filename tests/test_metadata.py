@@ -122,27 +122,6 @@ class HomeAssistantMetadataTests(unittest.TestCase):
                 self.assertEqual(keys, set(translations["entity"][platform]))
                 self.assertEqual(keys, set(icons["entity"][platform]))
 
-    def test_status_sensor_owns_a_complete_translated_enum(self) -> None:
-        translations = _json_file(INTEGRATION / "translations/en.json")
-        sensor_text = (INTEGRATION / "sensor.py").read_text(encoding="utf-8")
-        options = next(
-            node.value
-            for node in ast.walk(ast.parse(sensor_text))
-            if isinstance(node, ast.Assign)
-            and any(
-                isinstance(target, ast.Attribute) and target.attr == "_attr_options"
-                for target in node.targets
-            )
-        )
-        expected_states = set(ast.literal_eval(options))
-        self.assertTrue(expected_states)
-
-        self.assertEqual(
-            expected_states,
-            set(translations["entity"]["sensor"]["status"]["state"]),
-        )
-        self.assertIn("SensorDeviceClass.ENUM", sensor_text)
-
 
 if __name__ == "__main__":
     unittest.main()

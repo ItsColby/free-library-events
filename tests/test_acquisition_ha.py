@@ -4,14 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import ssl
-import sys
 from datetime import date, timedelta
-from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
-
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
 import aiohttp
 import pytest
@@ -44,8 +38,6 @@ from custom_components.free_library_events.diagnostics import (
     async_get_config_entry_diagnostics,
 )
 from custom_components.free_library_events.digest import BRANCHES
-
-pytestmark = pytest.mark.usefixtures("enable_custom_integrations")
 
 
 @pytest.mark.parametrize(
