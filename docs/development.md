@@ -6,73 +6,16 @@ reproduce it locally, and carry it into a release. For the data model and runtim
 boundaries, read [Architecture](architecture.md); for caller behavior and examples,
 read the [user guide](usage.md).
 
-## Select validation for the change
+## Validation lanes
 
-The default runner mode is `affected`. Preview an exact candidate comparison
-before running it:
-
-```powershell
-.\scripts\verify-release-local.ps1 -Base <base-commit> -Head HEAD -PlanOnly
-.\scripts\verify-release-local.ps1 -Base <base-commit> -Head HEAD
-```
-
-For a working edit, use `-ChangedPath scripts/verify-release-local.sh` instead of
-refs. On Linux, use `bash scripts/verify-release-local.sh affected container ""`
-with `--base <base-commit> --head HEAD`, or repeated `--path <relative-path>`;
-add `--plan-only` to inspect the JSON plan without snapshots or installations.
-The PowerShell `-PlanOnly` preview uses `python` from PATH, which must be Python
-3.14. Bash planning and container snapshot admission find an existing host
-Python 3.14 through `python3.14`, an installed uv runtime, or
-`VALIDATION_PYTHON`. The public-safety guard
-checks link policy before planning reads input sources and before snapshot
-copying. The planner, guard, and interpreter remain trusted executable tooling.
-Planning parses input source without importing the integration. Neither step
-downloads a runtime; HA execution keeps its isolated Python 3.14 lane.
-Explicit paths describe the complete change being accepted; they select checks,
-not the files read. Planning parses all Python sources under `custom_components`,
-`tests`, and `scripts`; container execution snapshots tracked and nonignored files.
-The refs mode requires a clean checkout with the candidate as its head and rejects
-uncommitted edits. An empty verified comparison selects no jobs. Missing
-comparison input and unmapped changes fail with an unresolved applicability message.
-
-The product-owned planner traces local Python imports and reviewed direct-file
-consumers. Changed tests run in their native collector; runtime changes include
-the affected success, failure, and recovery consumers in both maintained HA
-environments. A support requirements change selects that environment. Minimum
-requirements also select current compatibility, which reads both requirements
-files, without selecting unchanged current tests or typing. Runner and workflow
-dependency declarations are compared against the supplied base, or HEAD for
-working-path selections;
-changed harness, Python image, action, and tool pins select their actual consumers.
-An unavailable dependency comparison remains unresolved. The Bash runner remains
-the owner of exact local tool versions. Tooling, workflow, public-content and
-metadata checks are selected independently of product tests. Parsed `pyproject.toml`
-changes select Ruff's Python inputs, the minimum typing lane for mypy, or both
-HA test lanes for pytest settings. Comments and equivalent TOML formatting add no
-tool consumers; normal public-safety validation still applies. Changed unmapped
-configuration, invalid TOML, and unavailable base or candidate content remain
-unresolved instead of selecting an automatic complete run.
-
-Container execution rebuilds the affected plan from the captured payload, retaining
-the preview's resolved dependency baseline and selected paths. That plan contains
-the exact lane commands, which are reused without reading original source files
-again. Ref comparisons also require the captured files to match the clean candidate.
-Keep edits stable while the payload is being copied. Native execution uses one
-captured plan and requires its working tree to remain stable for the run.
-
-Pull requests and main pushes use this same selection. The stable Release gate
-requires the planning job and every selected job to succeed, and accepts skipped
-jobs only when the plan excludes them. Manual workflow dispatch explicitly runs
-the complete lanes. `all`, `unit`, `minimum`, `current`, and `release` remain
-explicit complete-lane requests. Reuse evidence whose source and environment
-have not changed; a merge alone does not invalidate it. Local checks do not
-replace HACS, authorize publication, or establish live behavior.
-
-When both Home Assistant lanes are selected locally, the container runner starts
-them together after selected static checks pass and waits for both before any
-selected Hassfest check or snapshot cleanup. Single-lane selections and native
-runs remain sequential. To limit local concurrency, run selected lanes separately
-with `--only minimum` and `--only current` on the Bash affected route.
+Every pull request and `main` push runs every validation lane: unit and static
+checks, both maintained Home Assistant environments, Hassfest, and HACS. Manual
+workflow dispatch runs the same lanes. The stable **Release gate** requires all
+of them to succeed. Locally, `all` runs the unit, both HA, and Hassfest lanes;
+`unit`, `minimum`, `current`, and `release` run one complete lane. Reuse
+evidence whose source and environment have not changed; a merge alone does not
+invalidate it. Local checks do not replace HACS, authorize publication, or
+establish live behavior.
 
 ## Start with the affected contract
 
@@ -97,45 +40,43 @@ To support another branch, extend the public registry in `digest.py` and verify
 that its feeds parse correctly. Include deterministic coverage for the addition
 and update the supported-branch documentation before treating it as supported.
 
-## Run the checks for the selected work
+## Run the checks locally
 
-The normal local entry point is the repository's container runner in `affected`
-mode. From the repository root on Windows, supply the candidate comparison:
+The normal local entry point is the repository's container runner. From the
+repository root on Windows:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-release-local.ps1 -Base <base-commit> -Head HEAD
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-release-local.ps1
 ```
 
 It requires the `Ubuntu-24.04` WSL distribution with rootless Podman, Bash, Git,
-the Python 3.14 locator above, and access to the image registries and package
-sources. The wrapper resolves
-both the worktree and its Git directory before invoking Linux validation.
+an existing host Python 3.14 for snapshot admission (found through `python3.14`,
+an installed uv runtime, or `VALIDATION_PYTHON`), and access to the image
+registries and package sources. The wrapper resolves both the worktree and its
+Git directory before invoking Linux validation.
 
 On Linux with rootless Podman:
 
 ```bash
-bash scripts/verify-release-local.sh affected container "" --base <base-commit> --head HEAD
+bash scripts/verify-release-local.sh all container
 ```
 
 Either script can also be invoked by path from another directory. Bash defaults
-to `affected container`; `--help` prints its argument contract. The PowerShell wrapper
-accepts `-Mode`, comparison refs or changed paths, and always uses containers for execution.
+to `all container`; `--help` prints its argument contract. The PowerShell wrapper
+accepts `-Mode` (default `all`) and always uses containers for execution.
 
 | Mode | Work performed |
 | --- | --- |
-| `affected` (default) | Only checks selected from the supplied comparison or explicit changed paths; unresolved applicability stops the run |
-| `unit` | actionlint with ShellCheck, shell-script ShellCheck, zizmor, Ruff format/lint, seven dependency-light test modules, compile checks, and public-content validation |
+| `unit` | actionlint with ShellCheck, shell-script ShellCheck, zizmor, Ruff format/lint, six dependency-light test modules, compile checks, and public-content validation |
 | `minimum` | Minimum Core environment, dependency check, strict mypy, and the complete HA test surface |
 | `current` | Current Core environment, metadata/dependency compatibility check, and the complete HA test surface |
 | `release` | Hassfest |
-| `all` | `unit`, both HA modes, then Hassfest |
+| `all` (default) | `unit`, both HA modes, then Hassfest |
 
-The other modes deliberately request complete lanes without comparison arguments.
-For example, use `-Mode unit` on Windows or
-`bash scripts/verify-release-local.sh unit container` on Linux. Use `-Mode all`
-or `bash scripts/verify-release-local.sh all container` only for an explicit
-complete local check. The name `release` means the Hassfest lane alone; it is
-not a complete release check or a publication command.
+For a single lane, use `-Mode unit` on Windows or
+`bash scripts/verify-release-local.sh unit container` on Linux. The name
+`release` means the Hassfest lane alone; it is not a complete release check or a
+publication command.
 
 During a small parser/render change, this dependency-light command gives quick
 feedback using Python 3.14:
@@ -188,7 +129,7 @@ retrying and preserve the failure output needed for diagnosis.
 The hosted unit and HA jobs use the same runner's native Linux backend:
 
 ```bash
-bash scripts/verify-release-local.sh affected native "" --base <base-commit> --head HEAD
+bash scripts/verify-release-local.sh all native
 ```
 
 Provide Python 3.14 with pip and `venv`, Bash, Git, and network access. Unit mode
@@ -251,8 +192,8 @@ artifacts separately.
 
 The [Validate workflow](../.github/workflows/validate.yaml) runs for pull requests,
 `main` pushes, and manual dispatch. Its unit, minimum, current, Hassfest, and HACS
-jobs feed the **Release gate** through the applicability plan. A selected job
-that skips or fails blocks the aggregate; an excluded job must be skipped.
+jobs all run and feed the **Release gate**, which fails unless every one of them
+succeeds.
 Jobs have bounded timeouts and read-only permissions; checkouts
 do not persist credentials. Action references are pinned, and
 [Dependabot](../.github/dependabot.yml) proposes weekly updates after a seven-day
@@ -278,13 +219,11 @@ Inspect the builder through a browser when its access challenge requires one.
 This is a release-time source review; the builder is not a runtime polling
 dependency. The integration's acquisition boundary remains the RSS endpoint.
 
-Use a release pull request and require terminal success for the planning job,
-every selected Validate job, and **Release gate**. Accept a skipped job only when
-the candidate's applicability plan excludes it; a selected job that skips blocks
-release. Inspect CodeQL's **Analyze (actions)**, **Analyze (python)**, and **CodeQL**
+Use a release pull request and require terminal success for every Validate job
+and **Release gate**. Inspect CodeQL's **Analyze (actions)**, **Analyze (python)**, and **CodeQL**
 checks. Merge with squash or rebase through branch protection without bypass.
-On the resulting `main` commit, require its Validate push run to satisfy the same
-plan-based success rule and CodeQL analysis to succeed; review complete logs and
+On the resulting `main` commit, require every job in its Validate push run to
+succeed and CodeQL analysis to succeed; review complete logs and
 resolve or explicitly disposition candidate-introduced alerts. Publish the
 immutable tag and GitHub Release only from that exact validated commit.
 
