@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import sys
 import threading
 import types
 from collections.abc import Callable
@@ -15,10 +14,6 @@ from pathlib import Path
 from typing import Literal
 from unittest.mock import AsyncMock, Mock, PropertyMock, patch
 from zoneinfo import ZoneInfo
-
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
 import aiohttp
 import pytest
@@ -35,6 +30,7 @@ from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.network import NoURLAvailableError
+from homeassistant.helpers.translation import async_get_translations
 from homeassistant.helpers.update_coordinator import UpdateFailed
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
@@ -135,8 +131,6 @@ from custom_components.free_library_events.webcal import (
     render_icalendar,
     webcal_subscription_urls,
 )
-
-pytestmark = pytest.mark.usefixtures("enable_custom_integrations")
 
 LOCAL_TIME_ZONE = ZoneInfo("America/New_York")
 
@@ -1567,6 +1561,13 @@ async def test_setup_entities_action_and_redacted_diagnostics(
     assert status_state.state == "ok"
     assert status_state.attributes["device_class"] == "enum"
     assert status_state.attributes["options"] == ["ok", "limited", "partial", "error"]
+    entity_translations = await async_get_translations(hass, "en", "entity", {DOMAIN})
+    status_prefix = f"component.{DOMAIN}.entity.sensor.status.state."
+    assert {
+        key.removeprefix(status_prefix)
+        for key in entity_translations
+        if key.startswith(status_prefix)
+    } == set(status_state.attributes["options"])
     assert status_state.attributes["next_week_events"] == 4
     assert status_state.attributes["current_age_coverage_complete"] is True
     assert status_state.attributes["supplemental_age_coverage_complete"] is True

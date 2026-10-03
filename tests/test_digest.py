@@ -1,20 +1,11 @@
 from __future__ import annotations
 
-import importlib.util
-import sys
 import unittest
 from datetime import date
 from itertools import permutations
-from pathlib import Path
 from unittest.mock import patch
 
-ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "custom_components" / "free_library_events" / "digest.py"
-SPEC = importlib.util.spec_from_file_location("free_library_events_digest", SCRIPT)
-assert SPEC and SPEC.loader
-digest = importlib.util.module_from_spec(SPEC)
-sys.modules[SPEC.name] = digest
-SPEC.loader.exec_module(digest)
+from custom_components.free_library_events import digest
 
 
 def rss(items: list[dict[str, str]]) -> str:
