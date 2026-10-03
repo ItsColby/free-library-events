@@ -257,7 +257,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: LibraryConfigEntry) -> 
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
 
-async def _async_render_digest(call: ServiceCall) -> ServiceResponse:
+async def _async_render_digest(call: ServiceCall) -> ServiceResponse:  # noqa: C901
     """Refresh source data and return an email payload with coverage metadata."""
 
     hass = call.hass

@@ -66,10 +66,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.mccabe]
-max-complexity = 17
-
-[tool.ruff.lint.per-file-ignores]
-"scripts/**" = ["T20"]
+max-complexity = 12
 
 [tool.mypy]
 python_version = "3.14"
@@ -79,3 +76,6 @@ show_error_codes = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+
+[dependency-groups]
+dev = ["pre-commit==4.6.2"]

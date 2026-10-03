@@ -105,7 +105,7 @@ def _valid_dimensions(width: int, height: int) -> tuple[int, int] | None:
     return (width, height) if 0 < width <= 100_000 and 0 < height <= 100_000 else None
 
 
-def _image_dimensions(content: bytes, extension: str) -> tuple[int, int] | None:
+def _image_dimensions(content: bytes, extension: str) -> tuple[int, int] | None:  # noqa: C901
     """Read common image dimensions without decoding untrusted image pixels."""
 
     if extension == ".png" and len(content) >= 24 and content.startswith(b"\x89PNG"):

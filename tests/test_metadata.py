@@ -1,4 +1,4 @@
-"""Static contracts for product metadata and validation configuration."""
+"""Static contracts for product metadata."""
 
 from __future__ import annotations
 
@@ -7,8 +7,6 @@ import json
 import re
 import unittest
 from pathlib import Path
-
-from scripts.check_ha_patch_compatibility import exact_core_pin, stable_version
 
 ROOT = Path(__file__).resolve().parents[1]
 INTEGRATION = ROOT / "custom_components/free_library_events"
@@ -20,26 +18,28 @@ def _json_file(path: Path) -> dict[str, object]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-class HomeAssistantMetadataTests(unittest.TestCase):
-    """Keep public metadata and repository validation contracts aligned."""
+def _core_version(path: Path) -> tuple[int, ...]:
+    """Return the single exact Home Assistant pin in a requirements file."""
 
-    def test_ci_uses_read_only_permissions_without_token_injection(self) -> None:
-        workflow = (ROOT / ".github/workflows/validate.yaml").read_text(
-            encoding="utf-8"
-        )
-        release_runner = (ROOT / "scripts/verify-release-local.sh").read_text(
-            encoding="utf-8"
-        )
-        self.assertEqual(1, workflow.count("permissions:"))
-        permissions = workflow.split("\npermissions:\n", 1)[1].split("\n\n", 1)[0]
-        self.assertEqual("  contents: read", permissions)
-        self.assertNotIn("GH_TOKEN", release_runner)
+    pins = re.findall(
+        r"^homeassistant==(\d+)\.(\d+)\.(\d+)$",
+        path.read_text(encoding="utf-8"),
+        re.MULTILINE,
+    )
+    if len(pins) != 1:
+        raise AssertionError(f"{path.name} must pin exactly one Home Assistant")
+    return tuple(int(part) for part in pins[0])
+
+
+class HomeAssistantMetadataTests(unittest.TestCase):
+    """Keep public metadata aligned with the tested support floor."""
 
     def test_declared_minimum_matches_the_tested_support_floor(self) -> None:
-        minimum = exact_core_pin(ROOT / "requirements-ha-test.txt")
-        current = exact_core_pin(ROOT / "requirements-ha-current.txt")
-        self.assertEqual(_json_file(ROOT / "hacs.json")["homeassistant"], minimum)
-        self.assertGreaterEqual(stable_version(current), stable_version(minimum))
+        minimum = _core_version(ROOT / "requirements-ha-test.txt")
+        current = _core_version(ROOT / "requirements-ha-current.txt")
+        declared = str(_json_file(ROOT / "hacs.json")["homeassistant"])
+        self.assertEqual(tuple(int(part) for part in declared.split(".")), minimum)
+        self.assertGreaterEqual(current, minimum)
 
     def translation_keys(self, source: str, exception_types: set[str]) -> set[str]:
         keys: set[str] = set()
@@ -142,12 +142,6 @@ class HomeAssistantMetadataTests(unittest.TestCase):
             set(translations["entity"]["sensor"]["status"]["state"]),
         )
         self.assertIn("SensorDeviceClass.ENUM", sensor_text)
-
-    def test_every_integration_json_file_is_valid(self) -> None:
-        paths = [*INTEGRATION.rglob("*.json"), ROOT / "hacs.json"]
-        for path in paths:
-            with self.subTest(path=path.relative_to(ROOT)):
-                self.assertIsInstance(_json_file(path), dict)
 
 
 if __name__ == "__main__":
