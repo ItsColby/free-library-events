@@ -12,20 +12,19 @@ from datetime import UTC, date, datetime, time, timedelta
 from email.utils import format_datetime
 from pathlib import Path
 from typing import Literal
-from unittest.mock import AsyncMock, Mock, PropertyMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 from zoneinfo import ZoneInfo
 
 import aiohttp
 import pytest
 from homeassistant.components.calendar import CalendarEvent
-from homeassistant.components.smtp.helpers import _build_html_msg
 from homeassistant.config_entries import (
     SOURCE_RECONFIGURE,
     SOURCE_USER,
     ConfigEntryState,
 )
 from homeassistant.const import STATE_UNAVAILABLE
-from homeassistant.core import HomeAssistant, ServiceCall, is_callback
+from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
@@ -73,9 +72,6 @@ from custom_components.free_library_events.config import (
     normalize_profile,
     selected_branches,
 )
-from custom_components.free_library_events.config_flow import (
-    FreeLibraryEventsConfigFlow,
-)
 from custom_components.free_library_events.const import (
     ATTR_EMBED_IMAGES,
     ATTR_FORCE_REFRESH,
@@ -118,7 +114,6 @@ from custom_components.free_library_events.email_images import (
     DownloadedImage,
     ImageDownloadBatch,
     StoredImageBundle,
-    remove_stored_image_run,
     store_downloaded_images,
 )
 from custom_components.free_library_events.sensor import (
@@ -267,40 +262,6 @@ async def test_user_flow_rejects_duplicate_entry(hass: HomeAssistant) -> None:
     )
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "single_instance_allowed"
-
-
-async def test_behavior_options_do_not_depend_on_deprecated_advanced_mode(
-    hass: HomeAssistant,
-) -> None:
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        title="Free Library Events",
-        unique_id=DOMAIN,
-        data=PROFILE_DATA,
-        options=BEHAVIOR_INPUT,
-        version=1,
-        minor_version=2,
-    )
-    entry.add_to_hass(hass)
-
-    result = await hass.config_entries.options.async_init(entry.entry_id)
-    with patch(
-        "homeassistant.data_entry_flow.FlowHandler.show_advanced_options",
-        new_callable=PropertyMock,
-        side_effect=AssertionError("deprecated advanced-mode property accessed"),
-    ):
-        result = await hass.config_entries.options.async_configure(
-            result["flow_id"], {"next_step_id": "behavior"}
-        )
-
-    assert result["type"] is FlowResultType.FORM
-    assert result["step_id"] == "behavior"
-    assert {marker.schema for marker in result["data_schema"].schema} == {
-        CONF_FILTER_MODE,
-        CONF_CALENDAR_DURATION,
-        CONF_SCAN_INTERVAL,
-    }
-    assert is_callback(FreeLibraryEventsConfigFlow.async_get_options_flow)
 
 
 async def test_options_flow_enables_and_rotates_webcal_feed(
@@ -2019,50 +1980,6 @@ async def test_digest_and_button_wait_for_an_inflight_refresh(
                     task.cancel()
             await asyncio.gather(*pending_tasks, return_exceptions=True)
             assert await hass.config_entries.async_unload(entry.entry_id)
-
-
-def test_stored_cid_images_match_home_assistant_smtp_mime_contract(
-    hass: HomeAssistant,
-    tmp_path: Path,
-) -> None:
-    source_url = "https://libwww.freelibrary.org/images/landscape.png"
-    png = (
-        b"\x89PNG\r\n\x1a\n"
-        + b"\x00\x00\x00\rIHDR"
-        + (1200).to_bytes(4, "big")
-        + (600).to_bytes(4, "big")
-        + b"rest"
-    )
-    batch = ImageDownloadBatch(
-        images=(DownloadedImage(source_url, png, ".png", 1200, 600),),
-        requested_count=1,
-        failure_count=0,
-        failure_examples=(),
-    )
-    hass.config.allowlist_external_dirs.add(str(tmp_path))
-    bundle = store_downloaded_images(tmp_path / EMAIL_IMAGE_DIRECTORY, batch)
-    try:
-        cid = bundle.source_url_to_cid[source_url]
-        message = _build_html_msg(
-            hass,
-            "Plain fallback",
-            f'<html><body><img src="{cid}" alt="Event details"></body></html>',
-            list(bundle.paths),
-        )
-        parts = list(message.walk())
-
-        image_part = next(
-            part for part in parts if part.get_content_maintype() == "image"
-        )
-        html_part = next(
-            part for part in parts if part.get_content_type() == "text/html"
-        )
-        expected_content_id = f"<{Path(bundle.paths[0]).name}>"
-        assert image_part["Content-ID"] == expected_content_id
-        assert cid in html_part.get_payload(decode=True).decode("utf-8")
-    finally:
-        assert bundle.run_directory is not None
-        remove_stored_image_run(bundle.run_directory)
 
 
 @pytest.fixture

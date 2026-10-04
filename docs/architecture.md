@@ -234,4 +234,4 @@ Changes should follow the owner that establishes the behavior. Parser or matchin
 
 Household delivery schedules, recipients, SMTP configuration, credentials, external calendar accounts, and any automation conditions or delivery deduplication belong to their Home Assistant or external-service owners. They are not additional persistent state for this integration. The product's contract ends at its entities, read-only feed, response payload, and temporary image files.
 
-The source contracts are exercised in [test_digest.py](../tests/test_digest.py), [test_integration_ha.py](../tests/test_integration_ha.py), [test_acquisition_ha.py](../tests/test_acquisition_ha.py), and [test_email_images.py](../tests/test_email_images.py). See [development.md](development.md) for how to run the maintained checks.
+See [development.md](development.md) for how to run the maintained checks.
