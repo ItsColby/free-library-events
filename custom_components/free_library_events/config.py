@@ -16,20 +16,12 @@ from .const import (
     CONF_CALENDAR_DURATION,
     CONF_CHILD_NAME,
     CONF_FILTER_MODE,
-    CONF_INCLUDE_INDEPENDENCE,
-    CONF_INCLUDE_PARKWAY_CENTRAL,
-    CONF_INCLUDE_PCI,
-    CONF_INCLUDE_SANTORE,
     CONF_PUBLISH_WEBCAL,
     CONF_SCAN_INTERVAL,
     CONF_WEBCAL_NAME,
     CONF_WEBCAL_TOKEN,
     DEFAULT_CALENDAR_DURATION,
     DEFAULT_FILTER_MODE,
-    DEFAULT_INCLUDE_INDEPENDENCE,
-    DEFAULT_INCLUDE_PARKWAY_CENTRAL,
-    DEFAULT_INCLUDE_PCI,
-    DEFAULT_INCLUDE_SANTORE,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_WEBCAL_NAME,
     MAX_CALENDAR_DURATION,
@@ -40,18 +32,15 @@ from .const import (
 )
 from .digest import BRANCHES, FILTER_MODES, Branch, normalize_child_name
 
+# Version-1.1 entries stored one boolean per branch (default on); migration
+# converts them to `branches` and removes them.
 LEGACY_BRANCH_CONFIG_KEYS = (
-    (CONF_INCLUDE_SANTORE, "SWK"),
-    (CONF_INCLUDE_INDEPENDENCE, "IND"),
-    (CONF_INCLUDE_PARKWAY_CENTRAL, "CEN"),
-    (CONF_INCLUDE_PCI, "PCI"),
+    ("include_charles_santore", "SWK"),
+    ("include_independence", "IND"),
+    ("include_parkway_central", "CEN"),
+    ("include_philadelphia_city_institute", "PCI"),
 )
-PROFILE_CONFIG_KEYS = (
-    CONF_CHILD_NAME,
-    CONF_BIRTH_DATE,
-    CONF_BRANCHES,
-    *(key for key, _branch_code in LEGACY_BRANCH_CONFIG_KEYS),
-)
+PROFILE_CONFIG_KEYS = (CONF_CHILD_NAME, CONF_BIRTH_DATE, CONF_BRANCHES)
 OPTION_CONFIG_KEYS = (
     CONF_FILTER_MODE,
     CONF_CALENDAR_DURATION,
@@ -185,20 +174,6 @@ def entry_profile(
     return normalize_profile({**dict(entry_data), **dict(entry_option_values)})
 
 
-def profile_entry_data(values: Mapping[str, Any]) -> dict[str, Any]:
-    """Return canonical profile data with version-1 branch compatibility mirrors."""
-
-    profile = normalize_profile(values)
-    selected = set(profile[CONF_BRANCHES])
-    return {
-        **profile,
-        **{
-            config_key: branch_code in selected
-            for config_key, branch_code in LEGACY_BRANCH_CONFIG_KEYS
-        },
-    }
-
-
 def entry_options(
     entry_data: Mapping[str, Any], entry_option_values: Mapping[str, Any]
 ) -> dict[str, Any]:
@@ -229,20 +204,32 @@ def entry_config(
     return {**profile, **options}
 
 
+def without_legacy_branch_keys(values: Mapping[str, Any]) -> dict[str, Any]:
+    """Return values without the version-1.1 branch booleans."""
+
+    legacy_keys = {key for key, _branch_code in LEGACY_BRANCH_CONFIG_KEYS}
+    return {key: value for key, value in values.items() if key not in legacy_keys}
+
+
 def migrated_entry_config(
     entry_data: Mapping[str, Any], entry_option_values: Mapping[str, Any]
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Split a version-1.1 combined entry into version-1.2 data and options."""
+    """Split a version-1.1 combined entry into version-1.3 data and options."""
 
-    profile = profile_entry_data({**dict(entry_data), **dict(entry_option_values)})
+    combined = {**dict(entry_data), **dict(entry_option_values)}
+    if CONF_BRANCHES not in combined:
+        combined[CONF_BRANCHES] = list(_legacy_branch_codes(combined))
+    profile = normalize_profile(combined)
     options = entry_options(entry_data, entry_option_values)
     migrated_data = {
-        key: value for key, value in entry_data.items() if key not in OPTION_CONFIG_KEYS
+        key: value
+        for key, value in without_legacy_branch_keys(entry_data).items()
+        if key not in OPTION_CONFIG_KEYS
     }
     migrated_data.update(profile)
     migrated_options = {
         key: value
-        for key, value in entry_option_values.items()
+        for key, value in without_legacy_branch_keys(entry_option_values).items()
         if key not in PROFILE_CONFIG_KEYS
     }
     return (
@@ -258,28 +245,29 @@ def selected_branches(config: Mapping[str, Any]) -> tuple[Branch, ...]:
 
 
 def _normalize_branch_codes(config: Mapping[str, Any]) -> tuple[str, ...]:
-    """Return valid selected branch codes from current or legacy fields."""
+    """Return valid selected branch codes."""
 
-    if CONF_BRANCHES in config:
-        raw_codes = config[CONF_BRANCHES]
-        if isinstance(raw_codes, str) or not isinstance(raw_codes, (list, tuple, set)):
-            raise ValueError("invalid_branches")
-        requested = {str(code) for code in raw_codes}
-        if requested - BRANCHES.keys():
-            raise ValueError("invalid_branches")
-        return tuple(code for code in BRANCHES if code in requested)
+    if CONF_BRANCHES not in config:
+        raise ValueError("branch_required")
+    raw_codes = config[CONF_BRANCHES]
+    requested = (
+        {str(code) for code in raw_codes}
+        if isinstance(raw_codes, (list, tuple, set))
+        else None
+    )
+    if requested is None or requested - BRANCHES.keys():
+        raise ValueError("invalid_branches")
+    return tuple(code for code in BRANCHES if code in requested)
 
-    legacy_defaults = {
-        CONF_INCLUDE_SANTORE: DEFAULT_INCLUDE_SANTORE,
-        CONF_INCLUDE_INDEPENDENCE: DEFAULT_INCLUDE_INDEPENDENCE,
-        CONF_INCLUDE_PARKWAY_CENTRAL: DEFAULT_INCLUDE_PARKWAY_CENTRAL,
-        CONF_INCLUDE_PCI: DEFAULT_INCLUDE_PCI,
-    }
+
+def _legacy_branch_codes(config: Mapping[str, Any]) -> tuple[str, ...]:
+    """Return branch codes selected by version-1.1 branch booleans."""
+
     try:
         return tuple(
             branch_code
             for config_key, branch_code in LEGACY_BRANCH_CONFIG_KEYS
-            if cv.boolean(config.get(config_key, legacy_defaults[config_key]))
+            if cv.boolean(config.get(config_key, True))
         )
     except TypeError, ValueError, vol.Invalid:
         raise ValueError("invalid_config") from None

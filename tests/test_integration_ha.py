@@ -11,7 +11,7 @@ from dataclasses import replace
 from datetime import UTC, date, datetime, time, timedelta
 from email.utils import format_datetime
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 from unittest.mock import AsyncMock, Mock, patch
 from zoneinfo import ZoneInfo
 
@@ -68,6 +68,7 @@ from custom_components.free_library_events.calendar_data import (
 from custom_components.free_library_events.config import (
     LEGACY_BRANCH_CONFIG_KEYS,
     entry_config,
+    migrated_entry_config,
     normalize_options,
     normalize_profile,
     selected_branches,
@@ -80,14 +81,11 @@ from custom_components.free_library_events.const import (
     CONF_CALENDAR_DURATION,
     CONF_CHILD_NAME,
     CONF_FILTER_MODE,
-    CONF_INCLUDE_INDEPENDENCE,
-    CONF_INCLUDE_PARKWAY_CENTRAL,
-    CONF_INCLUDE_PCI,
-    CONF_INCLUDE_SANTORE,
     CONF_PUBLISH_WEBCAL,
     CONF_SCAN_INTERVAL,
     CONF_WEBCAL_NAME,
     CONF_WEBCAL_TOKEN,
+    CONFIG_ENTRY_MINOR_VERSION,
     DOMAIN,
     SERVICE_RENDER_DIGEST,
 )
@@ -132,10 +130,7 @@ LOCAL_TIME_ZONE = ZoneInfo("America/New_York")
 USER_INPUT = {
     CONF_CHILD_NAME: "Avery",
     CONF_BIRTH_DATE: "2025-01-15",
-    CONF_INCLUDE_SANTORE: True,
-    CONF_INCLUDE_INDEPENDENCE: True,
-    CONF_INCLUDE_PARKWAY_CENTRAL: True,
-    CONF_INCLUDE_PCI: True,
+    CONF_BRANCHES: list(BRANCHES),
     CONF_FILTER_MODE: "Recommended",
     CONF_CALENDAR_DURATION: 60,
     CONF_SCAN_INTERVAL: 21600,
@@ -147,12 +142,9 @@ PROFILE_INPUT = {
     CONF_BRANCHES: ["SWK", "CEN"],
 }
 
-PROFILE_DATA = PROFILE_INPUT | {
-    CONF_INCLUDE_SANTORE: True,
-    CONF_INCLUDE_INDEPENDENCE: False,
-    CONF_INCLUDE_PARKWAY_CENTRAL: True,
-    CONF_INCLUDE_PCI: False,
-}
+LEGACY_BRANCH_INPUT = dict.fromkeys(
+    (key for key, _branch_code in LEGACY_BRANCH_CONFIG_KEYS), True
+)
 
 BEHAVIOR_INPUT = {
     CONF_FILTER_MODE: "Recommended",
@@ -180,7 +172,7 @@ async def test_user_flow_creates_single_entry(hass: HomeAssistant) -> None:
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["title"] == "Free Library Events"
-    assert result["data"] == PROFILE_DATA
+    assert result["data"] == PROFILE_INPUT
 
 
 async def test_reconfigure_flow_updates_profile_data_only(
@@ -190,10 +182,10 @@ async def test_reconfigure_flow_updates_profile_data_only(
         domain=DOMAIN,
         title="Free Library Events",
         unique_id=DOMAIN,
-        data={**PROFILE_DATA, "future_profile": {"enabled": True}},
+        data={**PROFILE_INPUT, "future_profile": {"enabled": True}},
         options=BEHAVIOR_INPUT,
         version=1,
-        minor_version=2,
+        minor_version=CONFIG_ENTRY_MINOR_VERSION,
     )
     entry.add_to_hass(hass)
 
@@ -215,13 +207,7 @@ async def test_reconfigure_flow_updates_profile_data_only(
 
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reconfigure_successful"
-    assert entry.data == updated_profile | {
-        CONF_INCLUDE_SANTORE: False,
-        CONF_INCLUDE_INDEPENDENCE: True,
-        CONF_INCLUDE_PARKWAY_CENTRAL: False,
-        CONF_INCLUDE_PCI: True,
-        "future_profile": {"enabled": True},
-    }
+    assert entry.data == updated_profile | {"future_profile": {"enabled": True}}
     assert entry.options == BEHAVIOR_INPUT
 
 
@@ -232,10 +218,10 @@ async def test_reconfigure_flow_does_not_reload_unchanged_profile(
         domain=DOMAIN,
         title="Free Library Events",
         unique_id=DOMAIN,
-        data=PROFILE_DATA,
+        data=PROFILE_INPUT,
         options=BEHAVIOR_INPUT,
         version=1,
-        minor_version=2,
+        minor_version=CONFIG_ENTRY_MINOR_VERSION,
     )
     entry.add_to_hass(hass)
 
@@ -250,7 +236,7 @@ async def test_reconfigure_flow_does_not_reload_unchanged_profile(
 
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reconfigure_successful"
-    assert entry.data == PROFILE_DATA
+    assert entry.data == PROFILE_INPUT
     schedule_reload.assert_not_called()
 
 
@@ -272,10 +258,10 @@ async def test_options_flow_enables_and_rotates_webcal_feed(
         domain=DOMAIN,
         title="Free Library Events",
         unique_id=DOMAIN,
-        data=PROFILE_DATA,
+        data=PROFILE_INPUT,
         options={**BEHAVIOR_INPUT, **future_option},
         version=1,
-        minor_version=2,
+        minor_version=CONFIG_ENTRY_MINOR_VERSION,
     )
     entry.add_to_hass(hass)
     hass.config.external_url = "https://ha.example.test"
@@ -372,10 +358,10 @@ async def test_webcal_rotation_survives_url_recovery(
         domain=DOMAIN,
         title="Free Library Events",
         unique_id=DOMAIN,
-        data=PROFILE_DATA,
+        data=PROFILE_INPUT,
         options=original_options,
         version=1,
-        minor_version=2,
+        minor_version=CONFIG_ENTRY_MINOR_VERSION,
     )
     entry.add_to_hass(hass)
     result = await hass.config_entries.options.async_init(entry.entry_id)
@@ -469,10 +455,10 @@ async def test_webcal_preview_rejects_competing_options_update(
         domain=DOMAIN,
         title="Free Library Events",
         unique_id=DOMAIN,
-        data=PROFILE_DATA,
+        data=PROFILE_INPUT,
         options=BEHAVIOR_INPUT,
         version=1,
-        minor_version=2,
+        minor_version=CONFIG_ENTRY_MINOR_VERSION,
     )
     entry.add_to_hass(hass)
     hass.config.external_url = "https://ha.example.test"
@@ -523,10 +509,10 @@ async def test_webcal_preview_rejects_external_profile_update(
         domain=DOMAIN,
         title="Free Library Events",
         unique_id=DOMAIN,
-        data=PROFILE_DATA,
+        data=PROFILE_INPUT,
         options=BEHAVIOR_INPUT,
         version=1,
-        minor_version=2,
+        minor_version=CONFIG_ENTRY_MINOR_VERSION,
     )
     entry.add_to_hass(hass)
     hass.config.external_url = "https://ha.example.test"
@@ -571,7 +557,7 @@ async def test_options_flow_disables_webcal_and_removes_token(
         domain=DOMAIN,
         title="Free Library Events",
         unique_id=DOMAIN,
-        data=PROFILE_DATA,
+        data=PROFILE_INPUT,
         options={
             **BEHAVIOR_INPUT,
             CONF_PUBLISH_WEBCAL: True,
@@ -580,7 +566,7 @@ async def test_options_flow_disables_webcal_and_removes_token(
             "future_behavior": {"enabled": True},
         },
         version=1,
-        minor_version=2,
+        minor_version=CONFIG_ENTRY_MINOR_VERSION,
     )
     entry.add_to_hass(hass)
 
@@ -609,10 +595,10 @@ async def test_options_flow_does_not_save_webcal_without_a_home_assistant_url(
         domain=DOMAIN,
         title="Free Library Events",
         unique_id=DOMAIN,
-        data=PROFILE_DATA,
+        data=PROFILE_INPUT,
         options=BEHAVIOR_INPUT,
         version=1,
-        minor_version=2,
+        minor_version=CONFIG_ENTRY_MINOR_VERSION,
     )
     entry.add_to_hass(hass)
 
@@ -646,10 +632,10 @@ async def test_options_flow_updates_behavior_without_profile_data(
         domain=DOMAIN,
         title="Free Library Events",
         unique_id=DOMAIN,
-        data=PROFILE_DATA,
+        data=PROFILE_INPUT,
         options={**BEHAVIOR_INPUT, **future_option},
         version=1,
-        minor_version=2,
+        minor_version=CONFIG_ENTRY_MINOR_VERSION,
     )
     entry.add_to_hass(hass)
 
@@ -662,7 +648,7 @@ async def test_options_flow_updates_behavior_without_profile_data(
     )
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert entry.data == PROFILE_DATA
+    assert entry.data == PROFILE_INPUT
     assert entry.options[CONF_FILTER_MODE] == "Strict"
     assert entry.options[CONF_CALENDAR_DURATION] == 60
     assert entry.options[CONF_SCAN_INTERVAL] == 21600
@@ -745,19 +731,13 @@ def test_profile_and_webcal_validation_reject_unknown_or_unsafe_values() -> None
     assert private_detail not in repr(invalid_birth_date.value)
 
 
-def test_entry_config_coerces_non_ui_boolean_strings() -> None:
-    disabled = dict.fromkeys(
-        (
-            CONF_INCLUDE_SANTORE,
-            CONF_INCLUDE_INDEPENDENCE,
-            CONF_INCLUDE_PARKWAY_CENTRAL,
-            CONF_INCLUDE_PCI,
-        ),
-        "false",
-    )
+def test_migration_coerces_non_ui_boolean_strings() -> None:
+    disabled = dict.fromkeys(LEGACY_BRANCH_INPUT, "false")
 
     with pytest.raises(ValueError, match="branch_required"):
-        entry_config(USER_INPUT | disabled, {})
+        migrated_entry_config(_legacy_input() | disabled, {})
+    with pytest.raises(ValueError, match="invalid_config"):
+        migrated_entry_config(_legacy_input() | {"include_independence": "maybe"}, {})
 
 
 def test_entry_config_rejects_non_string_child_name() -> None:
@@ -765,15 +745,15 @@ def test_entry_config_rejects_non_string_child_name() -> None:
         entry_config(USER_INPUT | {CONF_CHILD_NAME: None}, {})
 
 
-def test_all_sources_default_on_for_legacy_and_new_entries() -> None:
+def test_all_sources_default_on_for_legacy_entries() -> None:
     legacy_input = {
         key: value
-        for key, value in USER_INPUT.items()
-        if key not in {CONF_INCLUDE_PARKWAY_CENTRAL, CONF_INCLUDE_PCI}
+        for key, value in _legacy_input().items()
+        if key not in {"include_parkway_central", "include_philadelphia_city_institute"}
     }
-    legacy_config = entry_config(legacy_input, {})
-    assert legacy_config[CONF_BRANCHES] == ["SWK", "IND", "CEN", "PCI"]
-    assert [branch.code for branch in selected_branches(legacy_config)] == [
+    data, _options = migrated_entry_config(legacy_input, {})
+    assert data[CONF_BRANCHES] == ["SWK", "IND", "CEN", "PCI"]
+    assert [branch.code for branch in selected_branches(data)] == [
         "SWK",
         "IND",
         "CEN",
@@ -789,11 +769,11 @@ async def test_version_one_entry_migrates_profile_and_behavior_without_token_lea
         domain=DOMAIN,
         title="Free Library Events",
         unique_id=DOMAIN,
-        data=USER_INPUT | {"future_data": {"version": 2}},
-        options=USER_INPUT
+        data=_legacy_input() | {"future_data": {"version": 2}},
+        options=_legacy_input()
         | {
             CONF_CHILD_NAME: "Jordan",
-            CONF_INCLUDE_PCI: False,
+            "include_philadelphia_city_institute": False,
             CONF_FILTER_MODE: "Strict",
             CONF_PUBLISH_WEBCAL: True,
             CONF_WEBCAL_TOKEN: token,
@@ -806,15 +786,11 @@ async def test_version_one_entry_migrates_profile_and_behavior_without_token_lea
     assert await async_migrate_entry(hass, entry)
 
     assert entry.version == 1
-    assert entry.minor_version == 2
+    assert entry.minor_version == CONFIG_ENTRY_MINOR_VERSION
     assert entry.data == {
         CONF_CHILD_NAME: "Jordan",
         CONF_BIRTH_DATE: "2025-01-15",
         CONF_BRANCHES: ["SWK", "IND", "CEN"],
-        CONF_INCLUDE_SANTORE: True,
-        CONF_INCLUDE_INDEPENDENCE: True,
-        CONF_INCLUDE_PARKWAY_CENTRAL: True,
-        CONF_INCLUDE_PCI: False,
         "future_data": {"version": 2},
     }
     assert entry.options[CONF_FILTER_MODE] == "Strict"
@@ -822,12 +798,44 @@ async def test_version_one_entry_migrates_profile_and_behavior_without_token_lea
     assert entry.options["future_options"] == {"version": 2}
     assert CONF_CHILD_NAME not in entry.options
     assert CONF_BIRTH_DATE not in entry.options
+    assert not LEGACY_BRANCH_INPUT.keys() & entry.options.keys()
     assert token not in repr(entry.data)
-    assert [
-        branch_code
-        for config_key, branch_code in LEGACY_BRANCH_CONFIG_KEYS
-        if entry.data[config_key]
-    ] == ["SWK", "IND", "CEN"]
+
+
+async def test_minor_version_two_entry_drops_legacy_branch_mirrors(
+    hass: HomeAssistant,
+) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Free Library Events",
+        unique_id=DOMAIN,
+        data=PROFILE_INPUT
+        | LEGACY_BRANCH_INPUT
+        | {"include_independence": False, "future_data": {"version": 2}},
+        options=BEHAVIOR_INPUT | {"future_options": {"version": 2}},
+        version=1,
+        minor_version=2,
+    )
+    entry.add_to_hass(hass)
+
+    assert await async_migrate_entry(hass, entry)
+
+    assert entry.minor_version == CONFIG_ENTRY_MINOR_VERSION
+    assert entry.data == PROFILE_INPUT | {"future_data": {"version": 2}}
+    assert entry.options == BEHAVIOR_INPUT | {"future_options": {"version": 2}}
+
+
+async def test_newer_minor_version_entry_is_rejected(hass: HomeAssistant) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=PROFILE_INPUT,
+        version=1,
+        minor_version=CONFIG_ENTRY_MINOR_VERSION + 1,
+    )
+    entry.add_to_hass(hass)
+
+    assert not await async_migrate_entry(hass, entry)
+    assert entry.data == PROFILE_INPUT
 
 
 def test_status_projection_deadline_uses_local_tuesday_across_dst() -> None:
@@ -3959,3 +3967,16 @@ def _entry() -> MockConfigEntry:
         unique_id=DOMAIN,
         data=USER_INPUT,
     )
+
+
+def _legacy_input() -> dict[str, Any]:
+    """Return version-1.1 entry data, which stored one boolean per branch."""
+
+    return {
+        CONF_CHILD_NAME: "Avery",
+        CONF_BIRTH_DATE: "2025-01-15",
+        **LEGACY_BRANCH_INPUT,
+        CONF_FILTER_MODE: "Recommended",
+        CONF_CALENDAR_DURATION: 60,
+        CONF_SCAN_INTERVAL: 21600,
+    }
