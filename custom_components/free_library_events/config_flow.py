@@ -28,7 +28,7 @@ from .config import (
     entry_options,
     entry_profile,
     normalize_options,
-    profile_entry_data,
+    normalize_profile,
     updated_entry_options,
 )
 from .const import (
@@ -41,6 +41,7 @@ from .const import (
     CONF_SCAN_INTERVAL,
     CONF_WEBCAL_NAME,
     CONF_WEBCAL_TOKEN,
+    CONFIG_ENTRY_MINOR_VERSION,
     DEFAULT_WEBCAL_NAME,
     DOMAIN,
     MAX_CALENDAR_DURATION,
@@ -141,7 +142,7 @@ class FreeLibraryEventsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle setup from Home Assistant's integration UI."""
 
     VERSION = 1
-    MINOR_VERSION = 2
+    MINOR_VERSION = CONFIG_ENTRY_MINOR_VERSION
 
     @staticmethod
     @callback
@@ -160,7 +161,7 @@ class FreeLibraryEventsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
         if user_input is not None:
             try:
-                data = profile_entry_data(user_input)
+                data = normalize_profile(user_input)
             except (TypeError, ValueError) as err:
                 errors["base"] = str(err) or "invalid_config"
             else:
@@ -187,7 +188,7 @@ class FreeLibraryEventsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
         if user_input is not None:
             try:
-                profile = profile_entry_data(user_input)
+                profile = normalize_profile(user_input)
             except (TypeError, ValueError) as err:
                 errors["base"] = str(err) or "invalid_config"
             else:
