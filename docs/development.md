@@ -65,8 +65,8 @@ HA environments.
 The supported minimum Core is pinned in
 [`requirements-ha-test.txt`](../requirements-ha-test.txt) and the current target
 in [`requirements-ha-current.txt`](../requirements-ha-current.txt). Keep these
-targets, workflow job names, and the minimum in [`hacs.json`](../hacs.json)
-consistent when support changes. An exact current lane is evidence for that Core
+targets and the minimum in [`hacs.json`](../hacs.json) consistent when support
+changes. An exact current lane is evidence for that Core
 version, not an assurance about every newer one.
 
 Gitleaks uses its default credential rules plus the repository's

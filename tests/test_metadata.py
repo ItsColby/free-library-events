@@ -18,28 +18,40 @@ def _json_file(path: Path) -> dict[str, object]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _core_version(path: Path) -> tuple[int, ...]:
-    """Return the single exact Home Assistant pin in a requirements file."""
-
-    pins = re.findall(
-        r"^homeassistant==(\d+)\.(\d+)\.(\d+)$",
-        path.read_text(encoding="utf-8"),
-        re.MULTILINE,
-    )
+def _exact_core_pin(path: Path) -> str:
+    """Read one unconditional exact Core pin, allowing other requirements."""
+    pins = []
+    for line in path.read_text(encoding="utf-8-sig").splitlines():
+        content = line.split("#", 1)[0].strip()
+        if not re.match(r"homeassistant(?=[^A-Za-z0-9_.-]|$)", content, re.IGNORECASE):
+            continue
+        match = re.fullmatch(
+            r"homeassistant\s*==\s*([0-9]{4}\.(?:[1-9]|1[0-2])\.(?:0|[1-9][0-9]*))",
+            content,
+            re.IGNORECASE,
+        )
+        if match is None:
+            raise AssertionError(
+                f"{path.name} must use an unconditional stable exact Home Assistant pin"
+            )
+        pins.append(match.group(1))
     if len(pins) != 1:
-        raise AssertionError(f"{path.name} must pin exactly one Home Assistant")
-    return tuple(int(part) for part in pins[0])
+        raise AssertionError(f"{path.name} must contain exactly one Home Assistant pin")
+    return pins[0]
+
+
+def _version(value: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in value.split("."))
 
 
 class HomeAssistantMetadataTests(unittest.TestCase):
     """Keep public metadata aligned with the tested support floor."""
 
     def test_declared_minimum_matches_the_tested_support_floor(self) -> None:
-        minimum = _core_version(ROOT / "requirements-ha-test.txt")
-        current = _core_version(ROOT / "requirements-ha-current.txt")
-        declared = str(_json_file(ROOT / "hacs.json")["homeassistant"])
-        self.assertEqual(tuple(int(part) for part in declared.split(".")), minimum)
-        self.assertGreaterEqual(current, minimum)
+        minimum = _exact_core_pin(ROOT / "requirements-ha-test.txt")
+        current = _exact_core_pin(ROOT / "requirements-ha-current.txt")
+        self.assertEqual(str(_json_file(ROOT / "hacs.json")["homeassistant"]), minimum)
+        self.assertGreaterEqual(_version(current), _version(minimum))
 
     def translation_keys(self, source: str, exception_types: set[str]) -> set[str]:
         keys: set[str] = set()
