@@ -93,6 +93,38 @@ class HomeAssistantMetadataTests(unittest.TestCase):
         self.assertIn("library_source_update_failed", translated_failures)
         self.assertTrue(translated_failures <= set(strings["exceptions"]))
 
+    def test_service_metadata_has_translations_and_current_icons(self) -> None:
+        services_text = (INTEGRATION / "services.yaml").read_text(encoding="utf-8")
+        translations = _json_file(INTEGRATION / "translations/en.json")
+        icons = _json_file(INTEGRATION / "icons.json")
+        service_matches = list(
+            re.finditer(r"^([a-z_]+):$", services_text, re.MULTILINE)
+        )
+        service_keys = {match.group(1) for match in service_matches}
+
+        self.assertEqual(service_keys, set(translations["services"]))
+        self.assertEqual(service_keys, set(icons["services"]))
+        for index, match in enumerate(service_matches):
+            key = match.group(1)
+            block_end = (
+                service_matches[index + 1].start()
+                if index + 1 < len(service_matches)
+                else len(services_text)
+            )
+            service_block = services_text[match.end() : block_end]
+            field_keys = set(
+                re.findall(r"^    ([a-z_]+):$", service_block, re.MULTILINE)
+            )
+            translated = translations["services"][key]
+            self.assertIn("name", translated)
+            self.assertIn("description", translated)
+            self.assertEqual(field_keys, set(translated["fields"]))
+            for field in translated["fields"].values():
+                self.assertIn("name", field)
+                self.assertIn("description", field)
+            self.assertEqual({"service"}, set(icons["services"][key]))
+            self.assertRegex(icons["services"][key]["service"], r"^mdi:[a-z0-9-]+$")
+
     def test_entity_translation_keys_have_current_icons(self) -> None:
         translations = _json_file(INTEGRATION / "translations/en.json")
         icons = _json_file(INTEGRATION / "icons.json")
