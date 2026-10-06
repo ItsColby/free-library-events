@@ -12,7 +12,9 @@ The [Validate workflow](../.github/workflows/validate.yaml) defines the CI jobs
 and the **Release gate** that requires them,
 [`.pre-commit-config.yaml`](../.pre-commit-config.yaml) the static hooks, and
 [`.github/dependabot.yml`](../.github/dependabot.yml) the dependency update
-policy. Local checks do not replace HACS, authorize publication, or establish
+policy. The [Dependabot auto-merge workflow](../.github/workflows/dependabot-auto-merge.yaml)
+merges its Actions and pre-commit updates once required checks pass. Local
+checks do not replace HACS, authorize publication, or establish
 live behavior.
 
 ## Start with the affected contract
