@@ -13,9 +13,7 @@ and the **Release gate** that requires them,
 [`.pre-commit-config.yaml`](../.pre-commit-config.yaml) the static hooks, and
 [`.github/dependabot.yml`](../.github/dependabot.yml) the dependency update
 policy. The [Dependabot auto-merge workflow](../.github/workflows/dependabot-auto-merge.yaml)
-merges its Actions and pre-commit updates once required checks pass. Local
-checks do not replace HACS, authorize publication, or establish
-live behavior.
+merges its Actions and pre-commit updates once required checks pass.
 
 ## Start with the affected contract
 
