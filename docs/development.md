@@ -52,9 +52,10 @@ Formatting, lint, and strict typing policy live in
 [`pyproject.toml`](../pyproject.toml).
 
 The Home Assistant tests need Linux (or WSL) and Python 3.14. Use a separate
-virtual environment for each maintained environment, install it the way its
-workflow job does, then run `python -m mypy custom_components/free_library_events`
-and `python -m pytest tests`, or name individual test modules while iterating.
+virtual environment for each maintained environment, install its dependency
+group (`uv pip install --group ha-minimum` or `--group ha-current`), then run
+`python -m mypy` and `python -m pytest tests`, or name individual test modules
+while iterating.
 Hassfest and HACS run only in CI.
 
 For documentation changes, validate claims against their source owners, check
@@ -62,9 +63,8 @@ links and examples, and run metadata or behavior tests affected by the wording.
 For runtime work, exercise the changed success/failure paths and both maintained
 HA environments.
 
-The supported minimum Core is pinned in
-[`requirements-ha-test.txt`](../requirements-ha-test.txt) and the current target
-in [`requirements-ha-current.txt`](../requirements-ha-current.txt). Keep these
+The supported minimum Core is pinned in the `ha-minimum` and the current target
+in the `ha-current` [dependency group](../pyproject.toml). Keep these
 targets and the minimum in [`hacs.json`](../hacs.json) consistent when support
 changes. An exact current lane is evidence for that Core
 version, not an assurance about every newer one.

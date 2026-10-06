@@ -52,7 +52,7 @@ OPTION_CONFIG_KEYS = (
 
 
 def default_config() -> dict[str, Any]:
-    """Return the complete safe runtime defaults."""
+    """Return defaults for the branch selection and optional settings."""
 
     return {
         CONF_BRANCHES: list(BRANCHES),
@@ -169,7 +169,7 @@ def _normalize_integer(value: object, error: str) -> int:
 def entry_profile(
     entry_data: Mapping[str, Any], entry_option_values: Mapping[str, Any]
 ) -> dict[str, Any]:
-    """Return profile data, honoring legacy version-1 options overrides."""
+    """Return normalized profile data, with options overriding entry data."""
 
     return normalize_profile({**dict(entry_data), **dict(entry_option_values)})
 
@@ -177,7 +177,7 @@ def entry_profile(
 def entry_options(
     entry_data: Mapping[str, Any], entry_option_values: Mapping[str, Any]
 ) -> dict[str, Any]:
-    """Return optional behavior, honoring legacy version-1 data fields."""
+    """Return normalized options, with options overriding entry data."""
 
     return normalize_options({**dict(entry_data), **dict(entry_option_values)})
 
@@ -214,7 +214,7 @@ def without_legacy_branch_keys(values: Mapping[str, Any]) -> dict[str, Any]:
 def migrated_entry_config(
     entry_data: Mapping[str, Any], entry_option_values: Mapping[str, Any]
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Split a version-1.1 combined entry into version-1.3 data and options."""
+    """Split a version-1.1 combined entry into current data and options."""
 
     combined = {**dict(entry_data), **dict(entry_option_values)}
     if CONF_BRANCHES not in combined:
