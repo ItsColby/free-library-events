@@ -1,11 +1,20 @@
 from __future__ import annotations
 
 import unittest
-from datetime import date
+import urllib.parse
+import xml.etree.ElementTree as ET
+from dataclasses import replace
+from datetime import date, datetime, time
 from itertools import permutations
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
-from custom_components.free_library_events import digest
+from custom_components.free_library_events import digest, email_render, matching, model
+
+
+def naive_datetime(*parts: int) -> datetime:
+    """Build the timezone-free end time that feed parsing produces."""
+
+    return datetime(*parts)  # noqa: DTZ001
 
 
 def rss(items: list[dict[str, str]]) -> str:
@@ -28,13 +37,13 @@ def rss(items: list[dict[str, str]]) -> str:
 
 class DigestTests(unittest.TestCase):
     def test_custom_feed_combines_branch_with_singular_age_parameter(self) -> None:
-        url = digest.BRANCHES["CEN"].rss_url_for_age("Baby")
+        url = model.BRANCHES["CEN"].rss_url_for_age("Baby")
 
         self.assertIn("location=CEN", url)
         self.assertIn("age=Baby", url)
         self.assertNotIn("ages=", url)
 
-        expanded_url = digest.BRANCHES["CEN"].rss_url_for_age_and_type(
+        expanded_url = model.BRANCHES["CEN"].rss_url_for_age_and_type(
             "Young Adult", "Family Programs"
         )
         self.assertIn("location=CEN", expanded_url)
@@ -44,7 +53,7 @@ class DigestTests(unittest.TestCase):
 
     def test_age_source_plan_includes_overlapping_official_categories(self) -> None:
         self.assertEqual(
-            digest.age_categories_for_window(
+            model.age_categories_for_window(
                 date(2025, 1, 15),
                 date(2026, 7, 20),
                 date(2026, 7, 26),
@@ -65,7 +74,7 @@ class DigestTests(unittest.TestCase):
         for birth_date, expected in cases:
             with self.subTest(birth_date=birth_date):
                 self.assertEqual(
-                    digest.age_categories_for_window(
+                    model.age_categories_for_window(
                         birth_date,
                         date(2026, 7, 18),
                         date(2026, 7, 18),
@@ -75,7 +84,7 @@ class DigestTests(unittest.TestCase):
 
     def test_source_plan_uses_complete_life_stage_provenance(self) -> None:
         self.assertEqual(
-            digest.source_age_categories_for_window(
+            model.source_age_categories_for_window(
                 date(2025, 11, 7),
                 date(2026, 7, 18),
                 date(2026, 10, 16),
@@ -83,7 +92,7 @@ class DigestTests(unittest.TestCase):
             ("Baby", "Toddler", "Preschool", "School Age", "Young Adult"),
         )
         self.assertEqual(
-            digest.source_age_categories_for_window(
+            model.source_age_categories_for_window(
                 date(1996, 7, 18),
                 date(2026, 7, 18),
                 date(2026, 10, 16),
@@ -91,7 +100,7 @@ class DigestTests(unittest.TestCase):
             ("Adult",),
         )
         self.assertEqual(
-            digest.source_age_categories_for_window(
+            model.source_age_categories_for_window(
                 date(2008, 8, 15),
                 date(2026, 6, 1),
                 date(2026, 9, 1),
@@ -100,19 +109,19 @@ class DigestTests(unittest.TestCase):
         )
 
     def test_official_age_category_precedes_title_only_inference(self) -> None:
-        event = digest.Event(
+        event = model.Event(
             title="Preschool Storytime",
             event_date=date(2026, 7, 24),
-            start_time=digest.time(10, 30),
+            start_time=time(10, 30),
             description="Stories, songs, and movement with caregivers.",
             link="https://example.test/events/structured-age",
             image_url="",
-            branch=digest.BRANCHES["CEN"],
+            branch=model.BRANCHES["CEN"],
             age_categories=("Toddler",),
         )
 
         self.assertEqual(
-            digest.classify_event(event, date(2025, 1, 15)),
+            matching.classify_event(event, date(2025, 1, 15)),
             "best",
         )
 
@@ -148,49 +157,49 @@ class DigestTests(unittest.TestCase):
 
         for title, description, age_categories, expected in cases:
             with self.subTest(title=title):
-                event = digest.Event(
+                event = model.Event(
                     title=title,
                     event_date=date(2026, 7, 24),
-                    start_time=digest.time(10, 0),
+                    start_time=time(10, 0),
                     description=description,
                     link=f"https://example.test/{title}",
                     image_url="",
-                    branch=digest.BRANCHES["SWK"],
+                    branch=model.BRANCHES["SWK"],
                     age_categories=age_categories,
                 )
                 self.assertEqual(
-                    digest.classify_event(event, date(2025, 11, 7)),
+                    matching.classify_event(event, date(2025, 11, 7)),
                     expected,
                 )
 
     def test_nonmatching_feed_category_still_rejects_generic_family_copy(
         self,
     ) -> None:
-        event = digest.Event(
+        event = model.Event(
             title="Family Art Workshop",
             event_date=date(2026, 7, 24),
-            start_time=digest.time(10, 0),
+            start_time=time(10, 0),
             description="Families can make art together.",
             link="https://example.test/family-art",
             image_url="",
-            branch=digest.BRANCHES["SWK"],
+            branch=model.BRANCHES["SWK"],
             age_categories=("School Age",),
         )
 
         self.assertEqual(
-            digest.classify_event(event, date(2025, 11, 7)),
+            matching.classify_event(event, date(2025, 11, 7)),
             "exclude",
         )
 
     def test_incidental_baby_references_do_not_override_publisher_age(self) -> None:
-        base = digest.Event(
+        base = model.Event(
             title="Nature Club",
             event_date=date(2026, 9, 17),
-            start_time=digest.time(15, 30),
+            start_time=time(15, 30),
             description="",
             link="https://example.test/nature-club",
             image_url="",
-            branch=digest.BRANCHES["PCI"],
+            branch=model.BRANCHES["PCI"],
             age_categories=("School Age",),
         )
         for description in (
@@ -208,31 +217,31 @@ class DigestTests(unittest.TestCase):
             "Babysitting stories and an infantry exhibit.",
         ):
             with self.subTest(description=description):
-                event = digest.replace(base, description=description)
-                fit = digest.classify_event(event, date(2025, 11, 17))
+                event = replace(base, description=description)
+                fit = matching.classify_event(event, date(2025, 11, 17))
                 self.assertEqual(fit, "exclude")
-                for mode in digest.FILTER_MODES:
-                    self.assertFalse(digest.include_fit(fit, mode))
+                for mode in model.FILTER_MODES:
+                    self.assertFalse(matching.include_fit(fit, mode))
                 self.assertEqual(
-                    digest.classify_event(event, date(2018, 9, 17)), "best"
+                    matching.classify_event(event, date(2018, 9, 17)), "best"
                 )
                 self.assertEqual(
-                    digest.classify_event(
-                        digest.replace(event, age_categories=("Baby",)),
+                    matching.classify_event(
+                        replace(event, age_categories=("Baby",)),
                         date(2025, 11, 17),
                     ),
                     "best",
                 )
 
     def test_baby_audience_and_program_wording_remains_strong_evidence(self) -> None:
-        base = digest.Event(
+        base = model.Event(
             title="Community Program",
             event_date=date(2026, 9, 17),
-            start_time=digest.time(10),
+            start_time=time(10),
             description="",
             link="https://example.test/community-program",
             image_url="",
-            branch=digest.BRANCHES["PCI"],
+            branch=model.BRANCHES["PCI"],
             age_categories=("School Age",),
         )
         cases = (
@@ -261,20 +270,20 @@ class DigestTests(unittest.TestCase):
         )
         for title, description in cases:
             with self.subTest(title=title, description=description):
-                event = digest.replace(base, title=title, description=description)
+                event = replace(base, title=title, description=description)
                 self.assertEqual(
-                    digest.classify_event(event, date(2025, 11, 17)), "best"
+                    matching.classify_event(event, date(2025, 11, 17)), "best"
                 )
 
     def test_age_group_words_do_not_match_unrelated_substrings(self) -> None:
-        base = digest.Event(
+        base = model.Event(
             title="Family Crafts",
             event_date=date(2026, 9, 17),
-            start_time=digest.time(10),
+            start_time=time(10),
             description="",
             link="https://example.test/family-crafts",
             image_url="",
-            branch=digest.BRANCHES["PCI"],
+            branch=model.BRANCHES["PCI"],
         )
         cases = (
             ("A babysitting story.", date(2025, 11, 17)),
@@ -285,8 +294,8 @@ class DigestTests(unittest.TestCase):
         )
         for description, birth_date in cases:
             with self.subTest(description=description):
-                event = digest.replace(base, description=description)
-                self.assertEqual(digest.classify_event(event, birth_date), "broad")
+                event = replace(base, description=description)
+                self.assertEqual(matching.classify_event(event, birth_date), "broad")
 
         audience_cases = (
             ("For toddlers.", date(2024, 9, 17)),
@@ -300,21 +309,21 @@ class DigestTests(unittest.TestCase):
         )
         for description, birth_date in audience_cases:
             with self.subTest(description=description):
-                event = digest.replace(base, description=description)
-                self.assertEqual(digest.classify_event(event, birth_date), "best")
+                event = replace(base, description=description)
+                self.assertEqual(matching.classify_event(event, birth_date), "best")
 
     def test_merge_events_retains_richer_safe_source_fields(self) -> None:
-        base = digest.Event(
+        base = model.Event(
             title="Baby Storytime",
             event_date=date(2026, 7, 20),
-            start_time=digest.time(10, 30),
+            start_time=time(10, 30),
             description="Stories for babies.",
             link="https://example.test/events/shared",
             image_url="",
-            branch=digest.BRANCHES["CEN"],
+            branch=model.BRANCHES["CEN"],
             age_categories=("Baby",),
         )
-        richer = digest.replace(
+        richer = replace(
             base,
             description="Stories, songs, rhymes, and movement for babies.",
             description_html=(
@@ -323,15 +332,15 @@ class DigestTests(unittest.TestCase):
             ),
             image_url="https://libwww.freelibrary.org/assets/images/event.jpg",
             age_categories=("Toddler",),
-            end_at=digest.datetime(2026, 7, 20, 11, 30),
+            end_at=naive_datetime(2026, 7, 20, 11, 30),
             description_links=(
-                digest.DescriptionLink("Resource", "https://example.test/resource"),
+                model.DescriptionLink("Resource", "https://example.test/resource"),
             ),
             venue="Sister Cities Park",
             room="Storyhour Room",
         )
 
-        merged = digest.merge_events((base, richer))[0]
+        merged = model.merge_events((base, richer))[0]
 
         self.assertEqual(merged.description, richer.description)
         self.assertEqual(merged.image_url, richer.image_url)
@@ -346,7 +355,7 @@ class DigestTests(unittest.TestCase):
             birth_date=date(2025, 10, 7),
             filter_mode="Recommended",
             duration_minutes=60,
-            selected_branches=[digest.BRANCHES["CEN"]],
+            selected_branches=[model.BRANCHES["CEN"]],
             reference_date=date(2026, 7, 18),
             events=(base, richer),
             source_counts={"Parkway Central Library": 2},
@@ -356,23 +365,23 @@ class DigestTests(unittest.TestCase):
         self.assertIn(richer.image_url, payload["html"])
 
     def test_merge_events_is_stable_for_reordered_duplicate_sources(self) -> None:
-        base = digest.Event(
+        base = model.Event(
             title="Baby Storytime",
             event_date=date(2026, 7, 20),
-            start_time=digest.time(10, 30),
+            start_time=time(10, 30),
             description="A detailed published description for this event.",
             link="https://example.test/events/42",
             image_url="",
-            branch=digest.BRANCHES["CEN"],
+            branch=model.BRANCHES["CEN"],
             age_categories=("Baby",),
         )
-        cancelled = digest.replace(
+        cancelled = replace(
             base,
             title="Baby Storytime - Cancelled",
             description="Cancelled.",
             age_categories=("Toddler",),
         )
-        illustrated = digest.replace(
+        illustrated = replace(
             base,
             description="Flyer available.",
             image_url="https://libwww.freelibrary.org/images/storytime.png",
@@ -380,14 +389,14 @@ class DigestTests(unittest.TestCase):
         )
 
         merged_results = {
-            digest.merge_events(order)[0]
+            model.merge_events(order)[0]
             for order in permutations((base, cancelled, illustrated))
         }
 
         self.assertEqual(len(merged_results), 1)
         merged = merged_results.pop()
         self.assertEqual(merged.title, cancelled.title)
-        self.assertFalse(digest.event_is_active(merged))
+        self.assertFalse(model.event_is_active(merged))
         self.assertEqual(merged.description, base.description)
         self.assertEqual(merged.image_url, illustrated.image_url)
         self.assertEqual(
@@ -406,20 +415,20 @@ class DigestTests(unittest.TestCase):
             self.assertEqual(selected, [])
 
     def test_next_week_start_treats_monday_as_current_week(self) -> None:
-        self.assertEqual(digest.next_week_start(date(2026, 7, 20)), date(2026, 7, 20))
-        self.assertEqual(digest.next_week_start(date(2026, 7, 17)), date(2026, 7, 20))
+        self.assertEqual(model.next_week_start(date(2026, 7, 20)), date(2026, 7, 20))
+        self.assertEqual(model.next_week_start(date(2026, 7, 17)), date(2026, 7, 20))
 
     def test_feed_title_repairs_library_ampersand_loss(self) -> None:
         self.assertEqual(
-            digest.clean_title(
+            model.clean_title(
                 "07/20/26: Baby  Toddler Storytime! - Parkway Central Library",
-                digest.BRANCHES["CEN"],
+                model.BRANCHES["CEN"],
             ),
             "Baby & Toddler Storytime!",
         )
 
         self.assertEqual(
-            digest._repair_bare_numeric_entities("We#39;ll keep #0; literal."),
+            model._repair_bare_numeric_entities("We#39;ll keep #0; literal."),
             "We'll keep #0; literal.",
         )
 
@@ -437,10 +446,10 @@ class DigestTests(unittest.TestCase):
                 self.subTest(payload=payload),
                 self.assertRaisesRegex(ValueError, "one feed channel"),
             ):
-                digest.parse_feed(payload, digest.BRANCHES["SWK"], "Baby")
+                model.parse_feed(payload, model.BRANCHES["SWK"], "Baby")
 
         self.assertEqual(
-            digest.parse_feed("<rss><channel /></rss>", digest.BRANCHES["SWK"], "Baby"),
+            model.parse_feed("<rss><channel /></rss>", model.BRANCHES["SWK"], "Baby"),
             ([], 0),
         )
 
@@ -464,8 +473,8 @@ class DigestTests(unittest.TestCase):
             },
         ]
 
-        events, source_count = digest.parse_feed(
-            rss(items), digest.BRANCHES["SWK"], "Baby"
+        events, source_count = model.parse_feed(
+            rss(items), model.BRANCHES["SWK"], "Baby"
         )
 
         self.assertEqual(source_count, 2)
@@ -484,7 +493,7 @@ class DigestTests(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(ValueError, "forbidden XML declaration"):
-            digest.parse_feed(payload, digest.BRANCHES["SWK"], "Baby")
+            model.parse_feed(payload, model.BRANCHES["SWK"], "Baby")
 
     def test_parser_rejects_multibyte_xml_entity_declarations(self) -> None:
         encodings = (
@@ -502,7 +511,7 @@ class DigestTests(unittest.TestCase):
                 ).encode(encoding)
 
                 with self.assertRaisesRegex(ValueError, "forbidden XML declaration"):
-                    digest.parse_feed(payload, digest.BRANCHES["SWK"], "Baby")
+                    model.parse_feed(payload, model.BRANCHES["SWK"], "Baby")
 
     def test_parser_accepts_benign_utf16_feed(self) -> None:
         payload = rss(
@@ -518,9 +527,7 @@ class DigestTests(unittest.TestCase):
             ]
         ).encode("utf-16")
 
-        events, source_count = digest.parse_feed(
-            payload, digest.BRANCHES["SWK"], "Baby"
-        )
+        events, source_count = model.parse_feed(payload, model.BRANCHES["SWK"], "Baby")
 
         self.assertEqual(source_count, 1)
         self.assertEqual(
@@ -537,13 +544,13 @@ class DigestTests(unittest.TestCase):
             "link": "https://example.test/good",
         }
         oversized = valid | {
-            "title": "X" * (digest.MAX_EVENT_TITLE_LENGTH + 1),
+            "title": "X" * (model.MAX_EVENT_TITLE_LENGTH + 1),
             "link": "https://example.test/oversized",
         }
         rows = [valid, oversized]
 
-        events, source_count = digest.parse_feed(
-            rss(rows), digest.BRANCHES["SWK"], "Baby"
+        events, source_count = model.parse_feed(
+            rss(rows), model.BRANCHES["SWK"], "Baby"
         )
 
         self.assertEqual(source_count, len(rows))
@@ -557,8 +564,8 @@ class DigestTests(unittest.TestCase):
                     valid | {"link": f"https://example.test/item-{index}"}
                     for index in range(count)
                 ]
-                events, source_count = digest.parse_feed(
-                    rss(rows), digest.BRANCHES["SWK"], "Baby"
+                events, source_count = model.parse_feed(
+                    rss(rows), model.BRANCHES["SWK"], "Baby"
                 )
                 self.assertEqual(count, source_count)
                 self.assertEqual(
@@ -580,8 +587,8 @@ class DigestTests(unittest.TestCase):
             ),
         }
 
-        events, _source_count = digest.parse_feed(
-            rss([item]), digest.BRANCHES["SWK"], "Toddler"
+        events, _source_count = model.parse_feed(
+            rss([item]), model.BRANCHES["SWK"], "Toddler"
         )
 
         self.assertEqual(
@@ -593,14 +600,14 @@ class DigestTests(unittest.TestCase):
             "https://libwww.freelibrary.org/assets/images/calendar/"
             "events/2026/11/171403.jpg"
         )
-        events, _source_count = digest.parse_feed(
-            rss([item]), digest.BRANCHES["SWK"], "Toddler"
+        events, _source_count = model.parse_feed(
+            rss([item]), model.BRANCHES["SWK"], "Toddler"
         )
         self.assertEqual(events[0].image_url, item["image_url"])
 
         item["image_url"] = ""
-        events, _source_count = digest.parse_feed(
-            rss([item]), digest.BRANCHES["SWK"], "Toddler"
+        events, _source_count = model.parse_feed(
+            rss([item]), model.BRANCHES["SWK"], "Toddler"
         )
         self.assertEqual(events[0].image_url, "")
 
@@ -616,11 +623,11 @@ class DigestTests(unittest.TestCase):
             '<script>alert("unsafe")</script>'
             '<a href="javascript:alert(1)">unsafe link</a>'
         )
-        description, links = digest._description_data(
+        description, links = model._description_data(
             raw_description,
             "",
         )
-        description_html = digest._description_render_html(raw_description, "")
+        description_html = model._description_render_html(raw_description, "")
 
         self.assertEqual(
             description,
@@ -632,25 +639,25 @@ class DigestTests(unittest.TestCase):
         )
         self.assertEqual(
             links,
-            (digest.DescriptionLink("a guide", "https://example.test/guide"),),
+            (model.DescriptionLink("a guide", "https://example.test/guide"),),
         )
 
-        event = digest.Event(
+        event = model.Event(
             title="Family Storytime with AAC",
             event_date=date(2026, 7, 25),
-            start_time=digest.time(11),
+            start_time=time(11),
             description=description,
             link="https://libwww.freelibrary.org/calendar/event/171403",
             image_url=(
                 "https://libwww.freelibrary.org/assets/images/calendar/"
                 "events/2026/11/.jpg"
             ),
-            branch=digest.BRANCHES["SWK"],
+            branch=model.BRANCHES["SWK"],
             age_categories=("Baby", "Toddler", "Preschool"),
             description_links=links,
             description_html=description_html,
         )
-        card = digest._render_event_card(event, duration_minutes=60)
+        card = email_render.render_event_card(event, duration_minutes=60)
 
         self.assertEqual(card.count('class="event-description-paragraph"'), 3)
         self.assertIn("<strong>important</strong>", card)
@@ -678,7 +685,7 @@ class DigestTests(unittest.TestCase):
         self,
     ) -> None:
         trailer = "07/25/26, 11:00 A.M. - Charles Santore Library"
-        rendered = digest._description_render_html(
+        rendered = model._description_render_html(
             f"<p><strong>Bold <em>nested</p><p>{trailer}</p>",
             trailer,
         )
@@ -688,10 +695,10 @@ class DigestTests(unittest.TestCase):
         self.assertEqual(rendered.count('class="event-description-paragraph"'), 1)
 
     def test_event_chips_show_all_useful_source_backed_context(self) -> None:
-        event = digest.Event(
+        event = model.Event(
             title="Inclusive outdoor program",
             event_date=date(2026, 7, 25),
-            start_time=digest.time(11),
+            start_time=time(11),
             description=(
                 "Join our AAC storytime and music program, then stay for playgroup "
                 "and playtime. This outdoor program has a to-go craft while supplies "
@@ -702,11 +709,11 @@ class DigestTests(unittest.TestCase):
             ),
             link="https://libwww.freelibrary.org/calendar/event/171403",
             image_url="",
-            branch=digest.BRANCHES["SWK"],
+            branch=model.BRANCHES["SWK"],
             age_categories=("Baby", "Toddler", "Preschool"),
         )
 
-        card = digest._render_event_card(event, duration_minutes=60)
+        card = email_render.render_event_card(event, duration_minutes=60)
 
         self.assertIn('class="event-highlights"', card)
         self.assertIn(
@@ -723,7 +730,9 @@ class DigestTests(unittest.TestCase):
             "Take-home craft",
         ):
             self.assertIn(f">{label}</span>", card)
-        self.assertEqual(len(digest._event_chip_specs(event)), digest.MAX_EVENT_CHIPS)
+        self.assertEqual(
+            len(email_render.event_chip_specs(event)), email_render.MAX_EVENT_CHIPS
+        )
         self.assertNotIn(">Crafts</span>", card)
         for generic_label in ("Family Programs", "Storytimes", "Children", "Family"):
             self.assertNotIn(f">{generic_label}</span>", card)
@@ -732,8 +741,8 @@ class DigestTests(unittest.TestCase):
             card.index("Join our AAC storytime"),
         )
 
-        topic_card = digest._render_event_card(
-            digest.replace(
+        topic_card = email_render.render_event_card(
+            replace(
                 event,
                 title="Inclusive program",
                 description="An AAC storytime with live music.",
@@ -743,22 +752,22 @@ class DigestTests(unittest.TestCase):
         for label in ("AAC", "Storytime", "Music"):
             self.assertIn(f">{label}</span>", topic_card)
 
-        no_registration_event = digest.replace(
+        no_registration_event = replace(
             event,
             description="This outdoor AAC program requires no registration.",
         )
         self.assertNotIn(
             "Registration required",
-            digest._render_event_card(no_registration_event, duration_minutes=60),
+            email_render.render_event_card(no_registration_event, duration_minutes=60),
         )
 
-        title_repeats = digest.replace(
+        title_repeats = replace(
             event,
             title="AAC Music Storytime, Playgroup, Playtime, and Crafternoon",
             description="Kids of all ages are welcome.",
         )
         repeated_labels = {
-            label for _kind, label in digest._event_chip_specs(title_repeats)
+            label for _kind, label in email_render.event_chip_specs(title_repeats)
         }
         for redundant_label in (
             "AAC",
@@ -770,7 +779,7 @@ class DigestTests(unittest.TestCase):
         ):
             self.assertNotIn(redundant_label, repeated_labels)
 
-        broad_published_audience = digest.replace(
+        broad_published_audience = replace(
             event,
             description="Toys for a range of ages.",
             age_categories=("Toddler", "Preschool", "School Age"),
@@ -779,10 +788,12 @@ class DigestTests(unittest.TestCase):
             "Broad ages",
             {
                 label
-                for _kind, label in digest._event_chip_specs(broad_published_audience)
+                for _kind, label in email_render.event_chip_specs(
+                    broad_published_audience
+                )
             },
         )
-        narrow_published_audience = digest.replace(
+        narrow_published_audience = replace(
             broad_published_audience,
             age_categories=("Toddler",),
         )
@@ -790,18 +801,20 @@ class DigestTests(unittest.TestCase):
             "Broad ages",
             {
                 label
-                for _kind, label in digest._event_chip_specs(narrow_published_audience)
+                for _kind, label in email_render.event_chip_specs(
+                    narrow_published_audience
+                )
             },
         )
 
-        incidental_music = digest.replace(
+        incidental_music = replace(
             event,
             title="Baby and Toddler Playtime",
             description="Play with toys while listening to music.",
         )
         self.assertNotIn(
             "Music",
-            {label for _kind, label in digest._event_chip_specs(incidental_music)},
+            {label for _kind, label in email_render.event_chip_specs(incidental_music)},
         )
 
     def test_parser_rejects_non_http_event_and_image_urls(self) -> None:
@@ -815,8 +828,8 @@ class DigestTests(unittest.TestCase):
             "image_url": "data:image/svg+xml,unsafe",
         }
 
-        events, _source_count = digest.parse_feed(
-            rss([item]), digest.BRANCHES["SWK"], "Toddler"
+        events, _source_count = model.parse_feed(
+            rss([item]), model.BRANCHES["SWK"], "Toddler"
         )
 
         self.assertEqual(events[0].link, "")
@@ -826,8 +839,8 @@ class DigestTests(unittest.TestCase):
             "<guid>javascript:alert(1)</guid>",
             "<guid>https://example.test/fallback-event</guid>",
         )
-        events, _source_count = digest.parse_feed(
-            payload, digest.BRANCHES["SWK"], "Toddler"
+        events, _source_count = model.parse_feed(
+            payload, model.BRANCHES["SWK"], "Toddler"
         )
         self.assertEqual(events[0].link, "https://example.test/fallback-event")
 
@@ -846,8 +859,8 @@ class DigestTests(unittest.TestCase):
             "image_url": "http://[::1",
         }
 
-        events, source_count = digest.parse_feed(
-            rss([item]), digest.BRANCHES["SWK"], "Toddler"
+        events, source_count = model.parse_feed(
+            rss([item]), model.BRANCHES["SWK"], "Toddler"
         )
 
         self.assertEqual(source_count, 1)
@@ -856,9 +869,9 @@ class DigestTests(unittest.TestCase):
         self.assertEqual(events[0].image_url, "")
         self.assertEqual(events[0].description_links, ())
 
-        item["link"] = "https://example.test/" + ("x" * digest.MAX_URL_LENGTH)
-        events, _source_count = digest.parse_feed(
-            rss([item]), digest.BRANCHES["SWK"], "Toddler"
+        item["link"] = "https://example.test/" + ("x" * model.MAX_URL_LENGTH)
+        events, _source_count = model.parse_feed(
+            rss([item]), model.BRANCHES["SWK"], "Toddler"
         )
         self.assertEqual(events[0].link, "")
 
@@ -873,8 +886,8 @@ class DigestTests(unittest.TestCase):
             "image_url": "https://tracking.example.test/open.gif",
         }
 
-        events, _source_count = digest.parse_feed(
-            rss([item]), digest.BRANCHES["SWK"], "Toddler"
+        events, _source_count = model.parse_feed(
+            rss([item]), model.BRANCHES["SWK"], "Toddler"
         )
 
         self.assertEqual(events[0].image_url, "")
@@ -882,8 +895,8 @@ class DigestTests(unittest.TestCase):
         item["image_url"] = (
             "http://libwww.freelibrary.org/assets/images/calendar/events/171403.jpg"
         )
-        events, _source_count = digest.parse_feed(
-            rss([item]), digest.BRANCHES["SWK"], "Toddler"
+        events, _source_count = model.parse_feed(
+            rss([item]), model.BRANCHES["SWK"], "Toddler"
         )
         self.assertEqual(events[0].image_url, "")
 
@@ -893,8 +906,8 @@ class DigestTests(unittest.TestCase):
                     "https://libwww.freelibrary.org:"
                     f"{unsafe_port}/assets/images/calendar/events/171403.jpg"
                 )
-                events, _source_count = digest.parse_feed(
-                    rss([item]), digest.BRANCHES["SWK"], "Toddler"
+                events, _source_count = model.parse_feed(
+                    rss([item]), model.BRANCHES["SWK"], "Toddler"
                 )
                 self.assertEqual(events[0].image_url, "")
 
@@ -903,8 +916,8 @@ class DigestTests(unittest.TestCase):
             "assets/images/calendar/events/171403.jpg"
         )
         item["image_url"] = default_port_url
-        events, _source_count = digest.parse_feed(
-            rss([item]), digest.BRANCHES["SWK"], "Toddler"
+        events, _source_count = model.parse_feed(
+            rss([item]), model.BRANCHES["SWK"], "Toddler"
         )
         self.assertEqual(events[0].image_url, default_port_url)
 
@@ -919,8 +932,8 @@ class DigestTests(unittest.TestCase):
             "image_url": "/assets/images/event.jpg",
         }
 
-        events, _source_count = digest.parse_feed(
-            rss([item]), digest.BRANCHES["SWK"], "Toddler"
+        events, _source_count = model.parse_feed(
+            rss([item]), model.BRANCHES["SWK"], "Toddler"
         )
 
         self.assertEqual(
@@ -936,13 +949,13 @@ class DigestTests(unittest.TestCase):
             birth_date=date(2025, 10, 7),
             filter_mode="Recommended",
             duration_minutes=60,
-            selected_branches=[digest.BRANCHES["SWK"]],
+            selected_branches=[model.BRANCHES["SWK"]],
             reference_date=date(2026, 7, 18),
             events=events,
             source_counts={"Charles Santore Library": 1},
         )
         self.assertIn(
-            f"Event details: {digest.BRANCHES['SWK'].calendar_url}",
+            f"Event details: {model.BRANCHES['SWK'].calendar_url}",
             payload["message"],
         )
 
@@ -962,8 +975,8 @@ class DigestTests(unittest.TestCase):
             "link": "https://libwww.freelibrary.org/calendar/event/171403",
         }
 
-        events, _source_count = digest.parse_feed(
-            rss([item]), digest.BRANCHES["SWK"], "Toddler"
+        events, _source_count = model.parse_feed(
+            rss([item]), model.BRANCHES["SWK"], "Toddler"
         )
         event = events[0]
 
@@ -972,7 +985,7 @@ class DigestTests(unittest.TestCase):
         self.assertEqual(
             event.description_links,
             (
-                digest.DescriptionLink(
+                model.DescriptionLink(
                     "Augmentative and Alternative Communication (AAC)",
                     "https://www.asha.org/public/speech/disorders/aac/",
                 ),
@@ -983,7 +996,7 @@ class DigestTests(unittest.TestCase):
             birth_date=date(2025, 10, 7),
             filter_mode="Recommended",
             duration_minutes=60,
-            selected_branches=[digest.BRANCHES["SWK"]],
+            selected_branches=[model.BRANCHES["SWK"]],
             reference_date=date(2026, 7, 18),
             events=events,
             source_counts={"Charles Santore Library": 1},
@@ -1000,16 +1013,16 @@ class DigestTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            digest.explicit_room("The Storyhour Room is on the first floor."),
+            model.explicit_room("The Storyhour Room is on the first floor."),
             "Storyhour Room",
         )
         self.assertEqual(
-            digest.explicit_room("Meet on the ground floor in Room 22."),
+            model.explicit_room("Meet on the ground floor in Room 22."),
             "Room 22",
         )
-        self.assertEqual(digest.explicit_room("Meet in the meeting room."), "")
+        self.assertEqual(model.explicit_room("Meet in the meeting room."), "")
         self.assertEqual(
-            digest.explicit_room("8/3: Meeting Room\n8/10: Family craft night"),
+            model.explicit_room("8/3: Meeting Room\n8/10: Family craft night"),
             "",
         )
 
@@ -1053,36 +1066,36 @@ class DigestTests(unittest.TestCase):
         )
         for title, description, expected in cases:
             with self.subTest(title=title):
-                event = digest.Event(
+                event = model.Event(
                     title=title,
                     event_date=date(2026, 7, 22),
-                    start_time=digest.time(10, 30),
+                    start_time=time(10, 30),
                     description=description,
                     link="https://example.test/event",
                     image_url="",
-                    branch=digest.BRANCHES["CEN"],
+                    branch=model.BRANCHES["CEN"],
                     age_categories=("Baby",),
-                    venue=digest.explicit_venue(title, description),
+                    venue=model.explicit_venue(title, description),
                 )
                 self.assertEqual(event.venue, expected)
-                self.assertEqual(digest.event_location_name(event), expected)
+                self.assertEqual(email_render.event_location_name(event), expected)
                 self.assertEqual(
-                    digest.event_calendar_location(event),
+                    email_render.event_calendar_location(event),
                     f"{expected}, Philadelphia, PA",
                 )
-                calendar_query = digest.urllib.parse.parse_qs(
-                    digest.urllib.parse.urlsplit(
-                        digest.google_calendar_url(event, 60)
+                calendar_query = urllib.parse.parse_qs(
+                    urllib.parse.urlsplit(
+                        email_render.google_calendar_url(event, 60)
                     ).query
                 )
                 self.assertEqual(
                     calendar_query["location"], [f"{expected}, Philadelphia, PA"]
                 )
                 self.assertEqual(
-                    digest.event_location_summary(event),
-                    f"{expected} {digest.MIDDLE_DOT} Hosted by Parkway Central Library",
+                    email_render.event_location_summary(event),
+                    f"{expected} {email_render.MIDDLE_DOT} Hosted by Parkway Central Library",
                 )
-                card = digest._render_event_card(event, duration_minutes=60)
+                card = email_render.render_event_card(event, duration_minutes=60)
                 self.assertIn(
                     '<span aria-hidden="true">&#128205;</span>&nbsp;'
                     '<a class="event-location-link"',
@@ -1090,7 +1103,7 @@ class DigestTests(unittest.TestCase):
                 )
                 self.assertIn(f">{expected}</a>", card)
                 self.assertIn("Hosted by Parkway Central Library", card)
-                compact_card = digest._render_event_card(
+                compact_card = email_render.render_event_card(
                     event, duration_minutes=60, compact=True
                 )
                 self.assertIn(
@@ -1101,22 +1114,22 @@ class DigestTests(unittest.TestCase):
                 self.assertIn(f">{expected}</a>", compact_card)
                 self.assertIn("Hosted by Parkway Central Library", compact_card)
                 self.assertIn(
-                    digest.urllib.parse.quote_plus(expected),
-                    digest.event_directions_url(event),
+                    urllib.parse.quote_plus(expected),
+                    email_render.event_directions_url(event),
                 )
                 self.assertNotIn(
-                    digest.urllib.parse.quote_plus(digest.BRANCHES["CEN"].name),
-                    digest.event_directions_url(event),
+                    urllib.parse.quote_plus(model.BRANCHES["CEN"].name),
+                    email_render.event_directions_url(event),
                 )
 
         self.assertEqual(
-            digest.explicit_venue(
+            model.explicit_venue(
                 "Storytime in the park", "Join us in the park for stories."
             ),
             "",
         )
         self.assertEqual(
-            digest.explicit_venue("Storytime at The Park", "Join us in The Park."),
+            model.explicit_venue("Storytime at The Park", "Join us in The Park."),
             "",
         )
         for title, description in (
@@ -1128,45 +1141,46 @@ class DigestTests(unittest.TestCase):
             ("Storytime in the library", "Stories in the Children's Room."),
         ):
             with self.subTest(title=title, description=description):
-                self.assertEqual(digest.explicit_venue(title, description), "")
+                self.assertEqual(model.explicit_venue(title, description), "")
 
     def test_conditional_weather_location_suppresses_a_fixed_destination(self) -> None:
         description = (
             "Cooler weather? We'll have storytime in the auditorium on the ground "
             "floor! Warmer weather? We'll be in Bluebird Park across the street."
         )
-        event = digest.Event(
+        event = model.Event(
             title="Baby Storytime",
             event_date=date(2026, 7, 20),
-            start_time=digest.time(10),
+            start_time=time(10),
             description=description,
             link="https://example.test/conditional-location",
             image_url="",
-            branch=digest.BRANCHES["CEN"],
+            branch=model.BRANCHES["CEN"],
             age_categories=("Baby",),
-            room=digest.explicit_room(description),
+            room=model.explicit_room(description),
         )
         location = "Location depends on weather; check the official listing"
         note = f"{location} before traveling."
-        self.assertEqual(digest.event_location_note(event), note)
+        self.assertEqual(email_render.event_location_note(event), note)
         self.assertEqual(
-            digest.event_location_name(event), "Location depends on weather"
+            email_render.event_location_name(event), "Location depends on weather"
         )
-        self.assertEqual(digest.event_calendar_location(event), location)
-        self.assertEqual(digest.event_directions_url(event), "")
+        self.assertEqual(email_render.event_calendar_location(event), location)
+        self.assertEqual(email_render.event_directions_url(event), "")
         self.assertIn(
-            "Hosted by Parkway Central Library", digest.event_location_summary(event)
+            "Hosted by Parkway Central Library",
+            email_render.event_location_summary(event),
         )
-        location_html = digest._event_location_html(event)
+        location_html = email_render._event_location_html(event)
         self.assertNotIn("ground floor", location_html)
         self.assertNotIn("href=", location_html)
         self.assertIn("Location depends on weather", location_html)
 
         for compact in (False, True):
             with self.subTest(compact=compact):
-                query = digest.urllib.parse.parse_qs(
-                    digest.urllib.parse.urlsplit(
-                        digest.google_calendar_url(event, 60, compact=compact)
+                query = urllib.parse.parse_qs(
+                    urllib.parse.urlsplit(
+                        email_render.google_calendar_url(event, 60, compact=compact)
                     ).query
                 )
                 self.assertEqual(query["location"], [location])
@@ -1178,7 +1192,7 @@ class DigestTests(unittest.TestCase):
             birth_date=date(2025, 11, 1),
             filter_mode="Recommended",
             duration_minutes=60,
-            selected_branches=(digest.BRANCHES["CEN"],),
+            selected_branches=(model.BRANCHES["CEN"],),
             reference_date=date(2026, 7, 19),
             events=[event],
             source_counts={"CEN": 1},
@@ -1190,23 +1204,25 @@ class DigestTests(unittest.TestCase):
         self.assertNotIn("https://www.google.com/maps/search/", payload["html"])
         self.assertNotIn("https://www.google.com/maps/search/", payload["message"])
 
-        explicit_park = digest.replace(event, venue="Bluebird Park")
-        self.assertEqual(digest.event_calendar_location(explicit_park), location)
+        explicit_park = replace(event, venue="Bluebird Park")
+        self.assertEqual(email_render.event_calendar_location(explicit_park), location)
         self.assertNotIn(
             "Outdoors",
-            {label for _kind, label in digest._event_chip_specs(explicit_park)},
+            {label for _kind, label in email_render.event_chip_specs(explicit_park)},
         )
         self.assertEqual(
-            digest.event_identity(explicit_park), digest.event_identity(event)
+            model.event_identity(explicit_park), model.event_identity(event)
         )
-        hybrid = digest.replace(explicit_park, modality="hybrid")
-        self.assertEqual(digest.event_calendar_location(hybrid), f"{location} (hybrid)")
-        self.assertIn("Online option", digest.event_location_summary(hybrid))
-        self.assertEqual(digest.event_directions_url(hybrid), "")
-        online = digest.replace(explicit_park, modality="online")
-        self.assertEqual(digest.event_location_note(online), "")
-        self.assertEqual(digest.event_calendar_location(online), "Online")
-        self.assertEqual(digest.event_location_summary(online), "Online")
+        hybrid = replace(explicit_park, modality="hybrid")
+        self.assertEqual(
+            email_render.event_calendar_location(hybrid), f"{location} (hybrid)"
+        )
+        self.assertIn("Online option", email_render.event_location_summary(hybrid))
+        self.assertEqual(email_render.event_directions_url(hybrid), "")
+        online = replace(explicit_park, modality="online")
+        self.assertEqual(email_render.event_location_note(online), "")
+        self.assertEqual(email_render.event_calendar_location(online), "Online")
+        self.assertEqual(email_render.event_location_summary(online), "Online")
 
     def test_source_highlights_survive_email_description_excerpt(self) -> None:
         for tail, expected in (
@@ -1217,24 +1233,24 @@ class DigestTests(unittest.TestCase):
             ),
         ):
             with self.subTest(tail=tail):
-                event = digest.Event(
+                event = model.Event(
                     title="Community gathering",
                     event_date=date(2026, 7, 20),
-                    start_time=digest.time(10),
+                    start_time=time(10),
                     description="Stories and songs. " * 200 + tail,
                     link="https://example.test/long-description",
                     image_url="",
-                    branch=digest.BRANCHES["CEN"],
+                    branch=model.BRANCHES["CEN"],
                     age_categories=("Baby",),
                 )
                 displayed = digest._display_event(event)
                 self.assertTrue(displayed.description_truncated)
                 self.assertNotIn(tail, displayed.description)
                 self.assertEqual(
-                    digest.event_identity(displayed), digest.event_identity(event)
+                    model.event_identity(displayed), model.event_identity(event)
                 )
                 for compact in (False, True):
-                    card = digest._render_event_card(
+                    card = email_render.render_event_card(
                         displayed, duration_minutes=60, compact=compact
                     )
                     self.assertIn(expected, card)
@@ -1266,37 +1282,37 @@ class DigestTests(unittest.TestCase):
             ("", "Registration is required for adults only."),
         ):
             with self.subTest(ending=ending):
-                event = digest.Event(
+                event = model.Event(
                     title="Community gathering",
                     event_date=date(2026, 7, 20),
-                    start_time=digest.time(10),
+                    start_time=time(10),
                     description=beginning + "Stories and songs. " * 200 + ending,
                     link="https://example.test/qualified-description",
                     image_url="",
-                    branch=digest.BRANCHES["CEN"],
+                    branch=model.BRANCHES["CEN"],
                 )
                 displayed = digest._display_event(event)
                 self.assertTrue(displayed.description_truncated)
                 self.assertNotIn(ending, displayed.description)
                 self.assertEqual(displayed.display_highlights, ())
                 for compact in (False, True):
-                    card = digest._render_event_card(
+                    card = email_render.render_event_card(
                         displayed, duration_minutes=60, compact=compact
                     )
                     self.assertNotIn('class="event-highlights"', card)
 
     def test_weather_location_note_survives_email_description_excerpt(self) -> None:
-        event = digest.Event(
+        event = model.Event(
             title="Baby Storytime",
             event_date=date(2026, 7, 20),
-            start_time=digest.time(10),
+            start_time=time(10),
             description=(
                 "Songs and stories for babies. " * 200
                 + "In inclement weather, the program will move indoors."
             ),
             link="https://example.test/long-conditional-location",
             image_url="",
-            branch=digest.BRANCHES["CEN"],
+            branch=model.BRANCHES["CEN"],
             age_categories=("Baby",),
             venue="Bluebird Park",
         )
@@ -1305,41 +1321,44 @@ class DigestTests(unittest.TestCase):
         self.assertTrue(displayed.description_truncated)
         self.assertNotIn("weather", displayed.description)
         self.assertEqual(
-            digest.event_location_note(displayed), digest.event_location_note(event)
+            email_render.event_location_note(displayed),
+            email_render.event_location_note(event),
         )
-        self.assertEqual(digest.event_identity(displayed), digest.event_identity(event))
-        self.assertEqual(digest.event_directions_url(displayed), "")
+        self.assertEqual(model.event_identity(displayed), model.event_identity(event))
+        self.assertEqual(email_render.event_directions_url(displayed), "")
         self.assertNotIn(
             "Weather affects location",
-            {label for _kind, label in digest._event_chip_specs(displayed)},
+            {label for _kind, label in email_render.event_chip_specs(displayed)},
         )
         for compact in (False, True):
             with self.subTest(compact=compact):
-                rendered = digest._render_event_card(
+                rendered = email_render.render_event_card(
                     displayed, duration_minutes=60, compact=compact
                 )
                 self.assertIn("Location depends on weather", rendered)
                 self.assertNotIn("https://www.google.com/maps/search/", rendered)
-                query = digest.urllib.parse.parse_qs(
-                    digest.urllib.parse.urlsplit(
-                        digest.google_calendar_url(displayed, 60, compact=compact)
+                query = urllib.parse.parse_qs(
+                    urllib.parse.urlsplit(
+                        email_render.google_calendar_url(displayed, 60, compact=compact)
                     ).query
                 )
                 self.assertEqual(
                     query["location"],
                     ["Location depends on weather; check the official listing"],
                 )
-                self.assertIn(digest.event_location_note(event), query["details"][0])
+                self.assertIn(
+                    email_render.event_location_note(event), query["details"][0]
+                )
 
     def test_weather_location_note_distinguishes_moves_from_cancellation(self) -> None:
-        base = digest.Event(
+        base = model.Event(
             title="Community Program",
             event_date=date(2026, 7, 20),
-            start_time=digest.time(10),
+            start_time=time(10),
             description="",
             link="https://example.test/weather-location",
             image_url="",
-            branch=digest.BRANCHES["CEN"],
+            branch=model.BRANCHES["CEN"],
             venue="Bluebird Park",
         )
         for description in (
@@ -1357,20 +1376,20 @@ class DigestTests(unittest.TestCase):
             ),
         ):
             with self.subTest(description=description):
-                event = digest.replace(base, description=description)
-                self.assertTrue(digest.event_location_note(event))
-                self.assertEqual(digest.event_directions_url(event), "")
+                event = replace(base, description=description)
+                self.assertTrue(email_render.event_location_note(event))
+                self.assertEqual(email_render.event_directions_url(event), "")
                 self.assertEqual(
-                    digest.event_calendar_location(event),
+                    email_render.event_calendar_location(event),
                     "Location depends on weather; check the official listing",
                 )
                 self.assertNotIn(
                     "Weather affects location",
-                    {label for _kind, label in digest._event_chip_specs(event)},
+                    {label for _kind, label in email_render.event_chip_specs(event)},
                 )
                 self.assertNotIn(
                     "Weather dependent",
-                    {label for _kind, label in digest._event_chip_specs(event)},
+                    {label for _kind, label in email_render.event_chip_specs(event)},
                 )
 
         for description in (
@@ -1393,90 +1412,90 @@ class DigestTests(unittest.TestCase):
             "Storytime takes place in the auditorium.",
         ):
             with self.subTest(description=description):
-                event = digest.replace(base, description=description)
-                self.assertEqual(digest.event_location_note(event), "")
+                event = replace(base, description=description)
+                self.assertEqual(email_render.event_location_note(event), "")
                 self.assertEqual(
-                    digest.event_calendar_location(event),
+                    email_render.event_calendar_location(event),
                     "Bluebird Park, Philadelphia, PA",
                 )
-                self.assertTrue(digest.event_directions_url(event))
+                self.assertTrue(email_render.event_directions_url(event))
                 self.assertNotIn(
                     "Weather affects location",
-                    {label for _kind, label in digest._event_chip_specs(event)},
+                    {label for _kind, label in email_render.event_chip_specs(event)},
                 )
 
     def test_age_on_event_date(self) -> None:
-        self.assertEqual(digest.age_on(date(2025, 1, 15), date(2026, 7, 24)), (1, 6, 9))
+        self.assertEqual(model.age_on(date(2025, 1, 15), date(2026, 7, 24)), (1, 6, 9))
         self.assertEqual(
-            digest.format_age(date(2025, 1, 15), date(2026, 7, 24)),
+            model.format_age(date(2025, 1, 15), date(2026, 7, 24)),
             "18 months",
         )
 
     def test_age_display_uses_conversational_units(self) -> None:
         self.assertEqual(
-            digest.format_age(date(2026, 7, 1), date(2026, 7, 18)), "2 weeks"
+            model.format_age(date(2026, 7, 1), date(2026, 7, 18)), "2 weeks"
         )
         self.assertEqual(
-            digest.format_age(date(2026, 5, 18), date(2026, 7, 18)), "2 months"
+            model.format_age(date(2026, 5, 18), date(2026, 7, 18)), "2 months"
         )
         self.assertEqual(
-            digest.format_age(date(2026, 1, 15), date(2026, 7, 18)), "6 months"
+            model.format_age(date(2026, 1, 15), date(2026, 7, 18)), "6 months"
         )
         self.assertEqual(
-            digest.format_age(date(2024, 1, 15), date(2026, 7, 18)), "2½ years"
+            model.format_age(date(2024, 1, 15), date(2026, 7, 18)), "2½ years"
         )
         self.assertEqual(
-            digest.format_age(date(2023, 9, 15), date(2026, 7, 18)), "2 years"
+            model.format_age(date(2023, 9, 15), date(2026, 7, 18)), "2 years"
         )
         self.assertEqual(
-            digest.format_age(date(2021, 1, 15), date(2026, 7, 18)), "5 years"
+            model.format_age(date(2021, 1, 15), date(2026, 7, 18)), "5 years"
         )
 
     def test_child_name_is_single_line_and_bounded_for_email_headers(self) -> None:
         self.assertEqual(
-            digest.normalize_child_name("  Avery\r\n Quinn  "), "Avery Quinn"
+            model.normalize_child_name("  Avery\r\n Quinn  "), "Avery Quinn"
         )
         with self.assertRaisesRegex(TypeError, "invalid_child_name"):
-            digest.normalize_child_name(None)
+            model.normalize_child_name(None)
         with self.assertRaisesRegex(ValueError, "invalid_child_name"):
-            digest.normalize_child_name("A" * (digest.MAX_CHILD_NAME_LENGTH + 1))
+            model.normalize_child_name("A" * (model.MAX_CHILD_NAME_LENGTH + 1))
 
     def test_explicit_end_evidence_must_be_confident(self) -> None:
         self.assertEqual(
-            digest.explicit_end_at(
+            model.explicit_end_at(
                 date(2026, 7, 20),
-                digest.time(10, 30),
+                time(10, 30),
                 "Storytime runs from 10:30 a.m. to 11:30 a.m.",
             ),
-            digest.datetime(2026, 7, 20, 11, 30),
+            naive_datetime(2026, 7, 20, 11, 30),
         )
         self.assertIsNone(
-            digest.explicit_end_at(
+            model.explicit_end_at(
                 date(2026, 7, 20),
-                digest.time(10, 30),
+                time(10, 30),
                 "Playtime runs from 12:00 p.m. to 1:00 p.m.",
             )
         )
         self.assertEqual(
-            digest.explicit_end_at(
+            model.explicit_end_at(
                 date(2026, 7, 20),
-                digest.time(11, 30),
+                time(11, 30),
                 "The program runs from 11:30 to 1:00 p.m.",
             ),
-            digest.datetime(2026, 7, 20, 13, 0),
+            naive_datetime(2026, 7, 20, 13, 0),
         )
         self.assertEqual(
-            digest.explicit_end_at(
+            model.explicit_end_at(
                 date(2026, 7, 20),
-                digest.time(10, 30),
+                time(10, 30),
                 "Each 90-minute class is free.",
             ),
-            digest.datetime(2026, 7, 20, 12, 0),
+            naive_datetime(2026, 7, 20, 12, 0),
         )
         self.assertIsNone(
-            digest.explicit_end_at(
+            model.explicit_end_at(
                 date(2026, 7, 20),
-                digest.time(10, 30),
+                time(10, 30),
                 "The event includes a 10-minute welcome and open-ended playtime.",
             )
         )
@@ -1493,27 +1512,27 @@ class DigestTests(unittest.TestCase):
             "branch": "Charles Santore Library",
             "link": "https://example.test/event",
         }
-        events, _source_count = digest.parse_feed(
-            rss([item]), digest.BRANCHES["SWK"], "Toddler"
+        events, _source_count = model.parse_feed(
+            rss([item]), model.BRANCHES["SWK"], "Toddler"
         )
 
-        rendered = digest._description_html(events[0])
+        rendered = email_render._description_html(events[0])
 
         self.assertTrue(rendered.startswith("The literacy guide is useful."))
         self.assertEqual(rendered.count("<a "), 1)
         self.assertIn(">literacy guide</a>.", rendered)
 
     def test_explicit_age_range_overrides_all_ages_wording(self) -> None:
-        event = digest.Event(
+        event = model.Event(
             title="Writing Workshop",
             event_date=date(2026, 7, 21),
-            start_time=digest.time(13, 0),
+            start_time=time(13, 0),
             description="Perfect for aspiring writers ages 8 to 12. Anyone is welcome.",
             link="https://example.test/1",
             image_url="",
-            branch=digest.BRANCHES["IND"],
+            branch=model.BRANCHES["IND"],
         )
-        self.assertEqual(digest.classify_event(event, date(2025, 1, 15)), "exclude")
+        self.assertEqual(matching.classify_event(event, date(2025, 1, 15)), "exclude")
 
     def test_explicit_age_ranges_support_newborn_and_mixed_units(self) -> None:
         cases = (
@@ -1523,29 +1542,29 @@ class DigestTests(unittest.TestCase):
         )
         for description, expected in cases:
             with self.subTest(description=description):
-                event = digest.Event(
+                event = model.Event(
                     title="Family Program",
                     event_date=date(2026, 7, 21),
-                    start_time=digest.time(13, 0),
+                    start_time=time(13, 0),
                     description=description,
                     link="https://example.test/age-range",
                     image_url="",
-                    branch=digest.BRANCHES["IND"],
+                    branch=model.BRANCHES["IND"],
                     age_categories=("School Age",),
                 )
                 self.assertEqual(
-                    digest.classify_event(event, date(2025, 11, 7)), expected
+                    matching.classify_event(event, date(2025, 11, 7)), expected
                 )
 
     def test_explicit_alternative_age_ranges_preserve_each_audience(self) -> None:
-        event = digest.Event(
+        event = model.Event(
             title="Library program",
             event_date=date(2026, 7, 21),
-            start_time=digest.time(13),
+            start_time=time(13),
             description="",
             link="https://example.test/alternative-age-ranges",
             image_url="",
-            branch=digest.BRANCHES["IND"],
+            branch=model.BRANCHES["IND"],
             age_categories=("School Age",),
         )
         for description in (
@@ -1564,14 +1583,14 @@ class DigestTests(unittest.TestCase):
                 (9, "exclude"),
             ):
                 with self.subTest(description=description, age=age):
-                    candidate = digest.replace(event, description=description)
+                    candidate = replace(event, description=description)
                     birth_date = date(2026 - age, 7, 21)
                     self.assertEqual(
-                        digest.classify_event(candidate, birth_date), expected
+                        matching.classify_event(candidate, birth_date), expected
                     )
                     self.assertEqual(
                         bool(
-                            digest.matching_events(
+                            matching.matching_events(
                                 [candidate],
                                 birth_date,
                                 "Recommended",
@@ -1599,7 +1618,7 @@ class DigestTests(unittest.TestCase):
         ):
             with self.subTest(description=description, age_months=age_months):
                 self.assertEqual(
-                    digest._explicit_age_fit(description, age_months), expected
+                    matching._explicit_age_fit(description, age_months), expected
                 )
 
     def test_alternative_age_ranges_do_not_combine_roles_or_sessions(self) -> None:
@@ -1625,18 +1644,18 @@ class DigestTests(unittest.TestCase):
         ):
             with self.subTest(description=description, age_months=age_months):
                 self.assertEqual(
-                    digest._explicit_age_fit(description, age_months), "exclude"
+                    matching._explicit_age_fit(description, age_months), "exclude"
                 )
 
     def test_published_children_age_ranges_override_category_matches(self) -> None:
-        event = digest.Event(
+        event = model.Event(
             title="Toddler and Preschooler Storytime",
             event_date=date(2026, 9, 10),
-            start_time=digest.time(10),
+            start_time=time(10),
             description="",
             link="https://example.test/children-age-range",
             image_url="",
-            branch=digest.BRANCHES["SWK"],
+            branch=model.BRANCHES["SWK"],
             age_categories=("Preschool", "Toddler"),
         )
         cases = (
@@ -1656,13 +1675,13 @@ class DigestTests(unittest.TestCase):
         for description, profiles in cases:
             for birth_date, expected in profiles:
                 with self.subTest(description=description, birth_date=birth_date):
-                    candidate = digest.replace(event, description=description)
+                    candidate = replace(event, description=description)
                     self.assertEqual(
-                        digest.classify_event(candidate, birth_date), expected
+                        matching.classify_event(candidate, birth_date), expected
                     )
                     self.assertEqual(
                         bool(
-                            digest.matching_events(
+                            matching.matching_events(
                                 [candidate],
                                 birth_date,
                                 "Recommended",
@@ -1675,10 +1694,10 @@ class DigestTests(unittest.TestCase):
 
     def test_children_number_ranges_require_age_words_or_units(self) -> None:
         self.assertIsNone(
-            digest._explicit_age_fit("We welcome children 1 to 2 p.m.", 18)
+            matching._explicit_age_fit("We welcome children 1 to 2 p.m.", 18)
         )
         self.assertEqual(
-            digest._explicit_age_fit(
+            matching._explicit_age_fit(
                 "We welcome children 1 to 2 p.m. Intended for children 3 to 5 years.",
                 18,
             ),
@@ -1686,35 +1705,35 @@ class DigestTests(unittest.TestCase):
         )
 
     def test_broad_upper_age_limit_is_not_a_recommended_toddler_match(self) -> None:
-        event = digest.Event(
+        event = model.Event(
             title="Chess Club for Kids",
             event_date=date(2026, 7, 20),
-            start_time=digest.time(16, 0),
+            start_time=time(16, 0),
             description="Kids 12 and under are welcome to play and learn.",
             link="https://example.test/chess",
             image_url="",
-            branch=digest.BRANCHES["CEN"],
+            branch=model.BRANCHES["CEN"],
         )
-        fit = digest.classify_event(event, date(2025, 1, 15))
+        fit = matching.classify_event(event, date(2025, 1, 15))
         self.assertEqual(fit, "broad")
-        self.assertFalse(digest.include_fit(fit, "Recommended"))
+        self.assertFalse(matching.include_fit(fit, "Recommended"))
 
-        event = digest.replace(
+        event = replace(
             event,
             title="Baby Storytime",
             description="Intended for ages 2 and under and their caregivers.",
         )
-        self.assertEqual(digest.classify_event(event, date(2025, 1, 15)), "best")
+        self.assertEqual(matching.classify_event(event, date(2025, 1, 15)), "best")
 
     def test_age_matching_requires_age_evidence_and_bounds_source_numbers(self) -> None:
-        event = digest.Event(
+        event = model.Event(
             title="Library program",
             event_date=date(2026, 7, 20),
-            start_time=digest.time(10),
+            start_time=time(10),
             description="",
             link="",
             image_url="",
-            branch=digest.BRANCHES["CEN"],
+            branch=model.BRANCHES["CEN"],
             age_categories=("Baby",),
         )
         for description in (
@@ -1725,8 +1744,8 @@ class DigestTests(unittest.TestCase):
         ):
             with self.subTest(description=description[:60]):
                 self.assertEqual(
-                    digest.classify_event(
-                        digest.replace(event, description=description),
+                    matching.classify_event(
+                        replace(event, description=description),
                         date(2025, 1, 15),
                     ),
                     "best",
@@ -1739,8 +1758,8 @@ class DigestTests(unittest.TestCase):
         ):
             with self.subTest(description=description):
                 self.assertEqual(
-                    digest.classify_event(
-                        digest.replace(event, description=description),
+                    matching.classify_event(
+                        replace(event, description=description),
                         date(2025, 1, 15),
                     ),
                     "exclude",
@@ -1759,35 +1778,35 @@ class DigestTests(unittest.TestCase):
         ]
         for title, description, expected in cases:
             with self.subTest(title=title):
-                event = digest.Event(
+                event = model.Event(
                     title=title,
                     event_date=date(2026, 7, 24),
-                    start_time=digest.time(10, 0),
+                    start_time=time(10, 0),
                     description=description,
                     link=f"https://example.test/{title}",
                     image_url="",
-                    branch=digest.BRANCHES["SWK"],
+                    branch=model.BRANCHES["SWK"],
                 )
                 self.assertEqual(
-                    digest.classify_event(event, date(2025, 1, 15)),
+                    matching.classify_event(event, date(2025, 1, 15)),
                     expected,
                 )
 
     def test_inactive_events_are_not_returned(self) -> None:
-        event = digest.Event(
+        event = model.Event(
             title="Art Workshop: POSTPONED to July 27",
             event_date=date(2026, 7, 20),
-            start_time=digest.time(10, 0),
+            start_time=time(10, 0),
             description="For babies and toddlers with caregivers.",
             link="https://example.test/postponed",
             image_url="",
-            branch=digest.BRANCHES["CEN"],
+            branch=model.BRANCHES["CEN"],
             age_categories=("Baby",),
         )
 
-        self.assertFalse(digest.event_is_active(event))
+        self.assertFalse(model.event_is_active(event))
         self.assertEqual(
-            digest.matching_events(
+            matching.matching_events(
                 [event],
                 date(2025, 11, 7),
                 "Recommended",
@@ -1802,7 +1821,7 @@ class DigestTests(unittest.TestCase):
             birth_date=date(2025, 11, 7),
             filter_mode="Recommended",
             duration_minutes=60,
-            selected_branches=[digest.BRANCHES["CEN"]],
+            selected_branches=[model.BRANCHES["CEN"]],
             reference_date=date(2026, 7, 18),
             events=[event],
             source_counts={"Parkway Central Library": 1},
@@ -1866,8 +1885,8 @@ class DigestTests(unittest.TestCase):
         events = []
         source_counts = {}
         for code, items in fixture_items.items():
-            parsed, source_counts[code] = digest.parse_feed(
-                rss(items), digest.BRANCHES[code]
+            parsed, source_counts[code] = model.parse_feed(
+                rss(items), model.BRANCHES[code]
             )
             events.extend(parsed)
 
@@ -1876,7 +1895,7 @@ class DigestTests(unittest.TestCase):
             birth_date=date(2025, 1, 15),
             filter_mode="Recommended",
             duration_minutes=60,
-            selected_branches=list(digest.BRANCHES.values()),
+            selected_branches=list(model.BRANCHES.values()),
             reference_date=date(2026, 7, 17),
             events=events,
             source_counts=source_counts,
@@ -1982,14 +2001,14 @@ class DigestTests(unittest.TestCase):
         self.assertNotIn("See every published event:", payload["html"])
 
     def test_branch_distance_prioritization_never_renders_distance_copy(self) -> None:
-        branch_event = digest.Event(
+        branch_event = model.Event(
             title="Baby Storytime",
             event_date=date(2026, 7, 22),
-            start_time=digest.time(10, 30),
+            start_time=time(10, 30),
             description="Stories for babies.",
             link="https://example.test/events/branch",
             image_url="",
-            branch=digest.BRANCHES["SWK"],
+            branch=model.BRANCHES["SWK"],
             age_categories=("Baby",),
         )
         payload = digest.build_digest(
@@ -1997,7 +2016,7 @@ class DigestTests(unittest.TestCase):
             birth_date=date(2025, 11, 1),
             filter_mode="Recommended",
             duration_minutes=60,
-            selected_branches=(digest.BRANCHES["SWK"],),
+            selected_branches=(model.BRANCHES["SWK"],),
             reference_date=date(2026, 7, 19),
             events=[branch_event],
             source_counts={"SWK": 1},
@@ -2011,37 +2030,37 @@ class DigestTests(unittest.TestCase):
         self.assertEqual(payload["html"].count('class="branch-calendar-cell"'), 1)
         self.assertEqual(payload["html"].count('class="branch-calendar-empty"'), 1)
 
-        offsite_card = digest._render_event_card(
-            digest.replace(branch_event, venue="Sister Cities Park"),
+        offsite_card = email_render.render_event_card(
+            replace(branch_event, venue="Sister Cities Park"),
             duration_minutes=60,
         )
         self.assertNotRegex(offsite_card, r"(?:~|&lt;)?\d+(?:\.\d+)?\s*mi\b")
 
     def test_calendar_placeholder_note_distinguishes_all_some_and_none(self) -> None:
-        event = digest.Event(
+        event = model.Event(
             title="Storytime",
             event_date=date(2026, 7, 20),
-            start_time=digest.time(10, 30),
+            start_time=time(10, 30),
             description="Stories for young children.",
             link="https://example.test/events/placeholder",
             image_url="",
-            branch=digest.BRANCHES["CEN"],
+            branch=model.BRANCHES["CEN"],
         )
-        with_end = digest.replace(
+        with_end = replace(
             event,
             title="Music class",
-            end_at=digest.datetime(2026, 7, 20, 11, 30),
+            end_at=naive_datetime(2026, 7, 20, 11, 30),
         )
 
         self.assertEqual(
-            digest._calendar_placeholder_note([event], 60),
+            email_render._calendar_placeholder_note([event], 60),
             "No end time was found in the fetched data for these events. Their Google Calendar links use a 60-minute fallback duration; check the listing before saving.",
         )
         self.assertEqual(
-            digest._calendar_placeholder_note([event, with_end], 60),
+            email_render._calendar_placeholder_note([event, with_end], 60),
             "No end time was found in the fetched data for some events. Their Google Calendar links use a 60-minute fallback duration; check the listing before saving.",
         )
-        self.assertEqual(digest._calendar_placeholder_note([with_end], 60), "")
+        self.assertEqual(email_render._calendar_placeholder_note([with_end], 60), "")
 
     def test_source_coverage_and_errors_are_disclosed_in_both_bodies(self) -> None:
         payload = digest.build_digest(
@@ -2049,7 +2068,7 @@ class DigestTests(unittest.TestCase):
             birth_date=date(2025, 1, 15),
             filter_mode="Recommended",
             duration_minutes=60,
-            selected_branches=list(digest.BRANCHES.values()),
+            selected_branches=list(model.BRANCHES.values()),
             reference_date=date(2026, 7, 17),
             events=[],
             source_counts={"Philadelphia City Institute": 10},
@@ -2105,22 +2124,22 @@ class DigestTests(unittest.TestCase):
         )
 
     def test_digest_prioritizes_event_and_omits_unknown_facts(self) -> None:
-        event = digest.Event(
+        event = model.Event(
             title="Baby & Toddler Storytime!",
             event_date=date(2026, 7, 20),
-            start_time=digest.time(10, 30),
+            start_time=time(10, 30),
             description="Stories, songs, rhymes, and bounces for ages 2 and under.",
             link="https://libwww.freelibrary.org/calendar/event/166375",
             image_url="https://example.test/full-flyer.jpg",
-            branch=digest.BRANCHES["CEN"],
-            end_at=digest.datetime(2026, 7, 20, 11, 30),
+            branch=model.BRANCHES["CEN"],
+            end_at=naive_datetime(2026, 7, 20, 11, 30),
         )
         payload = digest.build_digest(
             child_name="Avery",
             birth_date=date(2025, 1, 15),
             filter_mode="Recommended",
             duration_minutes=60,
-            selected_branches=[digest.BRANCHES["CEN"]],
+            selected_branches=[model.BRANCHES["CEN"]],
             reference_date=date(2026, 7, 18),
             events=[event],
             source_counts={"Parkway Central Library": 1},
@@ -2133,13 +2152,13 @@ class DigestTests(unittest.TestCase):
         )
         self.assertNotIn("event was checked", card)
         self.assertEqual(payload["metadata"]["scanned_count"], 1)
-        self.assertIn(f"10:30 AM {digest.EN_DASH} 11:30 AM", card)
+        self.assertIn(f"10:30 AM {model.EN_DASH} 11:30 AM", card)
         self.assertNotIn(">Ends</td>", card)
         self.assertNotIn("Registration</td>", card)
         self.assertNotIn("Cost</td>", card)
         self.assertNotIn("Why included", card)
         self.assertNotIn("The published maximum age includes Avery.", card)
-        self.assertNotIn(digest.BRANCHES["CEN"].address, card)
+        self.assertNotIn(model.BRANCHES["CEN"].address, card)
         self.assertNotIn("215-686-5322", card)
         self.assertIn(
             "https://www.google.com/maps/search/?api=1&amp;query=Parkway+Central+Library",
@@ -2148,36 +2167,38 @@ class DigestTests(unittest.TestCase):
         self.assertNotIn(">Directions</a>", card)
         self.assertNotIn(">Event details</a>", card)
         self.assertNotIn(">Other calendars</a>", card)
-        self.assertNotIn("calendar placeholder", digest.google_calendar_url(event, 60))
+        self.assertNotIn(
+            "calendar placeholder", email_render.google_calendar_url(event, 60)
+        )
         self.assertNotIn("No end time was found", card)
 
         message = payload["message"]
         self.assertIn(
-            f"10:30 AM {digest.EN_DASH} 11:30 AM | Baby & Toddler Storytime!",
+            f"10:30 AM {model.EN_DASH} 11:30 AM | Baby & Toddler Storytime!",
             message,
         )
         self.assertNotIn("Ends:", message)
         self.assertNotIn("Why included", message)
         self.assertNotIn("The published maximum age includes Avery.", message)
-        self.assertNotIn(digest.BRANCHES["CEN"].address, message)
+        self.assertNotIn(model.BRANCHES["CEN"].address, message)
         self.assertNotIn("215-686-5322", message)
         self.assertIn(
-            f"Parkway Central Library: {digest.directions_url(digest.BRANCHES['CEN'])}",
+            f"Parkway Central Library: {email_render.directions_url(model.BRANCHES['CEN'])}",
             message,
         )
         self.assertNotIn("Directions:", message)
 
     def test_digest_can_replace_remote_images_with_cid_or_omit_them(self) -> None:
-        first = digest.Event(
+        first = model.Event(
             title="Embedded flyer",
             event_date=date(2026, 7, 20),
-            start_time=digest.time(10, 30),
+            start_time=time(10, 30),
             description="Stories for children ages 2 and under.",
             link="https://libwww.freelibrary.org/calendar/event/1001",
             image_url="https://libwww.freelibrary.org/images/first.png",
-            branch=digest.BRANCHES["CEN"],
+            branch=model.BRANCHES["CEN"],
         )
-        second = digest.replace(
+        second = replace(
             first,
             title="Unavailable flyer",
             link="https://libwww.freelibrary.org/calendar/event/1002",
@@ -2188,13 +2209,13 @@ class DigestTests(unittest.TestCase):
             birth_date=date(2025, 1, 15),
             filter_mode="Recommended",
             duration_minutes=60,
-            selected_branches=[digest.BRANCHES["CEN"]],
+            selected_branches=[model.BRANCHES["CEN"]],
             reference_date=date(2026, 7, 18),
             events=[first, second],
             source_counts={"Parkway Central Library": 2},
             image_url_overrides={
-                digest.event_identity(first): "cid:event-01.png",
-                digest.event_identity(second): "",
+                model.event_identity(first): "cid:event-01.png",
+                model.event_identity(second): "",
             },
         )
 
@@ -2212,7 +2233,7 @@ class DigestTests(unittest.TestCase):
             birth_date=date(2025, 1, 15),
             filter_mode="Recommended",
             duration_minutes=60,
-            selected_branches=[digest.BRANCHES["IND"]],
+            selected_branches=[model.BRANCHES["IND"]],
             reference_date=date(2026, 7, 17),
             events=[],
             source_counts={"IND": 0},
@@ -2226,27 +2247,27 @@ class DigestTests(unittest.TestCase):
         )
 
     def test_occurrence_identity_keeps_repeated_series_dates_distinct(self) -> None:
-        first = digest.Event(
+        first = model.Event(
             title="Recurring storytime",
             event_date=date(2026, 7, 20),
-            start_time=digest.time(10),
+            start_time=time(10),
             description="Stories for babies.",
             link="https://libwww.freelibrary.org/calendar/event/series",
             image_url="",
-            branch=digest.BRANCHES["CEN"],
+            branch=model.BRANCHES["CEN"],
             age_categories=("Baby",),
         )
-        second = digest.replace(first, event_date=date(2026, 7, 22))
+        second = replace(first, event_date=date(2026, 7, 22))
 
-        self.assertNotEqual(digest.event_identity(first), digest.event_identity(second))
-        self.assertEqual(len(digest.merge_events([first, second])), 2)
+        self.assertNotEqual(model.event_identity(first), model.event_identity(second))
+        self.assertEqual(len(model.merge_events([first, second])), 2)
 
         payload = digest.build_digest(
             child_name="Avery",
             birth_date=date(2025, 10, 7),
             filter_mode="Recommended",
             duration_minutes=60,
-            selected_branches=[digest.BRANCHES["CEN"]],
+            selected_branches=[model.BRANCHES["CEN"]],
             reference_date=date(2026, 7, 19),
             events=[first, second],
             source_counts={"Parkway Central Library": 2},
@@ -2256,7 +2277,7 @@ class DigestTests(unittest.TestCase):
         )
         self.assertEqual(
             payload["metadata"]["included_occurrence_ids"],
-            [digest.event_identity(first), digest.event_identity(second)],
+            [model.event_identity(first), model.event_identity(second)],
         )
 
     def test_blank_title_restores_the_generic_fallback(self) -> None:
@@ -2273,14 +2294,14 @@ class DigestTests(unittest.TestCase):
             ]
         )
 
-        events, _count = digest.parse_feed(payload, digest.BRANCHES["CEN"], "Baby")
+        events, _count = model.parse_feed(payload, model.BRANCHES["CEN"], "Baby")
 
         self.assertEqual(events[0].title, "Library event")
 
     def test_description_sanitizer_normalizes_nested_blocks_and_orphan_text(
         self,
     ) -> None:
-        rendered = digest._description_render_html(
+        rendered = model._description_render_html(
             "<div>Outer<p><strong>Nested</strong> paragraph</p>tail</div>"
             "<table><tr><td>Table text</td></tr></table>",
             "",
@@ -2292,7 +2313,7 @@ class DigestTests(unittest.TestCase):
         self.assertIn(">tail</p>", rendered)
         self.assertIn(">Table text</p>", rendered)
 
-        malformed_list = digest._description_render_html(
+        malformed_list = model._description_render_html(
             "<ul>Loose text<strong> with emphasis</strong></ul>", ""
         )
         self.assertIn("<ul", malformed_list)
@@ -2302,10 +2323,10 @@ class DigestTests(unittest.TestCase):
     def test_highlights_prioritize_actions_bound_count_and_respect_negation(
         self,
     ) -> None:
-        event = digest.Event(
+        event = model.Event(
             title="Community gathering",
             event_date=date(2026, 7, 20),
-            start_time=digest.time(10),
+            start_time=time(10),
             description=(
                 "Storytime with live music, a playgroup, playtime, crafts, and AAC. "
                 "This outdoor event welcomes siblings and kids of all ages. "
@@ -2314,18 +2335,18 @@ class DigestTests(unittest.TestCase):
             ),
             link="https://libwww.freelibrary.org/calendar/event/chips",
             image_url="",
-            branch=digest.BRANCHES["CEN"],
+            branch=model.BRANCHES["CEN"],
             age_categories=("Baby",),
         )
 
-        chips = digest._event_chip_specs(event)
+        chips = email_render.event_chip_specs(event)
 
-        self.assertLessEqual(len(chips), digest.MAX_EVENT_CHIPS)
+        self.assertLessEqual(len(chips), email_render.MAX_EVENT_CHIPS)
         self.assertEqual(chips[0], ("action", "Registration required"))
         self.assertIn(("action", "Weather dependent"), chips)
         self.assertIn(("action", "Limited supplies"), chips)
 
-        location_change = digest.replace(
+        location_change = replace(
             event,
             description=(
                 "Cooler weather? We will meet indoors. Warmer weather? "
@@ -2333,18 +2354,18 @@ class DigestTests(unittest.TestCase):
             ),
         )
         location_labels = {
-            label for _kind, label in digest._event_chip_specs(location_change)
+            label for _kind, label in email_render.event_chip_specs(location_change)
         }
         self.assertNotIn("Weather affects location", location_labels)
         self.assertNotIn("Weather dependent", location_labels)
 
-        inclement_location_change = digest.replace(
+        inclement_location_change = replace(
             event,
             description="In inclement weather, the program will move indoors.",
         )
         inclement_labels = {
             label
-            for _kind, label in digest._event_chip_specs(inclement_location_change)
+            for _kind, label in email_render.event_chip_specs(inclement_location_change)
         }
         self.assertNotIn("Weather affects location", inclement_labels)
         self.assertNotIn("Weather dependent", inclement_labels)
@@ -2354,19 +2375,21 @@ class DigestTests(unittest.TestCase):
             "Weather permitting.",
         ):
             with self.subTest(risk=risk):
-                conditional_with_risk = digest.replace(
+                conditional_with_risk = replace(
                     inclement_location_change,
                     description=f"{inclement_location_change.description} {risk}",
                 )
-                self.assertTrue(digest.event_location_note(conditional_with_risk))
+                self.assertTrue(email_render.event_location_note(conditional_with_risk))
                 risk_labels = {
                     label
-                    for _kind, label in digest._event_chip_specs(conditional_with_risk)
+                    for _kind, label in email_render.event_chip_specs(
+                        conditional_with_risk
+                    )
                 }
                 self.assertIn("Weather dependent", risk_labels)
                 self.assertNotIn("Weather affects location", risk_labels)
 
-        negated = digest.replace(
+        negated = replace(
             event,
             description=(
                 "Registration is required for adults only; children may drop in. "
@@ -2374,7 +2397,7 @@ class DigestTests(unittest.TestCase):
                 "weather. No materials are provided."
             ),
         )
-        labels = {label for _kind, label in digest._event_chip_specs(negated)}
+        labels = {label for _kind, label in email_render.event_chip_specs(negated)}
         self.assertNotIn("Registration required", labels)
         self.assertNotIn("AAC board provided", labels)
         self.assertNotIn("Weather dependent", labels)
@@ -2382,7 +2405,7 @@ class DigestTests(unittest.TestCase):
         self.assertNotIn("Materials provided", labels)
         self.assertIn("Drop-in", labels)
 
-        american_spelling = digest.replace(
+        american_spelling = replace(
             event,
             description=(
                 "Weather update: the event will not be canceled because of the weather."
@@ -2390,17 +2413,20 @@ class DigestTests(unittest.TestCase):
         )
         self.assertNotIn(
             "Weather dependent",
-            {label for _kind, label in digest._event_chip_specs(american_spelling)},
+            {
+                label
+                for _kind, label in email_render.event_chip_specs(american_spelling)
+            },
         )
 
     def test_highlights_do_not_assert_explicitly_unavailable_features(self) -> None:
-        event = digest.Event(
+        event = model.Event(
             title="Community program",
             event_date=date(2026, 7, 20),
-            start_time=digest.time(10),
+            start_time=time(10),
             link="",
             image_url="",
-            branch=digest.BRANCHES["CEN"],
+            branch=model.BRANCHES["CEN"],
             description=(
                 "No ASL interpretation will be available. This event is not "
                 "sensory-friendly or bilingual. No drop-ins are welcome. "
@@ -2408,7 +2434,7 @@ class DigestTests(unittest.TestCase):
                 "Caregiver participation is not required."
             ),
         )
-        labels = {label for _kind, label in digest._event_chip_specs(event)}
+        labels = {label for _kind, label in email_render.event_chip_specs(event)}
         for excluded in (
             "ASL interpreted",
             "Sensory-friendly",
@@ -2440,17 +2466,17 @@ class DigestTests(unittest.TestCase):
                     excluded,
                     {
                         label
-                        for _kind, label in digest._event_chip_specs(
-                            digest.replace(event, description=description)
+                        for _kind, label in email_render.event_chip_specs(
+                            replace(event, description=description)
                         )
                     },
                 )
-        positive = digest.replace(
+        positive = replace(
             event, description="No crafts. ASL interpretation is available."
         )
         self.assertIn(
             "ASL interpreted",
-            {label for _kind, label in digest._event_chip_specs(positive)},
+            {label for _kind, label in email_render.event_chip_specs(positive)},
         )
 
     def test_highlight_claim_grammar_matrix_preserves_positive_evidence(self) -> None:
@@ -2540,48 +2566,46 @@ class DigestTests(unittest.TestCase):
                 )
             ):
                 with self.subTest(description=text, expected=expected):
-                    self.assertEqual(
-                        digest._has_positive_claim(pattern, text), expected
-                    )
+                    self.assertEqual(model.has_positive_claim(pattern, text), expected)
 
     def test_online_and_hybrid_events_do_not_get_misleading_map_links(self) -> None:
-        online = digest.Event(
+        online = model.Event(
             title="Virtual family workshop",
             event_date=date(2026, 7, 20),
-            start_time=digest.time(10),
+            start_time=time(10),
             description="Join us online via Zoom for this virtual program.",
             link="https://libwww.freelibrary.org/calendar/event/online",
             image_url="",
-            branch=digest.BRANCHES["CEN"],
+            branch=model.BRANCHES["CEN"],
             age_categories=("Baby",),
             modality="online",
         )
-        hybrid = digest.replace(
+        hybrid = replace(
             online,
             description="Attend in person or online via Zoom.",
             modality="hybrid",
             room="Storyhour Room",
         )
 
-        self.assertEqual(digest.event_location_label(online), "Online")
-        self.assertEqual(digest.event_directions_url(online), "")
-        self.assertEqual(digest.event_calendar_location(online), "Online")
-        self.assertIn("Online", digest.event_location_label(hybrid))
-        self.assertTrue(digest.event_directions_url(hybrid))
+        self.assertEqual(email_render.event_location_label(online), "Online")
+        self.assertEqual(email_render.event_directions_url(online), "")
+        self.assertEqual(email_render.event_calendar_location(online), "Online")
+        self.assertIn("Online", email_render.event_location_label(hybrid))
+        self.assertTrue(email_render.event_directions_url(hybrid))
 
-        online_card = digest._render_event_card(online, duration_minutes=60)
+        online_card = email_render.render_event_card(online, duration_minutes=60)
         self.assertIn('class="event-location"', online_card)
         self.assertIn("&#128205;</span>&nbsp;Online</div>", online_card)
         self.assertNotIn(">Online</a>", online_card)
-        hybrid_card = digest._render_event_card(hybrid, duration_minutes=60)
+        hybrid_card = email_render.render_event_card(hybrid, duration_minutes=60)
         self.assertIn(
             '<span aria-hidden="true">&#128205;</span>&nbsp;'
             '<a class="event-location-link"',
             hybrid_card,
         )
         self.assertIn(
-            f">Parkway Central Library {digest.MIDDLE_DOT} Storyhour Room</a>"
-            f" {digest.MIDDLE_DOT} Online option",
+            f">Parkway Central Library {email_render.MIDDLE_DOT} Storyhour Room</a>"
+            f" {email_render.MIDDLE_DOT} Online option",
             hybrid_card,
         )
         self.assertNotIn(
@@ -2589,13 +2613,13 @@ class DigestTests(unittest.TestCase):
         )
         self.assertNotRegex(hybrid_card, r">[^<]*Online option</a>")
 
-        plain_text = digest._render_plain_text(
+        plain_text = email_render.render_plain_text(
             [online],
             child_name="Avery",
             birth_date=date(2025, 10, 7),
             week_start=date(2026, 7, 20),
             week_end=date(2026, 7, 26),
-            branches=[digest.BRANCHES["CEN"]],
+            branches=[model.BRANCHES["CEN"]],
             duration_minutes=60,
             source_errors=(),
             source_warnings=(),
@@ -2632,7 +2656,7 @@ class DigestTests(unittest.TestCase):
             },
         ]
 
-        events, _count = digest.parse_feed(rss(items), digest.BRANCHES["CEN"])
+        events, _count = model.parse_feed(rss(items), model.BRANCHES["CEN"])
 
         self.assertEqual(
             [event.modality for event in events],
@@ -2673,7 +2697,7 @@ class DigestTests(unittest.TestCase):
         )
         for description, expected in cases:
             with self.subTest(description=description):
-                events, _count = digest.parse_feed(
+                events, _count = model.parse_feed(
                     rss(
                         [
                             {
@@ -2686,68 +2710,68 @@ class DigestTests(unittest.TestCase):
                             }
                         ]
                     ),
-                    digest.BRANCHES["CEN"],
+                    model.BRANCHES["CEN"],
                     "Baby",
                 )
                 event = events[0]
                 self.assertEqual(event.modality, expected)
                 self.assertEqual(
-                    bool(digest.event_directions_url(event)), expected != "online"
+                    bool(email_render.event_directions_url(event)), expected != "online"
                 )
                 if "Storyhour Room" in description:
                     self.assertEqual(event.room, "Storyhour Room")
                     self.assertIn(
-                        "Storyhour Room", digest.event_location_summary(event)
+                        "Storyhour Room", email_render.event_location_summary(event)
                     )
                 for compact in (False, True):
-                    card = digest._render_event_card(
+                    card = email_render.render_event_card(
                         event, duration_minutes=60, compact=compact
                     )
                     self.assertEqual("Online option" in card, expected == "hybrid")
                     self.assertEqual("maps/search/" in card, expected != "online")
-                query = digest.urllib.parse.parse_qs(
-                    digest.urllib.parse.urlsplit(
-                        digest.google_calendar_url(event, 60)
+                query = urllib.parse.parse_qs(
+                    urllib.parse.urlsplit(
+                        email_render.google_calendar_url(event, 60)
                     ).query
                 )
                 self.assertEqual(
-                    query["location"], [digest.event_calendar_location(event)]
+                    query["location"], [email_render.event_calendar_location(event)]
                 )
 
     def test_landscape_images_use_a_full_width_hero_row(self) -> None:
-        event = digest.Event(
+        event = model.Event(
             title="Family activity",
             event_date=date(2026, 7, 20),
-            start_time=digest.time(10),
+            start_time=time(10),
             description="A family activity for babies.",
             link="https://example.test/hero",
             image_url="cid:event-01.png",
-            branch=digest.BRANCHES["CEN"],
+            branch=model.BRANCHES["CEN"],
             age_categories=("Baby",),
             image_layout="hero",
         )
 
-        card = digest._render_event_card(event, duration_minutes=60)
+        card = email_render.render_event_card(event, duration_minutes=60)
 
         self.assertIn('class="event-hero-image-cell"', card)
-        self.assertIn(f'width="{digest.EMAIL_CONTENT_WIDTH}"', card)
+        self.assertIn(f'width="{email_render.EMAIL_CONTENT_WIDTH}"', card)
         self.assertIn("width:100%;max-width:100%;height:auto", card)
         self.assertNotIn('class="event-image-cell"', card)
 
     def test_square_images_use_a_media_first_poster_row(self) -> None:
-        event = digest.Event(
+        event = model.Event(
             title="Baby and Toddler Storytime",
             event_date=date(2026, 7, 20),
-            start_time=digest.time(10, 30),
+            start_time=time(10, 30),
             description="Stories, songs, and playtime for young children.",
             link="https://example.test/poster",
             image_url="cid:event-02.png",
-            branch=digest.BRANCHES["CEN"],
+            branch=model.BRANCHES["CEN"],
             age_categories=("Baby", "Toddler"),
             image_layout="side",
         )
 
-        card = digest._render_event_card(event, duration_minutes=60)
+        card = email_render.render_event_card(event, duration_minutes=60)
 
         self.assertIn(
             'class="event-poster-image-cell" colspan="2"',
@@ -2769,12 +2793,12 @@ class DigestTests(unittest.TestCase):
         description = "A detailed activity description with useful information. " * 80
         events = []
         for index in range(40):
-            branch = digest.BRANCHES["SWK"] if index % 2 else digest.BRANCHES["CEN"]
+            branch = model.BRANCHES["SWK"] if index % 2 else model.BRANCHES["CEN"]
             events.append(
-                digest.Event(
+                model.Event(
                     title=f"General event {index}",
                     event_date=date(2026, 7, 20 + index % 6),
-                    start_time=digest.time(9 + index % 8, 30 if index % 2 else 0),
+                    start_time=time(9 + index % 8, 30 if index % 2 else 0),
                     description=description,
                     link=f"https://libwww.freelibrary.org/calendar/event/{2000 + index}",
                     image_url="https://libwww.freelibrary.org/images/event.png",
@@ -2788,7 +2812,7 @@ class DigestTests(unittest.TestCase):
             birth_date=date(2025, 11, 1),
             filter_mode="Recommended",
             duration_minutes=60,
-            selected_branches=(digest.BRANCHES["SWK"], digest.BRANCHES["CEN"]),
+            selected_branches=(model.BRANCHES["SWK"], model.BRANCHES["CEN"]),
             reference_date=date(2026, 7, 19),
             events=events,
             source_counts={"SWK": 20, "CEN": 20},
@@ -2805,33 +2829,33 @@ class DigestTests(unittest.TestCase):
         )
         self.assertGreater(metadata["truncated_description_count"], 0)
         self.assertLessEqual(
-            len(digest.google_calendar_url(events[0], 60)),
-            digest.MAX_CALENDAR_URL_LENGTH,
+            len(email_render.google_calendar_url(events[0], 60)),
+            email_render.MAX_CALENDAR_URL_LENGTH,
         )
 
     def test_calendar_url_keeps_required_context_when_optional_details_are_long(
         self,
     ) -> None:
-        base = digest.Event(
+        base = model.Event(
             title="Baby Storytime",
             event_date=date(2026, 7, 20),
-            start_time=digest.time(10),
+            start_time=time(10),
             description="Stories and songs for babies.",
             link="https://libwww.freelibrary.org/calendar/event/123456",
             image_url="",
-            branch=digest.BRANCHES["CEN"],
+            branch=model.BRANCHES["CEN"],
             age_categories=("Baby",),
         )
         cases = (
-            digest.replace(
+            replace(
                 base,
                 description=base.description
                 + " Multilingual storytime: 欢迎参加故事时间。" * 70,
             ),
-            digest.replace(
+            replace(
                 base,
                 description_links=tuple(
-                    digest.DescriptionLink(
+                    model.DescriptionLink(
                         f"Resource {index}",
                         f"https://example.test/resource/{index}?" + "x" * 250,
                     )
@@ -2840,7 +2864,7 @@ class DigestTests(unittest.TestCase):
             ),
         )
         for event in cases:
-            for explicit_end in (None, digest.datetime(2026, 7, 20, 11, 30)):
+            for explicit_end in (None, naive_datetime(2026, 7, 20, 11, 30)):
                 for compact in (False, True):
                     with self.subTest(
                         links=bool(event.description_links),
@@ -2848,21 +2872,25 @@ class DigestTests(unittest.TestCase):
                         compact=compact,
                     ):
                         displayed = digest._display_event(
-                            digest.replace(
+                            replace(
                                 event,
                                 end_at=explicit_end,
                                 description=event.description
                                 + " In inclement weather, we will move indoors.",
                             )
                         )
-                        url = digest.google_calendar_url(displayed, 60, compact=compact)
-                        query = digest.urllib.parse.parse_qs(
-                            digest.urllib.parse.urlsplit(url).query
+                        url = email_render.google_calendar_url(
+                            displayed, 60, compact=compact
                         )
+                        query = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
                         details = query["details"][0]
-                        self.assertLessEqual(len(url), digest.MAX_CALENDAR_URL_LENGTH)
+                        self.assertLessEqual(
+                            len(url), email_render.MAX_CALENDAR_URL_LENGTH
+                        )
                         self.assertIn(f"Official event details: {event.link}", details)
-                        self.assertIn(digest.event_location_note(displayed), details)
+                        self.assertIn(
+                            email_render.event_location_note(displayed), details
+                        )
                         self.assertIn("Hosted by Parkway Central Library", details)
                         self.assertEqual(
                             "60 minutes as a fallback" in details, explicit_end is None
@@ -2880,7 +2908,9 @@ class DigestTests(unittest.TestCase):
                         )
                         for line in details.splitlines():
                             if line.startswith("Related:"):
-                                self.assertIn(line, digest.related_link_lines(event))
+                                self.assertIn(
+                                    line, email_render.related_link_lines(event)
+                                )
 
     def test_unrepresentable_calendar_link_is_omitted_with_official_access_preserved(
         self,
@@ -2888,7 +2918,7 @@ class DigestTests(unittest.TestCase):
         for suffix in ("欢" * 500, "%E6%AC%A2" * 210):
             with self.subTest(encoded=suffix.startswith("%")):
                 link = "https://libwww.freelibrary.org/calendar/event/" + suffix
-                events, _count = digest.parse_feed(
+                events, _count = model.parse_feed(
                     rss(
                         [
                             {
@@ -2901,15 +2931,15 @@ class DigestTests(unittest.TestCase):
                             }
                         ]
                     ),
-                    digest.BRANCHES["CEN"],
+                    model.BRANCHES["CEN"],
                 )
                 event = events[0]
                 self.assertEqual(event.link, link)
                 for compact in (False, True):
                     self.assertEqual(
-                        digest.google_calendar_url(event, 60, compact=compact), ""
+                        email_render.google_calendar_url(event, 60, compact=compact), ""
                     )
-                    card = digest._render_event_card(
+                    card = email_render.render_event_card(
                         event, duration_minutes=60, compact=compact
                     )
                     self.assertIn(f'href="{link}"', card)
@@ -2920,14 +2950,14 @@ class DigestTests(unittest.TestCase):
                     birth_date=date(2025, 11, 1),
                     filter_mode="Recommended",
                     duration_minutes=60,
-                    selected_branches=(digest.BRANCHES["CEN"],),
+                    selected_branches=(model.BRANCHES["CEN"],),
                     reference_date=date(2026, 7, 19),
                     events=events,
                     source_counts={"CEN": 1},
                 )
                 self.assertEqual(
                     payload["metadata"]["included_occurrence_ids"],
-                    [digest.event_identity(event)],
+                    [model.event_identity(event)],
                 )
                 for body in (payload["html"], payload["message"]):
                     self.assertIn(link, body)
@@ -2935,32 +2965,32 @@ class DigestTests(unittest.TestCase):
                     self.assertNotIn("Their Google Calendar links use", body)
                 self.assertIn("Monday from 1 library.", payload["html"])
                 self.assertNotIn("with calendar links", payload["html"])
-                known_end = digest.replace(
+                known_end = replace(
                     event,
                     title="Baby Storytime",
                     link="https://example.test/known-end",
-                    end_at=digest.datetime(2026, 7, 20, 11),
+                    end_at=naive_datetime(2026, 7, 20, 11),
                 )
                 self.assertEqual(
-                    digest._calendar_placeholder_note((event, known_end), 60), ""
+                    email_render._calendar_placeholder_note((event, known_end), 60), ""
                 )
-                omitted_known_end = digest.replace(event, end_at=known_end.end_at)
-                linked_fallback = digest.replace(known_end, end_at=None)
-                note = digest._calendar_placeholder_note(
+                omitted_known_end = replace(event, end_at=known_end.end_at)
+                linked_fallback = replace(known_end, end_at=None)
+                note = email_render._calendar_placeholder_note(
                     (omitted_known_end, linked_fallback), 60
                 )
                 self.assertIn("for some events", note)
 
     def test_final_html_budget_includes_photo_preheader_changes(self) -> None:
         events = [
-            digest.Event(
+            model.Event(
                 title=f"Baby activity {index}",
                 event_date=date(2026, 7, 20),
-                start_time=digest.time(10 + index),
+                start_time=time(10 + index),
                 description="A fun activity.",
                 link=f"https://example.test/{index}",
                 image_url="https://libwww.freelibrary.org/images/test.png",
-                branch=digest.BRANCHES["CEN"],
+                branch=model.BRANCHES["CEN"],
                 age_categories=("Baby",),
             )
             for index in range(3)
@@ -2970,16 +3000,20 @@ class DigestTests(unittest.TestCase):
             "birth_date": date(2025, 11, 1),
             "week_start": date(2026, 7, 20),
             "week_end": date(2026, 7, 26),
-            "branches": (digest.BRANCHES["CEN"],),
+            "branches": (model.BRANCHES["CEN"],),
             "duration_minutes": 60,
             "source_errors": (),
             "source_warnings": (),
         }
-        compact = digest._render_html(events, **arguments, full_event_ids=frozenset())
+        compact = email_render.render_html(
+            events, **arguments, full_event_ids=frozenset()
+        )
         first_card_delta = len(
-            digest._render_event_card(events[0], duration_minutes=60).encode("utf-8")
+            email_render.render_event_card(events[0], duration_minutes=60).encode(
+                "utf-8"
+            )
         ) - len(
-            digest._render_event_card(
+            email_render.render_event_card(
                 events[0], duration_minutes=60, compact=True
             ).encode("utf-8")
         )
@@ -3001,14 +3035,14 @@ class DigestTests(unittest.TestCase):
         self,
     ) -> None:
         events = [
-            digest.Event(
+            model.Event(
                 title=f"Baby activity {index} \N{SNOWMAN}",
                 event_date=date(2026, 7, 20 + index % 6),
-                start_time=digest.time(10),
+                start_time=time(10),
                 description="Stories and play. " * 120,
                 link=f"https://example.test/{index}",
                 image_url="cid:original.png",
-                branch=digest.BRANCHES["CEN"],
+                branch=model.BRANCHES["CEN"],
                 age_categories=("Baby",),
             )
             for index in range(100)
@@ -3018,12 +3052,12 @@ class DigestTests(unittest.TestCase):
             "birth_date": date(2025, 11, 1),
             "filter_mode": "Recommended",
             "duration_minutes": 60,
-            "selected_branches": (digest.BRANCHES["CEN"],),
+            "selected_branches": (model.BRANCHES["CEN"],),
             "reference_date": date(2026, 7, 19),
             "events": events,
             "source_counts": {"CEN": 100},
         }
-        render_html = digest._render_html
+        render_html = email_render.render_html
 
         def uncached_render(*args, **kwargs):
             kwargs.pop("rendered_cards", None)
@@ -3034,11 +3068,14 @@ class DigestTests(unittest.TestCase):
                 self.subTest(budget=budget),
                 patch.object(digest, "MAX_DIGEST_HTML_BYTES", budget),
             ):
-                with patch.object(digest, "_render_html", side_effect=uncached_render):
+                with patch.object(digest, "render_html", side_effect=uncached_render):
                     expected = digest.build_digest(**arguments)
-                with patch.object(
-                    digest, "_render_event_card", wraps=digest._render_event_card
-                ) as render_card:
+                # digest.py pre-renders cards through its own imported name.
+                render_card = MagicMock(wraps=email_render.render_event_card)
+                with (
+                    patch.object(email_render, "render_event_card", new=render_card),
+                    patch.object(digest, "render_event_card", new=render_card),
+                ):
                     actual = digest.build_digest(**arguments)
                 self.assertEqual(actual, expected)
                 self.assertLessEqual(render_card.call_count, 2 * len(events))
@@ -3050,8 +3087,8 @@ class DigestTests(unittest.TestCase):
         first = digest.build_digest(**arguments)
         later = digest.build_digest(
             **{**arguments, "duration_minutes": 90},
-            image_url_overrides={digest.event_identity(events[0]): "cid:later.png"},
-            image_layout_overrides={digest.event_identity(events[0]): "hero"},
+            image_url_overrides={model.event_identity(events[0]): "cid:later.png"},
+            image_layout_overrides={model.event_identity(events[0]): "hero"},
         )
         self.assertIn("cid:original.png", first["html"])
         self.assertNotIn("cid:original.png", later["html"])
@@ -3063,12 +3100,12 @@ class DigestTests(unittest.TestCase):
     ) -> None:
         events = []
         for index in range(8):
-            branch = digest.BRANCHES["SWK"] if index < 5 else digest.BRANCHES["CEN"]
+            branch = model.BRANCHES["SWK"] if index < 5 else model.BRANCHES["CEN"]
             events.append(
-                digest.Event(
+                model.Event(
                     title=f"Baby activity {index}",
                     event_date=date(2026, 7, 20 + index % 7),
-                    start_time=digest.time(9 + index % 8),
+                    start_time=time(9 + index % 8),
                     description="A useful activity for babies and caregivers.",
                     link=f"https://example.test/events/{index}",
                     image_url="https://libwww.freelibrary.org/images/event.png",
@@ -3082,7 +3119,7 @@ class DigestTests(unittest.TestCase):
             birth_date=date(2025, 11, 1),
             filter_mode="Recommended",
             duration_minutes=60,
-            selected_branches=(digest.BRANCHES["SWK"], digest.BRANCHES["CEN"]),
+            selected_branches=(model.BRANCHES["SWK"], model.BRANCHES["CEN"]),
             reference_date=date(2026, 7, 19),
             events=events,
             source_counts={
@@ -3112,16 +3149,14 @@ class DigestTests(unittest.TestCase):
 
     def test_pathological_event_count_has_an_explicit_bounded_overflow(self) -> None:
         events = [
-            digest.Event(
+            model.Event(
                 title=f"Baby activity {index}",
                 event_date=date(2026, 7, 20 + index % 7),
-                start_time=digest.time(9 + index % 8, index % 60),
+                start_time=time(9 + index % 8, index % 60),
                 description="A useful activity for babies and caregivers.",
                 link=f"https://example.test/events/{index}",
                 image_url="",
-                branch=(
-                    digest.BRANCHES["SWK"] if index % 2 else digest.BRANCHES["CEN"]
-                ),
+                branch=(model.BRANCHES["SWK"] if index % 2 else model.BRANCHES["CEN"]),
                 age_categories=("Baby",),
             )
             for index in range(120)
@@ -3132,7 +3167,7 @@ class DigestTests(unittest.TestCase):
             birth_date=date(2025, 11, 1),
             filter_mode="Recommended",
             duration_minutes=60,
-            selected_branches=(digest.BRANCHES["SWK"], digest.BRANCHES["CEN"]),
+            selected_branches=(model.BRANCHES["SWK"], model.BRANCHES["CEN"]),
             reference_date=date(2026, 7, 19),
             events=events,
             source_counts={"SWK": 60, "CEN": 60},
@@ -3154,11 +3189,11 @@ class DigestTests(unittest.TestCase):
         self.assertNotIn("Every matched event is included", payload["html"])
 
     def test_nested_description_lists_preserve_their_parent_item(self) -> None:
-        rendered = digest._description_render_html(
+        rendered = model._description_render_html(
             "<ul><li>First<ul><li>Nested</li></ul>Tail</li><li>Second</li></ul>",
             "",
         )
-        root = digest.ET.fromstring(rendered)
+        root = ET.fromstring(rendered)  # noqa: S314
         self.assertEqual(root.tag, "ul")
         self.assertEqual([item.text for item in root], ["First", "Second"])
         self.assertEqual(root[0][0].tag, "ul")
@@ -3166,19 +3201,19 @@ class DigestTests(unittest.TestCase):
         self.assertEqual(root[0][0].tail, "Tail")
 
     def test_pre_birth_rows_are_excluded_without_breaking_matching(self) -> None:
-        event = digest.Event(
+        event = model.Event(
             title="Baby storytime",
             event_date=date(2026, 7, 20),
-            start_time=digest.time(10),
+            start_time=time(10),
             description="For babies with caregivers.",
             link="",
             image_url="",
-            branch=digest.BRANCHES["CEN"],
+            branch=model.BRANCHES["CEN"],
             age_categories=("Baby",),
         )
-        self.assertEqual(digest.classify_event(event, date(2026, 7, 21)), "exclude")
+        self.assertEqual(matching.classify_event(event, date(2026, 7, 21)), "exclude")
         self.assertEqual(
-            digest.matching_events(
+            matching.matching_events(
                 [event],
                 date(2026, 7, 21),
                 "Recommended",
@@ -3193,24 +3228,24 @@ class DigestTests(unittest.TestCase):
     ) -> None:
         prefix = "A long baby activity title " * 12
         events = [
-            digest.Event(
+            model.Event(
                 title=prefix + suffix,
                 event_date=date(2026, 7, 20),
-                start_time=digest.time(10),
+                start_time=time(10),
                 description="For babies and caregivers.",
                 link="",
                 image_url="",
-                branch=digest.BRANCHES["CEN"],
+                branch=model.BRANCHES["CEN"],
                 age_categories=("Baby",),
             )
             for suffix in ("First occurrence", "Second occurrence")
         ]
         self.assertNotEqual(
-            digest.event_identity(events[0]), digest.event_identity(events[1])
+            model.event_identity(events[0]), model.event_identity(events[1])
         )
         self.assertEqual(
-            digest.event_identity(digest._display_event(events[0])),
-            digest.event_identity(events[0]),
+            model.event_identity(digest._display_event(events[0])),
+            model.event_identity(events[0]),
         )
         with patch.object(digest, "MAX_EMAIL_EVENTS", 1):
             payload = digest.build_digest(
@@ -3218,7 +3253,7 @@ class DigestTests(unittest.TestCase):
                 birth_date=date(2025, 11, 1),
                 filter_mode="Recommended",
                 duration_minutes=60,
-                selected_branches=(digest.BRANCHES["CEN"],),
+                selected_branches=(model.BRANCHES["CEN"],),
                 reference_date=date(2026, 7, 19),
                 events=events,
                 source_counts={"CEN": 2},
@@ -3229,28 +3264,28 @@ class DigestTests(unittest.TestCase):
         self.assertEqual(metadata["full_card_count"], 1)
         self.assertEqual(payload["html"].count('class="event-title"'), 1)
         self.assertEqual(
-            metadata["full_card_event_ids"], [digest.event_identity(events[0])]
+            metadata["full_card_event_ids"], [model.event_identity(events[0])]
         )
         self.assertIn("1 matched activity was omitted", payload["message"])
         self.assertNotIn("Every matched event is included", payload["html"])
 
     def test_dynamic_icons_use_words_instead_of_substrings(self) -> None:
-        event = digest.Event(
+        event = model.Event(
             title="Community Party",
             event_date=date(2026, 7, 20),
-            start_time=digest.time(10),
+            start_time=time(10),
             description="",
             link="",
             image_url="",
-            branch=digest.BRANCHES["CEN"],
+            branch=model.BRANCHES["CEN"],
         )
-        self.assertEqual(digest.icon_for(event), "\N{SPARKLES}")
+        self.assertEqual(email_render.icon_for(event), "\N{SPARKLES}")
         self.assertEqual(
-            digest.icon_for(digest.replace(event, title="Bread Making")),
+            email_render.icon_for(replace(event, title="Bread Making")),
             "\N{SPARKLES}",
         )
         self.assertEqual(
-            digest.icon_for(digest.replace(event, title="Art Workshop")),
+            email_render.icon_for(replace(event, title="Art Workshop")),
             "\N{ARTIST PALETTE}",
         )
 

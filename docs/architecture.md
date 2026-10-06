@@ -37,7 +37,10 @@ The principal owners are:
 | --- | --- |
 | HTTP acquisition and feed coverage evidence | [api.py](../custom_components/free_library_events/api.py) |
 | Source planning, snapshots, refresh attempts, recovery | [coordinator.py](../custom_components/free_library_events/coordinator.py) |
-| Parsing, occurrence identity, matching, digest rendering | [digest.py](../custom_components/free_library_events/digest.py) |
+| Event model, parsing, occurrence identity | [model.py](../custom_components/free_library_events/model.py) |
+| Age matching and fit classification | [matching.py](../custom_components/free_library_events/matching.py) |
+| Email and calendar presentation | [email_render.py](../custom_components/free_library_events/email_render.py) |
+| Digest selection, budgeting, and response assembly | [digest.py](../custom_components/free_library_events/digest.py) |
 | Shared calendar item projection | [calendar_data.py](../custom_components/free_library_events/calendar_data.py) |
 | Home Assistant entities | [calendar.py](../custom_components/free_library_events/calendar.py), [sensor.py](../custom_components/free_library_events/sensor.py), [button.py](../custom_components/free_library_events/button.py) |
 | Response orchestration and entry lifecycle | [__init__.py](../custom_components/free_library_events/__init__.py) |
@@ -48,7 +51,7 @@ The principal owners are:
 
 ## Acquisition must prove its horizon
 
-A source is a branch and official age-category pair, keyed as `branch_code:age_category`. The supported branch codes are `SWK`, `IND`, `CEN`, and `PCI`. Their public metadata and RSS URL construction live in `digest.py`.
+A source is a branch and official age-category pair, keyed as `branch_code:age_category`. The supported branch codes are `SWK`, `IND`, `CEN`, and `PCI`. Their public metadata and RSS URL construction live in `model.py`.
 
 Every refresh recomputes age-category selection from the configured birth date and Home Assistant's current local date through 90 days ahead. For a minor, the plan also includes all five child and teen categories so explicit inclusive wording can be discovered outside the most obvious category. Adult and senior source selection follows the overlapping local age windows. A window crossing a life-stage boundary retains the categories needed on both sides.
 

@@ -29,14 +29,9 @@ from .coordinator import (
     source_label,
     supplemental_coverage,
 )
-from .digest import (
-    BRANCHES,
-    classify_event,
-    event_is_active,
-    include_fit,
-    next_week_start,
-)
 from .entity import service_device_info
+from .matching import classify_event, include_fit
+from .model import BRANCHES, event_is_active, next_week_start
 from .runtime import LibraryConfigEntry
 
 PARALLEL_UPDATES = 0

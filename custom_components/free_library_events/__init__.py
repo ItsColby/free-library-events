@@ -52,13 +52,7 @@ from .coordinator import (
     source_label,
     supplemental_coverage,
 )
-from .digest import (
-    BRANCHES,
-    build_digest,
-    event_identity,
-    next_week_start,
-    select_digest_events,
-)
+from .digest import build_digest, select_digest_events
 from .email_images import (
     EMAIL_IMAGE_DIRECTORY,
     IMAGE_CACHE_TTL_SECONDS,
@@ -70,6 +64,7 @@ from .email_images import (
     remove_stored_image_run,
     store_downloaded_images,
 )
+from .model import BRANCHES, event_identity, next_week_start
 from .runtime import LibraryConfigEntry
 from .webcal import async_register_webcal_view
 

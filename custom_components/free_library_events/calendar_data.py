@@ -12,19 +12,15 @@ from .const import (
     CONF_CALENDAR_DURATION,
     CONF_FILTER_MODE,
 )
-from .digest import (
-    TIMEZONE,
-    Event,
-    classify_event,
+from .email_render import (
     event_age_categories,
     event_calendar_location,
     event_details_url,
-    event_identity,
-    event_is_active,
     event_location_note,
-    include_fit,
     related_link_lines,
 )
+from .matching import classify_event, include_fit
+from .model import TIMEZONE, Event, event_identity, event_is_active
 
 LIBRARY_TIME_ZONE = ZoneInfo(TIMEZONE)
 

@@ -12,7 +12,7 @@ from typing import Self
 from unittest.mock import AsyncMock, patch
 
 from custom_components.free_library_events import email_images
-from custom_components.free_library_events.digest import BRANCHES, Event
+from custom_components.free_library_events.model import BRANCHES, Event
 
 _PNG = b"\x89PNG\r\n\x1a\n" + (b"test" * 8)
 

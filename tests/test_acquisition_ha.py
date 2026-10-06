@@ -37,7 +37,7 @@ from custom_components.free_library_events.coordinator import LibraryDataCoordin
 from custom_components.free_library_events.diagnostics import (
     async_get_config_entry_diagnostics,
 )
-from custom_components.free_library_events.digest import BRANCHES
+from custom_components.free_library_events.model import BRANCHES
 
 
 @pytest.mark.parametrize(

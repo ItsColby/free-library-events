@@ -50,7 +50,7 @@ from .const import (
     MIN_SCAN_INTERVAL,
     NAME,
 )
-from .digest import BRANCHES, FILTER_MODES
+from .model import BRANCHES, FILTER_MODES
 from .webcal import webcal_status, webcal_subscription_urls
 
 

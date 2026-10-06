@@ -23,7 +23,7 @@ live behavior.
 | --- | --- |
 | Settings or entry lifecycle | `config.py`, `config_flow.py`, `__init__.py`; config-flow, migration, reload, and unload cases in `test_integration_ha.py` |
 | RSS requests, taxonomy, or source coverage | `api.py`, `coordinator.py`; `test_acquisition_ha.py` and acquisition cases in `test_integration_ha.py` |
-| Parsing, matching, deduplication, or email presentation | `digest.py`; `test_digest.py`, plus HA action tests for response orchestration |
+| Parsing, matching, deduplication, or email presentation | `model.py`, `matching.py`, `email_render.py`, `digest.py`; `test_digest.py`, plus HA action tests for response orchestration |
 | Calendar or subscription behavior | `calendar_data.py`, `calendar.py`, `webcal.py`; native calendar and HTTP cases in `test_integration_ha.py` |
 | Image download, attachment, or cleanup behavior | `email_images.py`, `__init__.py`; `test_email_images.py` and digest-action cases in `test_integration_ha.py` |
 | Help text or public metadata | `translations/en.json`, `services.yaml`, `icons.json`, `manifest.json`, `hacs.json`; `test_metadata.py` and affected flow/render tests |
@@ -36,7 +36,7 @@ compatibility decision, not just updated descriptions. Use public synthetic test
 inputs. Household recipients, profiles, subscription tokens, deployment routes,
 and operational records belong outside this repository.
 
-To support another branch, extend the public registry in `digest.py` and verify
+To support another branch, extend the public registry in `model.py` and verify
 that its feeds parse correctly. Include deterministic coverage for the addition
 and update the supported-branch documentation before treating it as supported.
 
@@ -64,7 +64,7 @@ python3.14 -m venv .venv
 source .venv/bin/activate
 python -m pip install --group ha-current  # or ha-minimum
 python -m pip check
-python -m mypy
+python -m mypy  # ha-current only; CI runs it in the current lane
 python -m pytest tests
 ```
 
