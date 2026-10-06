@@ -6,7 +6,7 @@ import xml.etree.ElementTree as ET
 from dataclasses import replace
 from datetime import date, datetime, time
 from itertools import permutations
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from custom_components.free_library_events import digest, email_render, matching, model
 
@@ -3070,11 +3070,12 @@ class DigestTests(unittest.TestCase):
             ):
                 with patch.object(digest, "render_html", side_effect=uncached_render):
                     expected = digest.build_digest(**arguments)
-                with patch.object(
-                    email_render,
-                    "render_event_card",
-                    wraps=email_render.render_event_card,
-                ) as render_card:
+                # digest.py pre-renders cards through its own imported name.
+                render_card = MagicMock(wraps=email_render.render_event_card)
+                with (
+                    patch.object(email_render, "render_event_card", new=render_card),
+                    patch.object(digest, "render_event_card", new=render_card),
+                ):
                     actual = digest.build_digest(**arguments)
                 self.assertEqual(actual, expected)
                 self.assertLessEqual(render_card.call_count, 2 * len(events))
