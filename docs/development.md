@@ -12,7 +12,9 @@ The [Validate workflow](../.github/workflows/validate.yaml) defines the CI jobs
 and the **Release gate** that requires them,
 [`.pre-commit-config.yaml`](../.pre-commit-config.yaml) the static hooks, and
 [`.github/dependabot.yml`](../.github/dependabot.yml) the dependency update
-policy. Local checks do not replace HACS, authorize publication, or establish
+policy. The [Dependabot auto-merge workflow](../.github/workflows/dependabot-auto-merge.yaml)
+merges its Actions and pre-commit updates once required checks pass. Local
+checks do not replace HACS, authorize publication, or establish
 live behavior.
 
 ## Start with the affected contract
@@ -25,7 +27,7 @@ live behavior.
 | Calendar or subscription behavior | `calendar_data.py`, `calendar.py`, `webcal.py`; native calendar and HTTP cases in `test_integration_ha.py` |
 | Image download, attachment, or cleanup behavior | `email_images.py`, `__init__.py`; `test_email_images.py` and digest-action cases in `test_integration_ha.py` |
 | Help text or public metadata | `translations/en.json`, `services.yaml`, `icons.json`, `manifest.json`, `hacs.json`; `test_metadata.py` and affected flow/render tests |
-| Validation itself | `.github/workflows/validate.yaml`, `.pre-commit-config.yaml`, `.gitleaks.toml`, requirements files, and `pyproject.toml` |
+| Validation itself | `.github/workflows/validate.yaml`, `.pre-commit-config.yaml`, `.gitleaks.toml`, and `pyproject.toml` (including its `dev`, `ha-minimum`, and `ha-current` dependency groups) |
 
 Python modules are under `custom_components/free_library_events/`; tests are
 under `tests/`. Keep identity, settings storage, action-response fields, and their
@@ -52,11 +54,21 @@ Formatting, lint, and strict typing policy live in
 [`pyproject.toml`](../pyproject.toml).
 
 The Home Assistant tests need Linux (or WSL) and Python 3.14. Use a separate
-virtual environment for each maintained environment, install its dependency
-group (`uv pip install --group ha-minimum` or `--group ha-current`), then run
-`python -m pytest tests` (and, in the `ha-current` environment only, `python -m mypy`),
-or name individual test modules while iterating.
-Hassfest and HACS run only in CI.
+virtual environment for each maintained environment. The `ha-minimum` and
+`ha-current` [dependency groups](../pyproject.toml) pin the lane's Core version,
+test harness and mypy together; installing only the harness does not establish
+the intended Core version.
+
+```bash
+python3.14 -m venv .venv
+source .venv/bin/activate
+python -m pip install --group ha-current  # or ha-minimum
+python -m pip check
+python -m mypy  # ha-current only; CI runs it in the current lane
+python -m pytest tests
+```
+
+Name individual test modules while iterating. Hassfest and HACS run only in CI.
 
 For documentation changes, validate claims against their source owners, check
 links and examples, and run metadata or behavior tests affected by the wording.
