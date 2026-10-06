@@ -6,7 +6,7 @@ and reproduce it locally. For the data model and runtime
 boundaries, read [Architecture](architecture.md); for caller behavior and examples,
 read the [user guide](usage.md).
 
-## Validation lanes
+## Validation
 
 The [Validate workflow](../.github/workflows/validate.yaml) defines the CI jobs
 and the **Release gate** that requires them,
@@ -27,7 +27,7 @@ live behavior.
 | Calendar or subscription behavior | `calendar_data.py`, `calendar.py`, `webcal.py`; native calendar and HTTP cases in `test_integration_ha.py` |
 | Image download, attachment, or cleanup behavior | `email_images.py`, `__init__.py`; `test_email_images.py` and digest-action cases in `test_integration_ha.py` |
 | Help text or public metadata | `translations/en.json`, `services.yaml`, `icons.json`, `manifest.json`, `hacs.json`; `test_metadata.py` and affected flow/render tests |
-| Validation itself | `.github/workflows/validate.yaml`, `.pre-commit-config.yaml`, `.gitleaks.toml`, and `pyproject.toml` (including its `dev`, `ha-minimum`, and `ha-current` dependency groups) |
+| Validation itself | `.github/workflows/validate.yaml`, `.pre-commit-config.yaml`, `.gitleaks.toml`, and `pyproject.toml` (including its `dev` and `ha-current` dependency groups) |
 
 Python modules are under `custom_components/free_library_events/`; tests are
 under `tests/`. Keep identity, settings storage, action-response fields, and their
@@ -53,18 +53,17 @@ pre-commit run --all-files
 Formatting, lint, and strict typing policy live in
 [`pyproject.toml`](../pyproject.toml).
 
-The Home Assistant tests need Linux (or WSL) and Python 3.14. Use a separate
-virtual environment for each maintained environment. The `ha-minimum` and
-`ha-current` [dependency groups](../pyproject.toml) pin the lane's Core version,
-test harness and mypy together; installing only the harness does not establish
-the intended Core version.
+The Home Assistant tests need Linux (or WSL) and Python 3.14. The `ha-current`
+[dependency group](../pyproject.toml) pins Core, the test harness and mypy
+together; installing only the harness does not establish the intended Core
+version.
 
 ```bash
 python3.14 -m venv .venv
 source .venv/bin/activate
-python -m pip install --group ha-current  # or ha-minimum
+python -m pip install --group ha-current
 python -m pip check
-python -m mypy  # ha-current only; CI runs it in the current lane
+python -m mypy
 python -m pytest tests
 ```
 
@@ -72,14 +71,12 @@ Name individual test modules while iterating. Hassfest and HACS run only in CI.
 
 For documentation changes, validate claims against their source owners, check
 links and examples, and run metadata or behavior tests affected by the wording.
-For runtime work, exercise the changed success/failure paths and both maintained
-HA environments.
+For runtime work, exercise the changed success/failure paths.
 
-The supported minimum Core is pinned in the `ha-minimum` and the current target
-in the `ha-current` [dependency group](../pyproject.toml). Keep these
-targets and the minimum in [`hacs.json`](../hacs.json) consistent when support
-changes. An exact current lane is evidence for that Core
-version, not an assurance about every newer one.
+The supported Core is pinned in the `ha-current` [dependency group](../pyproject.toml)
+and is also the minimum in [`hacs.json`](../hacs.json); keep them equal when support
+changes. The exact pin is evidence for that Core version, not an assurance about
+every newer one.
 
 Gitleaks uses its default credential rules plus the repository's
 [`.gitleaks.toml`](../.gitleaks.toml) rules for private paths, addresses,

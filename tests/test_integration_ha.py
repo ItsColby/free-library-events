@@ -11,7 +11,7 @@ from dataclasses import replace
 from datetime import UTC, date, datetime, time, timedelta
 from email.utils import format_datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 from unittest.mock import AsyncMock, Mock, patch
 from zoneinfo import ZoneInfo
 
@@ -66,12 +66,9 @@ from custom_components.free_library_events.calendar_data import (
     build_calendar_items,
 )
 from custom_components.free_library_events.config import (
-    LEGACY_BRANCH_CONFIG_KEYS,
     entry_config,
-    migrated_entry_config,
     normalize_options,
     normalize_profile,
-    selected_branches,
 )
 from custom_components.free_library_events.const import (
     ATTR_EMBED_IMAGES,
@@ -141,10 +138,6 @@ PROFILE_INPUT = {
     CONF_BIRTH_DATE: "2025-01-15",
     CONF_BRANCHES: ["SWK", "CEN"],
 }
-
-LEGACY_BRANCH_INPUT = dict.fromkeys(
-    (key for key, _branch_code in LEGACY_BRANCH_CONFIG_KEYS), True
-)
 
 BEHAVIOR_INPUT = {
     CONF_FILTER_MODE: "Recommended",
@@ -731,98 +724,23 @@ def test_profile_and_webcal_validation_reject_unknown_or_unsafe_values() -> None
     assert private_detail not in repr(invalid_birth_date.value)
 
 
-def test_migration_coerces_non_ui_boolean_strings() -> None:
-    disabled = dict.fromkeys(LEGACY_BRANCH_INPUT, "false")
-
-    with pytest.raises(ValueError, match="branch_required"):
-        migrated_entry_config(_legacy_input() | disabled, {})
-    with pytest.raises(ValueError, match="invalid_config"):
-        migrated_entry_config(_legacy_input() | {"include_independence": "maybe"}, {})
-
-
 def test_entry_config_rejects_non_string_child_name() -> None:
     with pytest.raises(TypeError, match="invalid_child_name"):
         entry_config(USER_INPUT | {CONF_CHILD_NAME: None}, {})
 
 
-def test_all_sources_default_on_for_legacy_entries() -> None:
-    legacy_input = {
-        key: value
-        for key, value in _legacy_input().items()
-        if key not in {"include_parkway_central", "include_philadelphia_city_institute"}
-    }
-    data, _options = migrated_entry_config(legacy_input, {})
-    assert data[CONF_BRANCHES] == ["SWK", "IND", "CEN", "PCI"]
-    assert [branch.code for branch in selected_branches(data)] == [
-        "SWK",
-        "IND",
-        "CEN",
-        "PCI",
-    ]
-
-
-async def test_version_one_entry_migrates_profile_and_behavior_without_token_leak(
-    hass: HomeAssistant,
-) -> None:
-    token = "synthetic-migration-subscription-token"
+async def test_older_minor_version_entry_is_rejected(hass: HomeAssistant) -> None:
     entry = MockConfigEntry(
         domain=DOMAIN,
-        title="Free Library Events",
-        unique_id=DOMAIN,
-        data=_legacy_input() | {"future_data": {"version": 2}},
-        options=_legacy_input()
-        | {
-            CONF_CHILD_NAME: "Jordan",
-            "include_philadelphia_city_institute": False,
-            CONF_FILTER_MODE: "Strict",
-            CONF_PUBLISH_WEBCAL: True,
-            CONF_WEBCAL_TOKEN: token,
-            "future_options": {"version": 2},
-        },
+        data=PROFILE_INPUT,
         version=1,
+        minor_version=CONFIG_ENTRY_MINOR_VERSION - 1,
     )
     entry.add_to_hass(hass)
 
-    assert await async_migrate_entry(hass, entry)
-
-    assert entry.version == 1
-    assert entry.minor_version == CONFIG_ENTRY_MINOR_VERSION
-    assert entry.data == {
-        CONF_CHILD_NAME: "Jordan",
-        CONF_BIRTH_DATE: "2025-01-15",
-        CONF_BRANCHES: ["SWK", "IND", "CEN"],
-        "future_data": {"version": 2},
-    }
-    assert entry.options[CONF_FILTER_MODE] == "Strict"
-    assert entry.options[CONF_WEBCAL_TOKEN] == token
-    assert entry.options["future_options"] == {"version": 2}
-    assert CONF_CHILD_NAME not in entry.options
-    assert CONF_BIRTH_DATE not in entry.options
-    assert not LEGACY_BRANCH_INPUT.keys() & entry.options.keys()
-    assert token not in repr(entry.data)
-
-
-async def test_minor_version_two_entry_drops_legacy_branch_mirrors(
-    hass: HomeAssistant,
-) -> None:
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        title="Free Library Events",
-        unique_id=DOMAIN,
-        data=PROFILE_INPUT
-        | LEGACY_BRANCH_INPUT
-        | {"include_independence": False, "future_data": {"version": 2}},
-        options=BEHAVIOR_INPUT | {"future_options": {"version": 2}},
-        version=1,
-        minor_version=2,
-    )
-    entry.add_to_hass(hass)
-
-    assert await async_migrate_entry(hass, entry)
-
-    assert entry.minor_version == CONFIG_ENTRY_MINOR_VERSION
-    assert entry.data == PROFILE_INPUT | {"future_data": {"version": 2}}
-    assert entry.options == BEHAVIOR_INPUT | {"future_options": {"version": 2}}
+    assert not await async_migrate_entry(hass, entry)
+    assert entry.minor_version == CONFIG_ENTRY_MINOR_VERSION - 1
+    assert entry.data == PROFILE_INPUT
 
 
 async def test_newer_minor_version_entry_is_rejected(hass: HomeAssistant) -> None:
@@ -2332,6 +2250,8 @@ async def test_native_calendars_explain_conditional_venue_without_changing_occur
         unique_id=DOMAIN,
         data=profile,
         options={CONF_PUBLISH_WEBCAL: True, CONF_WEBCAL_TOKEN: token},
+        version=1,
+        minor_version=CONFIG_ENTRY_MINOR_VERSION,
     )
     entry.add_to_hass(hass)
 
@@ -2457,6 +2377,8 @@ async def test_webcal_view_is_token_gated_dynamic_and_unloads(
             CONF_WEBCAL_TOKEN: token,
             CONF_WEBCAL_NAME: "Neighborhood Library Events",
         },
+        version=1,
+        minor_version=CONFIG_ENTRY_MINOR_VERSION,
     )
     entry.add_to_hass(hass)
 
@@ -3966,17 +3888,6 @@ def _entry() -> MockConfigEntry:
         title="Legacy child-specific title",
         unique_id=DOMAIN,
         data=USER_INPUT,
+        version=1,
+        minor_version=CONFIG_ENTRY_MINOR_VERSION,
     )
-
-
-def _legacy_input() -> dict[str, Any]:
-    """Return version-1.1 entry data, which stored one boolean per branch."""
-
-    return {
-        CONF_CHILD_NAME: "Avery",
-        CONF_BIRTH_DATE: "2025-01-15",
-        **LEGACY_BRANCH_INPUT,
-        CONF_FILTER_MODE: "Recommended",
-        CONF_CALENDAR_DURATION: 60,
-        CONF_SCAN_INTERVAL: 21600,
-    }

@@ -227,9 +227,9 @@ Config entry version `1.3` separates required profile data from behavior options
 | Entry data, edited through reconfiguration | `child_name`, `birth_date`, and `branches` |
 | Entry options | `filter_mode`, `calendar_duration_minutes`, `scan_interval_seconds`, `publish_webcal`, `webcal_name`, and the enabled feed's `webcal_token` |
 
-Normalization is shared by UI, migration, and runtime reads. It rejects unsupported branch codes, future or invalid birth dates, fractional timing values, and out-of-range options. The effective runtime config excludes the WebCal token. Unknown existing fields survive the owned-field updates where supported.
+Normalization is shared by UI and runtime reads. It rejects unsupported branch codes, future or invalid birth dates, fractional timing values, and out-of-range options. The effective runtime config excludes the WebCal token. Unknown existing fields survive the owned-field updates where supported.
 
-Migration accepts older minor versions of entry version 1. It moves combined settings to the owners above, converts the original per-branch booleans to `branches` (legacy options take precedence over data), and removes those booleans. Newer unknown versions are rejected rather than rewritten. Downgrading below this release is unsupported: older releases reject the newer minor version, and the removed booleans are not restored. This migration changes storage ownership without changing the single-entry identity.
+Entries migrated to the current shape are the only supported ones: an entry below or above the current minor version of entry version 1 is rejected rather than rewritten, and older releases reject newer entries. Earlier shapes (per-branch booleans, combined settings) are no longer migrated; install a release that still migrates them first.
 
 The config entry unique ID remains `free_library_events`, and the integration keeps a generic service-device identity `(free_library_events, free_library_events)`. Entity unique IDs are `free_library_events_calendar`, `free_library_events_status`, and `free_library_events_refresh`. These are registry identities, not promises about user-visible entity IDs, which Home Assistant users may rename. Profile reconfiguration and option updates use native reload behavior; unchanged profile data avoids an unnecessary reload.
 
