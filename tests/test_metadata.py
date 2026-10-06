@@ -45,18 +45,20 @@ def _exact_core_pin(group: str) -> str:
     return pins[0]
 
 
-def _version(value: str) -> tuple[int, ...]:
-    return tuple(int(part) for part in value.split("."))
-
-
 class HomeAssistantMetadataTests(unittest.TestCase):
     """Keep public metadata aligned with the tested support floor."""
 
     def test_declared_minimum_matches_the_tested_support_floor(self) -> None:
-        minimum = _exact_core_pin("ha-minimum")
-        current = _exact_core_pin("ha-current")
-        self.assertEqual(str(_json_file(ROOT / "hacs.json")["homeassistant"]), minimum)
-        self.assertGreaterEqual(_version(current), _version(minimum))
+        self.assertEqual(
+            str(_json_file(ROOT / "hacs.json")["homeassistant"]),
+            _exact_core_pin("ha-current"),
+        )
+
+    def integration_source(self) -> str:
+        return "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in sorted(INTEGRATION.glob("*.py"))
+        )
 
     def translation_keys(self, source: str, exception_types: set[str]) -> set[str]:
         keys: set[str] = set()
@@ -78,7 +80,7 @@ class HomeAssistantMetadataTests(unittest.TestCase):
         return keys
 
     def test_user_visible_action_exceptions_are_translated(self) -> None:
-        init_text = (INTEGRATION / "__init__.py").read_text(encoding="utf-8")
+        init_text = self.integration_source()
         strings = _json_file(INTEGRATION / "translations/en.json")
         exception_keys = self.translation_keys(
             init_text, {"HomeAssistantError", "ServiceValidationError"}
@@ -87,7 +89,7 @@ class HomeAssistantMetadataTests(unittest.TestCase):
         self.assertTrue(exception_keys <= set(strings["exceptions"]))
 
     def test_coordinator_failures_are_translated(self) -> None:
-        coordinator_text = (INTEGRATION / "coordinator.py").read_text(encoding="utf-8")
+        coordinator_text = self.integration_source()
         strings = _json_file(INTEGRATION / "translations/en.json")
         translated_failures = self.translation_keys(coordinator_text, {"UpdateFailed"})
         self.assertIn("library_source_update_failed", translated_failures)

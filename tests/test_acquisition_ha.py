@@ -31,6 +31,7 @@ from custom_components.free_library_events.const import (
     CONF_PUBLISH_WEBCAL,
     CONF_WEBCAL_NAME,
     CONF_WEBCAL_TOKEN,
+    CONFIG_ENTRY_MINOR_VERSION,
     DOMAIN,
 )
 from custom_components.free_library_events.coordinator import LibraryDataCoordinator
@@ -383,4 +384,6 @@ def _entry(overrides: dict[str, object] | None = None) -> MockConfigEntry:
             CONF_BRANCHES: ["SWK"],
             **(overrides or {}),
         },
+        version=1,
+        minor_version=CONFIG_ENTRY_MINOR_VERSION,
     )

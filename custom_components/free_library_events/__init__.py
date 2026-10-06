@@ -25,12 +25,7 @@ from homeassistant.util import dt as dt_util
 from homeassistant.util.location import distance
 
 from .api import LibraryClient
-from .config import (
-    entry_config,
-    migrated_entry_config,
-    selected_branches,
-    without_legacy_branch_keys,
-)
+from .config import entry_config, selected_branches
 from .const import (
     ATTR_EMBED_IMAGES,
     ATTR_FORCE_REFRESH,
@@ -198,31 +193,9 @@ async def async_setup(hass: HomeAssistant, config: dict[str, object]) -> bool:
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: LibraryConfigEntry) -> bool:
-    """Migrate entries to profile data, behavior options and `branches` only."""
+    """Accept only the current entry shape; earlier shapes are not migrated."""
 
-    if entry.version != 1 or entry.minor_version > CONFIG_ENTRY_MINOR_VERSION:
-        return False
-    if entry.minor_version == CONFIG_ENTRY_MINOR_VERSION:
-        return True
-    if entry.minor_version == 1:
-        try:
-            data, options = migrated_entry_config(entry.data, entry.options)
-        except (TypeError, ValueError) as err:
-            _LOGGER.error(
-                "Could not migrate the Free Library Events config entry (%s)", err
-            )
-            return False
-    else:
-        data = without_legacy_branch_keys(entry.data)
-        options = without_legacy_branch_keys(entry.options)
-    hass.config_entries.async_update_entry(
-        entry,
-        data=data,
-        options=options,
-        version=1,
-        minor_version=CONFIG_ENTRY_MINOR_VERSION,
-    )
-    return True
+    return entry.version == 1 and entry.minor_version == CONFIG_ENTRY_MINOR_VERSION
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: LibraryConfigEntry) -> bool:
