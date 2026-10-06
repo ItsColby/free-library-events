@@ -58,12 +58,6 @@ extend-select = [
   "T20",
   "TID",
 ]
-ignore = [
-  "ASYNC109",
-  "ASYNC110",
-  "ASYNC240",
-  "PLW0108",
-]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 12
@@ -71,6 +65,7 @@ max-complexity = 12
 [tool.mypy]
 python_version = "3.14"
 strict = true
+files = ["custom_components/free_library_events"]
 warn_unused_configs = true
 show_error_codes = true
 
@@ -79,3 +74,13 @@ asyncio_mode = "auto"
 
 [dependency-groups]
 dev = ["pre-commit==4.6.2"]
+ha-minimum = [
+  "homeassistant==2026.8.0",
+  "pytest-homeassistant-custom-component==0.13.354",
+  "mypy==2.3.0",
+]
+ha-current = [
+  "homeassistant==2026.9.4",
+  "pytest-homeassistant-custom-component==0.13.367",
+  "mypy==2.3.0",
+]

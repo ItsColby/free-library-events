@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import json
 import re
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -18,25 +19,29 @@ def _json_file(path: Path) -> dict[str, object]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _exact_core_pin(path: Path) -> str:
-    """Read one unconditional exact Core pin, allowing other requirements."""
+def _exact_core_pin(group: str) -> str:
+    """Read one exact stable Home Assistant pin from a pyproject dependency group."""
+
+    with (ROOT / "pyproject.toml").open("rb") as file:
+        requirements = tomllib.load(file)["dependency-groups"][group]
     pins = []
-    for line in path.read_text(encoding="utf-8-sig").splitlines():
-        content = line.split("#", 1)[0].strip()
-        if not re.match(r"homeassistant(?=[^A-Za-z0-9_.-]|$)", content, re.IGNORECASE):
+    for requirement in requirements:
+        if not re.match(
+            r"homeassistant(?=[^A-Za-z0-9_.-]|$)", requirement, re.IGNORECASE
+        ):
             continue
         match = re.fullmatch(
             r"homeassistant\s*==\s*([0-9]{4}\.(?:[1-9]|1[0-2])\.(?:0|[1-9][0-9]*))",
-            content,
+            requirement,
             re.IGNORECASE,
         )
         if match is None:
             raise AssertionError(
-                f"{path.name} must use an unconditional stable exact Home Assistant pin"
+                f"{group} must use an unconditional stable exact Home Assistant pin"
             )
         pins.append(match.group(1))
     if len(pins) != 1:
-        raise AssertionError(f"{path.name} must contain exactly one Home Assistant pin")
+        raise AssertionError(f"{group} must contain exactly one Home Assistant pin")
     return pins[0]
 
 
@@ -48,8 +53,8 @@ class HomeAssistantMetadataTests(unittest.TestCase):
     """Keep public metadata aligned with the tested support floor."""
 
     def test_declared_minimum_matches_the_tested_support_floor(self) -> None:
-        minimum = _exact_core_pin(ROOT / "requirements-ha-test.txt")
-        current = _exact_core_pin(ROOT / "requirements-ha-current.txt")
+        minimum = _exact_core_pin("ha-minimum")
+        current = _exact_core_pin("ha-current")
         self.assertEqual(str(_json_file(ROOT / "hacs.json")["homeassistant"]), minimum)
         self.assertGreaterEqual(_version(current), _version(minimum))
 
