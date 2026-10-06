@@ -52,13 +52,7 @@ from .coordinator import (
     source_label,
     supplemental_coverage,
 )
-from .digest import (
-    BRANCHES,
-    build_digest,
-    event_identity,
-    next_week_start,
-    select_digest_events,
-)
+from .digest import build_digest, select_digest_events
 from .email_images import (
     EMAIL_IMAGE_DIRECTORY,
     IMAGE_CACHE_TTL_SECONDS,
@@ -70,6 +64,7 @@ from .email_images import (
     remove_stored_image_run,
     store_downloaded_images,
 )
+from .model import BRANCHES, event_identity, next_week_start
 from .runtime import LibraryConfigEntry
 from .webcal import async_register_webcal_view
 
@@ -188,9 +183,7 @@ async def async_setup(hass: HomeAssistant, config: dict[str, object]) -> bool:
     del config
     async_register_webcal_view(hass)
     image_root, _source_directory_id = _email_image_storage(hass)
-    legacy_image_root = Path(hass.config.path("www", EMAIL_IMAGE_DIRECTORY))
-    for owned_root in {image_root, legacy_image_root}:
-        await hass.async_add_executor_job(purge_stored_image_runs, owned_root)
+    await hass.async_add_executor_job(purge_stored_image_runs, image_root)
     if not hass.services.has_service(DOMAIN, SERVICE_RENDER_DIGEST):
         hass.services.async_register(
             DOMAIN,

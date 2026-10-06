@@ -101,18 +101,18 @@ from custom_components.free_library_events.coordinator import (
 from custom_components.free_library_events.diagnostics import (
     async_get_config_entry_diagnostics,
 )
-from custom_components.free_library_events.digest import (
-    BRANCHES,
-    DescriptionLink,
-    Event,
-    event_identity,
-)
 from custom_components.free_library_events.email_images import (
     EMAIL_IMAGE_DIRECTORY,
     DownloadedImage,
     ImageDownloadBatch,
     StoredImageBundle,
     store_downloaded_images,
+)
+from custom_components.free_library_events.model import (
+    BRANCHES,
+    DescriptionLink,
+    Event,
+    event_identity,
 )
 from custom_components.free_library_events.sensor import (
     LibraryStatusSensor,

@@ -33,7 +33,7 @@ from .api import (
     source_error_description,
 )
 from .const import DOMAIN
-from .digest import (
+from .model import (
     AGE_CATEGORY_ORDER,
     AGE_CATEGORY_WINDOWS,
     BRANCHES,

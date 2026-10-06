@@ -16,7 +16,7 @@ from uuid import uuid4
 
 import aiohttp
 
-from .digest import Event, clean_image_url
+from .model import Event, clean_image_url
 
 EMAIL_IMAGE_DIRECTORY = ".free_library_events_email"
 IMAGE_CACHE_TTL_SECONDS = 60 * 60

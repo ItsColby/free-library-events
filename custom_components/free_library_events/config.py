@@ -30,7 +30,7 @@ from .const import (
     MIN_CALENDAR_DURATION,
     MIN_SCAN_INTERVAL,
 )
-from .digest import BRANCHES, FILTER_MODES, Branch, normalize_child_name
+from .model import BRANCHES, FILTER_MODES, Branch, normalize_child_name
 
 # Version-1.1 entries stored one boolean per branch (default on); migration
 # converts them to `branches` and removes them.
