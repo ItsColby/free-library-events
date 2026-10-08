@@ -134,18 +134,15 @@ def normalize_options(values: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _normalize_integer(value: object, error: str) -> int:
-    """Accept whole UI numbers and legacy strings without truncating fractions."""
+    """Accept whole UI numbers without truncating fractions."""
 
     if (
         isinstance(value, bool)
-        or not isinstance(value, (int, float, str))
+        or not isinstance(value, (int, float))
         or (isinstance(value, float) and not value.is_integer())
     ):
         raise ValueError(error)
-    try:
-        return int(value)
-    except ValueError, OverflowError:
-        raise ValueError(error) from None
+    return int(value)
 
 
 def entry_profile(
