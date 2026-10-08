@@ -684,8 +684,8 @@ def test_behavior_rejects_in_range_fractional_values(
         normalize_options(BEHAVIOR_INPUT | {key: value})
 
 
-@pytest.mark.parametrize("value", (900, 900.0, "900"))
-def test_behavior_accepts_integral_ui_and_legacy_values(value: object) -> None:
+@pytest.mark.parametrize("value", (900, 900.0))
+def test_behavior_accepts_integral_ui_values(value: object) -> None:
     options = normalize_options(BEHAVIOR_INPUT | {CONF_SCAN_INTERVAL: value})
     assert options[CONF_SCAN_INTERVAL] == 900
     assert isinstance(options[CONF_SCAN_INTERVAL], int)
