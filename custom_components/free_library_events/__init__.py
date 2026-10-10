@@ -8,7 +8,7 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, cast
 
-import voluptuous as vol
+import probatio
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import Platform
 from homeassistant.core import (
@@ -80,10 +80,10 @@ PLATFORMS: tuple[Platform, ...] = (
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
-RENDER_DIGEST_SCHEMA = vol.Schema(
+RENDER_DIGEST_SCHEMA = probatio.Schema(
     {
-        vol.Optional(ATTR_FORCE_REFRESH, default=True): cv.boolean,
-        vol.Optional(ATTR_EMBED_IMAGES, default=False): cv.boolean,
+        probatio.Optional(ATTR_FORCE_REFRESH, default=True): cv.boolean,
+        probatio.Optional(ATTR_EMBED_IMAGES, default=False): cv.boolean,
     }
 )
 
