@@ -5,7 +5,7 @@ from __future__ import annotations
 from secrets import token_urlsafe
 from typing import Any
 
-import voluptuous as vol
+import probatio
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.core import callback
@@ -54,24 +54,24 @@ from .model import BRANCHES, FILTER_MODES
 from .webcal import webcal_status, webcal_subscription_urls
 
 
-def _profile_schema(defaults: dict[str, Any]) -> vol.Schema:
+def _profile_schema(defaults: dict[str, Any]) -> probatio.Schema:
     """Return required profile and source-selection fields."""
 
     birth_date_key = (
-        vol.Required(CONF_BIRTH_DATE, default=defaults[CONF_BIRTH_DATE])
+        probatio.Required(CONF_BIRTH_DATE, default=defaults[CONF_BIRTH_DATE])
         if CONF_BIRTH_DATE in defaults
-        else vol.Required(CONF_BIRTH_DATE)
+        else probatio.Required(CONF_BIRTH_DATE)
     )
     child_name_key = (
-        vol.Required(CONF_CHILD_NAME, default=defaults[CONF_CHILD_NAME])
+        probatio.Required(CONF_CHILD_NAME, default=defaults[CONF_CHILD_NAME])
         if CONF_CHILD_NAME in defaults
-        else vol.Required(CONF_CHILD_NAME)
+        else probatio.Required(CONF_CHILD_NAME)
     )
-    return vol.Schema(
+    return probatio.Schema(
         {
             child_name_key: TextSelector(),
             birth_date_key: DateSelector(),
-            vol.Required(
+            probatio.Required(
                 CONF_BRANCHES, default=defaults[CONF_BRANCHES]
             ): SelectSelector(
                 SelectSelectorConfig(
@@ -87,15 +87,15 @@ def _profile_schema(defaults: dict[str, Any]) -> vol.Schema:
     )
 
 
-def _behavior_schema(defaults: dict[str, Any]) -> vol.Schema:
+def _behavior_schema(defaults: dict[str, Any]) -> probatio.Schema:
     """Return matching and timing behavior fields."""
 
-    return vol.Schema(
+    return probatio.Schema(
         {
-            vol.Required(
+            probatio.Required(
                 CONF_FILTER_MODE, default=defaults[CONF_FILTER_MODE]
             ): SelectSelector(SelectSelectorConfig(options=list(FILTER_MODES))),
-            vol.Required(
+            probatio.Required(
                 CONF_CALENDAR_DURATION,
                 default=defaults[CONF_CALENDAR_DURATION],
             ): NumberSelector(
@@ -106,7 +106,7 @@ def _behavior_schema(defaults: dict[str, Any]) -> vol.Schema:
                     mode=NumberSelectorMode.BOX,
                 )
             ),
-            vol.Required(
+            probatio.Required(
                 CONF_SCAN_INTERVAL,
                 default=defaults[CONF_SCAN_INTERVAL],
             ): NumberSelector(
@@ -121,16 +121,16 @@ def _behavior_schema(defaults: dict[str, Any]) -> vol.Schema:
     )
 
 
-def _webcal_schema(defaults: dict[str, Any]) -> vol.Schema:
+def _webcal_schema(defaults: dict[str, Any]) -> probatio.Schema:
     """Return WebCal publication fields without exposing the token."""
 
-    return vol.Schema(
+    return probatio.Schema(
         {
-            vol.Required(
+            probatio.Required(
                 CONF_PUBLISH_WEBCAL,
                 default=bool(defaults.get(CONF_PUBLISH_WEBCAL, False)),
             ): BooleanSelector(),
-            vol.Required(
+            probatio.Required(
                 CONF_WEBCAL_NAME,
                 default=defaults.get(CONF_WEBCAL_NAME, DEFAULT_WEBCAL_NAME),
             ): TextSelector(),
@@ -330,7 +330,7 @@ class FreeLibraryEventsOptionsFlow(config_entries.OptionsFlowWithReload):
             return await self.async_step_webcal_url()
         return self.async_show_form(
             step_id="regenerate_webcal",
-            data_schema=vol.Schema({}),
+            data_schema=probatio.Schema({}),
         )
 
     async def async_step_webcal_url(
@@ -360,7 +360,7 @@ class FreeLibraryEventsOptionsFlow(config_entries.OptionsFlowWithReload):
             )
         return self.async_show_form(
             step_id="webcal_url",
-            data_schema=vol.Schema({}),
+            data_schema=probatio.Schema({}),
             description_placeholders={
                 "http_url": urls.http_url,
                 "webcal_url": urls.webcal_url,

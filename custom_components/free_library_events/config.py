@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from datetime import date, datetime
 from typing import Any
 
-import voluptuous as vol
+import probatio
 from homeassistant.helpers import config_validation as cv
 from homeassistant.util import dt as dt_util
 
@@ -99,7 +99,7 @@ def normalize_options(values: Mapping[str, Any]) -> dict[str, Any]:
     )
     try:
         publish_webcal = cv.boolean(config[CONF_PUBLISH_WEBCAL])
-    except TypeError, ValueError, vol.Invalid:
+    except TypeError, ValueError, probatio.Invalid:
         raise ValueError("invalid_config") from None
     webcal_name = config[CONF_WEBCAL_NAME]
     if not isinstance(webcal_name, str):

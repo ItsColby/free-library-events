@@ -6,7 +6,7 @@ Matching runs locally against published age ranges, categories, and descriptions
 
 ## Is this integration for you?
 
-You need Home Assistant **2026.9.4 or newer** and internet access to the library's public feeds. No library account or API key is required. One integration entry supports one person, from infancy through adulthood, and any selection of these four branches:
+You need Home Assistant **2026.10.0 or newer** and internet access to the library's public feeds. No library account or API key is required. One integration entry supports one person, from infancy through adulthood, and any selection of these four branches:
 
 | Branch | Official calendar |
 | --- | --- |
