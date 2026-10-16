@@ -129,16 +129,14 @@ class HomeAssistantMetadataTests(unittest.TestCase):
     def test_entity_translation_keys_have_current_icons(self) -> None:
         translations = _json_file(INTEGRATION / "translations/en.json")
         icons = _json_file(INTEGRATION / "icons.json")
-        expected = {
-            "button": {"refresh_events"},
-            "calendar": {"events"},
-            "sensor": {"status"},
-        }
+        self.assertEqual(
+            {platform: set(keys) for platform, keys in translations["entity"].items()},
+            {platform: set(keys) for platform, keys in icons["entity"].items()},
+        )
 
-        for platform, keys in expected.items():
-            with self.subTest(platform=platform):
-                self.assertEqual(keys, set(translations["entity"][platform]))
-                self.assertEqual(keys, set(icons["entity"][platform]))
+    def test_translations_hold_no_unresolved_key_references(self) -> None:
+        text = (INTEGRATION / "translations/en.json").read_text(encoding="utf-8")
+        self.assertNotIn("[%key:", text)
 
 
 if __name__ == "__main__":
