@@ -49,10 +49,9 @@ class HomeAssistantMetadataTests(unittest.TestCase):
     """Keep public metadata aligned with the tested support floor."""
 
     def test_declared_minimum_matches_the_tested_support_floor(self) -> None:
-        self.assertEqual(
-            str(_json_file(ROOT / "hacs.json")["homeassistant"]),
-            _exact_core_pin("ha-current"),
-        )
+        minimum = str(_json_file(ROOT / "hacs.json")["homeassistant"])
+        self.assertEqual(minimum, _exact_core_pin("ha-current"))
+        self.assertIn(minimum, (ROOT / "README.md").read_text(encoding="utf-8"))
 
     def integration_source(self) -> str:
         return "\n".join(
