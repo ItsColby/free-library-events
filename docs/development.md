@@ -40,10 +40,11 @@ and update the supported-branch documentation before treating it as supported.
 
 ## Run the checks locally
 
-Install the static checks once and run them before pushing:
+Install pre-commit once as a [uv tool](https://docs.astral.sh/uv/guides/tools/)
+and run the static checks before pushing:
 
 ```bash
-python -m pip install --group dev
+uv tool install pre-commit
 pre-commit install
 pre-commit run --all-files
 ```
