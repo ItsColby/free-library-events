@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import UTC, date, datetime, timedelta
+from functools import partial
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -371,22 +372,25 @@ async def _async_render_digest(call: ServiceCall) -> ServiceResponse:  # noqa: C
         }
         if stored_images is not None:
             embedded_image_paths = stored_images.paths
-    response = build_digest(
-        child_name=config[CONF_CHILD_NAME],
-        birth_date=birth_date,
-        filter_mode=config[CONF_FILTER_MODE],
-        duration_minutes=config[CONF_CALENDAR_DURATION],
-        selected_branches=branches,
-        reference_date=reference_date,
-        events=data.events,
-        source_counts=source_counts,
-        source_errors=source_errors,
-        source_warnings=source_warnings,
-        supplemental_age_failures=supplemental_failures,
-        supplemental_age_limitations=supplemental_limitations,
-        image_url_overrides=image_url_overrides,
-        image_layout_overrides=image_layout_overrides,
-        distance_by_branch_code=distance_by_branch_code,
+    response = await hass.async_add_executor_job(
+        partial(
+            build_digest,
+            child_name=config[CONF_CHILD_NAME],
+            birth_date=birth_date,
+            filter_mode=config[CONF_FILTER_MODE],
+            duration_minutes=config[CONF_CALENDAR_DURATION],
+            selected_branches=branches,
+            reference_date=reference_date,
+            events=data.events,
+            source_counts=source_counts,
+            source_errors=source_errors,
+            source_warnings=source_warnings,
+            supplemental_age_failures=supplemental_failures,
+            supplemental_age_limitations=supplemental_limitations,
+            image_url_overrides=image_url_overrides,
+            image_layout_overrides=image_layout_overrides,
+            distance_by_branch_code=distance_by_branch_code,
+        )
     )
     metadata = cast(dict[str, Any], response["metadata"])
     metadata["expanded_capped_sources"] = source_expansion_details(data.source_statuses)

@@ -779,31 +779,15 @@ def render_html(  # noqa: C901
     duration_minutes: int,
     source_errors: Sequence[str],
     source_warnings: Sequence[str],
-    full_event_ids: frozenset[str] | None = None,
+    full_event_ids: frozenset[str],
     email_omitted_count: int = 0,
-    rendered_cards: Mapping[tuple[Event, bool], str] | None = None,
-    calendar_link_ids: frozenset[str] | None = None,
+    rendered_cards: Mapping[tuple[Event, bool], str],
+    calendar_link_ids: frozenset[str],
 ) -> str:
-    if full_event_ids is None:
-        full_event_ids = frozenset(event_identity(event) for event in events)
-    if calendar_link_ids is None:
-        calendar_link_ids = frozenset(
-            event_identity(event)
-            for event in events
-            if google_calendar_url(event, duration_minutes, compact=True)
-        )
     day_sections: list[str] = []
     for event_date, day_items in groupby(events, key=lambda event: event.event_date):
         day_cards = "".join(
-            (
-                rendered_cards[(event, event_identity(event) not in full_event_ids)]
-                if rendered_cards is not None
-                else render_event_card(
-                    event,
-                    duration_minutes=duration_minutes,
-                    compact=event_identity(event) not in full_event_ids,
-                )
-            )
+            rendered_cards[(event, event_identity(event) not in full_event_ids)]
             for event in day_items
         )
         day_sections.append(
