@@ -11,7 +11,7 @@ from dataclasses import replace
 from datetime import UTC, date, datetime, time, timedelta
 from email.utils import format_datetime
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 from unittest.mock import AsyncMock, Mock, patch
 from zoneinfo import ZoneInfo
 
@@ -171,14 +171,10 @@ async def test_user_flow_creates_single_entry(hass: HomeAssistant) -> None:
 async def test_reconfigure_flow_updates_profile_data_only(
     hass: HomeAssistant,
 ) -> None:
-    entry = MockConfigEntry(
-        domain=DOMAIN,
+    entry = _entry(
         title="Free Library Events",
-        unique_id=DOMAIN,
         data={**PROFILE_INPUT, "future_profile": {"enabled": True}},
         options=BEHAVIOR_INPUT,
-        version=1,
-        minor_version=CONFIG_ENTRY_MINOR_VERSION,
     )
     entry.add_to_hass(hass)
 
@@ -207,14 +203,10 @@ async def test_reconfigure_flow_updates_profile_data_only(
 async def test_reconfigure_flow_does_not_reload_unchanged_profile(
     hass: HomeAssistant,
 ) -> None:
-    entry = MockConfigEntry(
-        domain=DOMAIN,
+    entry = _entry(
         title="Free Library Events",
-        unique_id=DOMAIN,
         data=PROFILE_INPUT,
         options=BEHAVIOR_INPUT,
-        version=1,
-        minor_version=CONFIG_ENTRY_MINOR_VERSION,
     )
     entry.add_to_hass(hass)
 
@@ -247,14 +239,10 @@ async def test_options_flow_enables_and_rotates_webcal_feed(
     hass: HomeAssistant,
 ) -> None:
     future_option = {"future_behavior": {"enabled": True}}
-    entry = MockConfigEntry(
-        domain=DOMAIN,
+    entry = _entry(
         title="Free Library Events",
-        unique_id=DOMAIN,
         data=PROFILE_INPUT,
         options={**BEHAVIOR_INPUT, **future_option},
-        version=1,
-        minor_version=CONFIG_ENTRY_MINOR_VERSION,
     )
     entry.add_to_hass(hass)
     hass.config.external_url = "https://ha.example.test"
@@ -297,8 +285,7 @@ async def test_options_flow_enables_and_rotates_webcal_feed(
         "url_scope": "This URL uses an external or cloud Home Assistant address. Your calendar service must be able to reach that address; the URL has not been tested from outside your network.",
     }
 
-    entry.runtime_data = Mock(source_result_count=1)
-    entry.runtime_data.source_result_count = 2
+    entry.runtime_data = Mock(source_result_count=2)
     result = await hass.config_entries.options.async_configure(result["flow_id"], {})
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert entry.options[CONF_PUBLISH_WEBCAL] is True
@@ -347,14 +334,10 @@ async def test_webcal_rotation_survives_url_recovery(
         CONF_WEBCAL_NAME: "Library Events",
         "future_behavior": {"enabled": True},
     }
-    entry = MockConfigEntry(
-        domain=DOMAIN,
+    entry = _entry(
         title="Free Library Events",
-        unique_id=DOMAIN,
         data=PROFILE_INPUT,
         options=original_options,
-        version=1,
-        minor_version=CONFIG_ENTRY_MINOR_VERSION,
     )
     entry.add_to_hass(hass)
     result = await hass.config_entries.options.async_init(entry.entry_id)
@@ -444,14 +427,10 @@ async def test_webcal_rotation_survives_url_recovery(
 async def test_webcal_preview_rejects_competing_options_update(
     hass: HomeAssistant,
 ) -> None:
-    entry = MockConfigEntry(
-        domain=DOMAIN,
+    entry = _entry(
         title="Free Library Events",
-        unique_id=DOMAIN,
         data=PROFILE_INPUT,
         options=BEHAVIOR_INPUT,
-        version=1,
-        minor_version=CONFIG_ENTRY_MINOR_VERSION,
     )
     entry.add_to_hass(hass)
     hass.config.external_url = "https://ha.example.test"
@@ -498,14 +477,10 @@ async def test_webcal_preview_rejects_competing_options_update(
 async def test_webcal_preview_rejects_external_profile_update(
     hass: HomeAssistant,
 ) -> None:
-    entry = MockConfigEntry(
-        domain=DOMAIN,
+    entry = _entry(
         title="Free Library Events",
-        unique_id=DOMAIN,
         data=PROFILE_INPUT,
         options=BEHAVIOR_INPUT,
-        version=1,
-        minor_version=CONFIG_ENTRY_MINOR_VERSION,
     )
     entry.add_to_hass(hass)
     hass.config.external_url = "https://ha.example.test"
@@ -546,10 +521,8 @@ async def test_options_flow_disables_webcal_and_removes_token(
     hass: HomeAssistant,
 ) -> None:
     old_token = "disabled-synthetic-subscription-token"
-    entry = MockConfigEntry(
-        domain=DOMAIN,
+    entry = _entry(
         title="Free Library Events",
-        unique_id=DOMAIN,
         data=PROFILE_INPUT,
         options={
             **BEHAVIOR_INPUT,
@@ -558,8 +531,6 @@ async def test_options_flow_disables_webcal_and_removes_token(
             CONF_WEBCAL_NAME: "Free Library Events",
             "future_behavior": {"enabled": True},
         },
-        version=1,
-        minor_version=CONFIG_ENTRY_MINOR_VERSION,
     )
     entry.add_to_hass(hass)
 
@@ -584,14 +555,10 @@ async def test_options_flow_disables_webcal_and_removes_token(
 async def test_options_flow_does_not_save_webcal_without_a_home_assistant_url(
     hass: HomeAssistant,
 ) -> None:
-    entry = MockConfigEntry(
-        domain=DOMAIN,
+    entry = _entry(
         title="Free Library Events",
-        unique_id=DOMAIN,
         data=PROFILE_INPUT,
         options=BEHAVIOR_INPUT,
-        version=1,
-        minor_version=CONFIG_ENTRY_MINOR_VERSION,
     )
     entry.add_to_hass(hass)
 
@@ -621,14 +588,10 @@ async def test_options_flow_updates_behavior_without_profile_data(
     hass: HomeAssistant,
 ) -> None:
     future_option = {"future_behavior": {"enabled": True}}
-    entry = MockConfigEntry(
-        domain=DOMAIN,
+    entry = _entry(
         title="Free Library Events",
-        unique_id=DOMAIN,
         data=PROFILE_INPUT,
         options={**BEHAVIOR_INPUT, **future_option},
-        version=1,
-        minor_version=CONFIG_ENTRY_MINOR_VERSION,
     )
     entry.add_to_hass(hass)
 
@@ -2244,14 +2207,10 @@ async def test_native_calendars_explain_conditional_venue_without_changing_occur
     )
     profile = USER_INPUT | {CONF_BIRTH_DATE: "2025-11-15", CONF_BRANCHES: ["CEN"]}
     token = "synthetic-conditional-location-token"
-    entry = MockConfigEntry(
-        domain=DOMAIN,
+    entry = _entry(
         title="Free Library Events",
-        unique_id=DOMAIN,
         data=profile,
         options={CONF_PUBLISH_WEBCAL: True, CONF_WEBCAL_TOKEN: token},
-        version=1,
-        minor_version=CONFIG_ENTRY_MINOR_VERSION,
     )
     entry.add_to_hass(hass)
 
@@ -2367,18 +2326,14 @@ async def test_webcal_view_is_token_gated_dynamic_and_unloads(
     hass_client_no_auth: ClientSessionGenerator,
 ) -> None:
     token = "valid-synthetic-subscription-token"
-    entry = MockConfigEntry(
-        domain=DOMAIN,
+    entry = _entry(
         title="Free Library Events",
-        unique_id=DOMAIN,
         data=USER_INPUT,
         options={
             CONF_PUBLISH_WEBCAL: True,
             CONF_WEBCAL_TOKEN: token,
             CONF_WEBCAL_NAME: "Neighborhood Library Events",
         },
-        version=1,
-        minor_version=CONFIG_ENTRY_MINOR_VERSION,
     )
     entry.add_to_hass(hass)
 
@@ -3882,12 +3837,18 @@ def _empty_feed(age_category: str | None) -> BranchFeed:
     )
 
 
-def _entry() -> MockConfigEntry:
+def _entry(
+    *,
+    title: str = "Legacy child-specific title",
+    data: dict[str, Any] = USER_INPUT,
+    options: dict[str, Any] | None = None,
+) -> MockConfigEntry:
     return MockConfigEntry(
         domain=DOMAIN,
-        title="Legacy child-specific title",
+        title=title,
         unique_id=DOMAIN,
-        data=USER_INPUT,
+        data=data,
+        options=options,
         version=1,
         minor_version=CONFIG_ENTRY_MINOR_VERSION,
     )
