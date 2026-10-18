@@ -38,19 +38,6 @@ PARALLEL_UPDATES = 0
 
 
 @dataclass(frozen=True, slots=True)
-class _AttemptProjection:
-    """Immutable compact evidence from one completed source attempt."""
-
-    completed_at: str
-    requested_sources: int
-    successful_sources: int
-    failed_sources: int
-    retryable_failures: int
-    error_categories: tuple[tuple[str, int], ...]
-    expedited_retry_scheduled: bool
-
-
-@dataclass(frozen=True, slots=True)
 class _StatusProjection:
     """Immutable state derived from one cached-data evaluation."""
 
@@ -66,7 +53,7 @@ class _StatusProjection:
     supplemental_age_limitations: tuple[str, ...] = ()
     expanded_capped_sources: tuple[tuple[str, SourceExpansionDetails], ...] = ()
     unavailable_current_age_sources: tuple[str, ...] = ()
-    last_attempt: _AttemptProjection | None = None
+    last_attempt: RefreshAttempt | None = None
 
     def attributes(self) -> dict[str, object]:
         """Return fresh Home Assistant attributes from the immutable snapshot."""
@@ -75,22 +62,18 @@ class _StatusProjection:
             "cached_events": self.cached_events,
             "next_week_events": self.next_week_events,
         }
-        if self.last_attempt is not None:
+        if (attempt := self.last_attempt) is not None:
             attributes.update(
                 {
-                    "last_attempt": self.last_attempt.completed_at,
-                    "last_attempt_requested_sources": self.last_attempt.requested_sources,
-                    "last_attempt_successful_sources": (
-                        self.last_attempt.successful_sources
-                    ),
-                    "last_attempt_failed_sources": self.last_attempt.failed_sources,
-                    "last_attempt_retryable_failures": self.last_attempt.retryable_failures,
+                    "last_attempt": attempt.completed_at.isoformat(),
+                    "last_attempt_requested_sources": attempt.requested_source_count,
+                    "last_attempt_successful_sources": attempt.successful_source_count,
+                    "last_attempt_failed_sources": attempt.failed_source_count,
+                    "last_attempt_retryable_failures": attempt.retryable_failure_count,
                     "last_attempt_error_categories": dict(
-                        self.last_attempt.error_categories
+                        attempt.error_category_counts
                     ),
-                    "expedited_retry_scheduled": (
-                        self.last_attempt.expedited_retry_scheduled
-                    ),
+                    "expedited_retry_scheduled": attempt.expedited_retry_scheduled,
                 }
             )
         if self.last_refresh is None:
@@ -141,23 +124,12 @@ def _build_status_projection(
 ) -> _StatusProjection:
     """Build one bounded status projection from cached coordinator data."""
 
-    attempt_projection = None
-    if last_attempt is not None:
-        attempt_projection = _AttemptProjection(
-            completed_at=last_attempt.completed_at.isoformat(),
-            requested_sources=last_attempt.requested_source_count,
-            successful_sources=last_attempt.successful_source_count,
-            failed_sources=last_attempt.failed_source_count,
-            retryable_failures=last_attempt.retryable_failure_count,
-            error_categories=tuple(last_attempt.error_category_counts.items()),
-            expedited_retry_scheduled=last_attempt.expedited_retry_scheduled,
-        )
     if data is None:
         return _StatusProjection(
             state="error" if not last_update_success else None,
             cached_events=0,
             next_week_events=0,
-            last_attempt=attempt_projection,
+            last_attempt=last_attempt,
         )
 
     week_start = next_week_start(evaluation_time.date())
@@ -203,7 +175,7 @@ def _build_status_projection(
         unavailable_current_age_sources=tuple(
             source_label(key) for key in relevant_error_keys
         ),
-        last_attempt=attempt_projection,
+        last_attempt=last_attempt,
     )
 
 

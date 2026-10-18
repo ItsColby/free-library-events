@@ -199,7 +199,7 @@ async def _async_download_one(
                     timeout=aiohttp.ClientTimeout(total=15),
                 ) as response:
                     if 300 <= response.status < 400:
-                        location = getattr(response, "headers", {}).get("Location", "")
+                        location = response.headers.get("Location", "")
                         redirected_url = clean_image_url(
                             urllib.parse.urljoin(current_url, location)
                         )
