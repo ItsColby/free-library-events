@@ -134,12 +134,14 @@ Those records serve different purposes: a new failed attempt can coexist with an
 | Time domain | Meaning |
 | --- | --- |
 | Publisher event time | Parsed as Philadelphia wall time; calendar items attach `America/New_York`, including daylight-saving behavior |
-| Home Assistant local date | Chooses the source age horizon and digest week |
+| Home Assistant local date | Chooses the source age horizon, digest week, and status week |
 | Digest week | Monday through Sunday, using the next Monday except that a Monday call includes that same Monday |
-| Status projection boundary | Tuesday at local midnight, when the digest-week calculation advances; re-evaluates cached data without source I/O |
+| Status week | The Monday-through-Sunday week containing the local date, so it equals a Monday call's digest week; it advances at local Monday midnight, re-evaluating cached data without source I/O |
 | Operational timestamps | Refresh, attempt, image-expiry, and HTTP/calendar modification evidence use UTC |
 
-The status entity keeps an immutable projection for property reads. It rebuilds on coordinator updates, consecutive failed-attempt notifications, the Tuesday boundary, and a Home Assistant timezone change. It writes state only when the projection changes and removes its scheduled callback when unloaded. This avoids both network calls from state reads and a stale weekly count during a prolonged outage.
+The status checks the week in progress rather than the next digest week. A capped feed often cannot prove coverage through the following Sunday until late in the week, so judging that week from Tuesday on reported routine publisher lag as a coverage problem. A digest call still reports its own week's coverage in its response metadata.
+
+The status entity keeps an immutable projection for property reads. It rebuilds on coordinator updates, consecutive failed-attempt notifications, the Monday boundary, and a Home Assistant timezone change. It writes state only when the projection changes and removes its scheduled callback when unloaded. This avoids both network calls from state reads and a stale weekly count during a prolonged outage.
 
 `build_calendar_items` is shared by the Home Assistant calendar and WebCal. It includes all active, age-matched cached occurrences rather than applying the digest week or email size budget. Recognized end times take precedence; otherwise it uses `calendar_duration_minutes` and explains the placeholder in the description. The Home Assistant calendar selects current/next events and requested overlapping ranges from this projection. Opening a wider range does not fetch more publisher data.
 
@@ -151,7 +153,7 @@ The diagnostic status stays available:
 
 | State | Meaning |
 | --- | --- |
-| `ok` | The retained snapshot proves the digest-week coverage for relevant and supplemental age sources |
+| `ok` | The retained snapshot proves the status-week coverage for relevant and supplemental age sources |
 | `limited` | Relevant-age coverage is complete, but otherwise healthy supplemental discovery remains capped or unproven |
 | `partial` | Relevant-age requests or coverage are incomplete, or supplemental discovery has an operational or parsing failure |
 | `error` | The latest coordinator update failed completely; older cache evidence may still be present |

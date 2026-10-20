@@ -389,6 +389,12 @@ class HTMLDescriptionSanitizer(HTMLParser):
         return "".join(self.parts).strip()
 
 
+def current_week_start(reference_date: date) -> date:
+    """Return the Monday that starts the reference date's Monday-Sunday week."""
+
+    return reference_date - timedelta(days=reference_date.weekday())
+
+
 def next_week_start(reference_date: date) -> date:
     """Return the next Monday, treating Monday itself as this week's start."""
 

@@ -31,7 +31,7 @@ from .coordinator import (
 )
 from .entity import service_device_info
 from .matching import classify_event, include_fit
-from .model import BRANCHES, event_is_active, next_week_start
+from .model import BRANCHES, current_week_start, event_is_active
 from .runtime import LibraryConfigEntry
 
 PARALLEL_UPDATES = 0
@@ -43,7 +43,7 @@ class _StatusProjection:
 
     state: str | None
     cached_events: int
-    next_week_events: int
+    week_events: int
     last_refresh: str | None = None
     cached_events_by_branch: tuple[tuple[str, int], ...] = ()
     current_age_coverage_complete: bool | None = None
@@ -60,7 +60,7 @@ class _StatusProjection:
 
         attributes: dict[str, object] = {
             "cached_events": self.cached_events,
-            "next_week_events": self.next_week_events,
+            "week_events": self.week_events,
         }
         if (attempt := self.last_attempt) is not None:
             attributes.update(
@@ -104,13 +104,10 @@ class _StatusProjection:
 
 
 def _next_projection_deadline(now: datetime, time_zone: tzinfo) -> datetime:
-    """Return the next Tuesday midnight in Home Assistant's local timezone."""
+    """Return the next Monday midnight in Home Assistant's local timezone."""
 
     local_now = now.astimezone(time_zone)
-    days_until_tuesday = (1 - local_now.weekday()) % 7
-    if days_until_tuesday == 0:
-        days_until_tuesday = 7
-    boundary_date = local_now.date() + timedelta(days=days_until_tuesday)
+    boundary_date = current_week_start(local_now.date()) + timedelta(days=7)
     return datetime.combine(boundary_date, time.min, tzinfo=time_zone)
 
 
@@ -128,11 +125,11 @@ def _build_status_projection(
         return _StatusProjection(
             state="error" if not last_update_success else None,
             cached_events=0,
-            next_week_events=0,
+            week_events=0,
             last_attempt=last_attempt,
         )
 
-    week_start = next_week_start(evaluation_time.date())
+    week_start = current_week_start(evaluation_time.date())
     week_end = week_start + timedelta(days=6)
     warnings = coverage_warnings(data, birth_date, week_start, week_end)
     supplemental_failures, supplemental_limitations = supplemental_coverage(
@@ -141,7 +138,7 @@ def _build_status_projection(
     relevant_error_keys = source_keys_for_window(
         tuple(data.source_errors), birth_date, week_start, week_end
     )
-    next_week_events = sum(
+    week_events = sum(
         1
         for event in data.events
         if week_start <= event.event_date <= week_end
@@ -159,7 +156,7 @@ def _build_status_projection(
     return _StatusProjection(
         state=state,
         cached_events=len(data.events),
-        next_week_events=next_week_events,
+        week_events=week_events,
         last_refresh=data.fetched_at.isoformat(),
         cached_events_by_branch=tuple(
             (BRANCHES[code].name, count) for code, count in data.source_counts.items()
@@ -284,7 +281,7 @@ class LibraryStatusSensor(CoordinatorEntity[LibraryDataCoordinator], SensorEntit
 
     @callback
     def _handle_projection_deadline(self, now: datetime) -> None:
-        """Rebuild cached status at the I/O-free Tuesday boundary."""
+        """Rebuild cached status at the I/O-free Monday boundary."""
 
         self._cancel_projection_deadline = None
         evaluation_time = now.astimezone(self._time_zone)
@@ -318,7 +315,7 @@ class LibraryStatusSensor(CoordinatorEntity[LibraryDataCoordinator], SensorEntit
 
     @callback
     def _schedule_projection_deadline(self, evaluation_time: datetime) -> None:
-        """Schedule the next local Tuesday midnight without requesting source I/O."""
+        """Schedule the next local Monday midnight without requesting source I/O."""
 
         self._cancel_scheduled_projection()
         deadline = _next_projection_deadline(evaluation_time, self._time_zone)

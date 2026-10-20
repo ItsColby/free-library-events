@@ -408,7 +408,7 @@ def coverage_warnings(
             warnings.append(
                 f"{label} event-type expansion failed for "
                 f"{len(feed.type_shard_failures)} official feeds; later events "
-                "in this digest week may be missing"
+                f"through {_month_day(end_date)} may be missing"
             )
         elif integrity_blockers := _type_shard_integrity_blockers(feed):
             examples = "; ".join(
@@ -418,13 +418,13 @@ def coverage_warnings(
             warnings.append(
                 f"{label} event-type expansion returned unusable evidence for "
                 f"{len(integrity_blockers)} official feeds ({examples}); later events "
-                "in this digest week may be missing"
+                f"through {_month_day(end_date)} may be missing"
             )
         elif feed.type_shards_queried:
             warnings.append(
                 f"{label} remained limited because "
                 f"{_type_expansion_limitation_reason(feed, end_date)}; later events "
-                "in this digest week may be missing"
+                f"through {_month_day(end_date)} may be missing"
             )
         else:
             # An uncovered, fully parsed feed holds at least RSS_ITEM_LIMIT events.
@@ -432,7 +432,7 @@ def coverage_warnings(
             warnings.append(
                 f"{label} reached its {feed.source_count}-item limit through "
                 f"{_month_day(feed.last_event_date)}; later events "
-                "in this digest week may be missing"
+                f"through {_month_day(end_date)} may be missing"
             )
     return warnings
 

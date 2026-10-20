@@ -90,6 +90,7 @@ from custom_components.free_library_events.coordinator import (
     MAX_TYPE_EXPANSIONS_PER_REFRESH,
     LibraryData,
     LibraryDataCoordinator,
+    coverage_warnings,
     source_expansion_details,
     source_keys_for_window,
     supplemental_coverage,
@@ -719,34 +720,42 @@ async def test_newer_minor_version_entry_is_rejected(hass: HomeAssistant) -> Non
     assert entry.data == PROFILE_INPUT
 
 
-def test_status_projection_deadline_uses_local_tuesday_across_dst() -> None:
-    spring_now = datetime(2026, 3, 3, tzinfo=LOCAL_TIME_ZONE)
+def test_status_projection_deadline_uses_local_monday_across_dst() -> None:
+    spring_now = datetime(2026, 3, 2, tzinfo=LOCAL_TIME_ZONE)
     spring_deadline = _next_projection_deadline(spring_now, LOCAL_TIME_ZONE)
-    assert spring_deadline == datetime(2026, 3, 10, tzinfo=LOCAL_TIME_ZONE)
+    assert spring_deadline == datetime(2026, 3, 9, tzinfo=LOCAL_TIME_ZONE)
     assert spring_deadline.astimezone(ZoneInfo("UTC")) - spring_now.astimezone(
         ZoneInfo("UTC")
     ) == timedelta(hours=167)
 
-    fall_now = datetime(2026, 10, 27, tzinfo=LOCAL_TIME_ZONE)
+    fall_now = datetime(2026, 10, 26, tzinfo=LOCAL_TIME_ZONE)
     fall_deadline = _next_projection_deadline(fall_now, LOCAL_TIME_ZONE)
-    assert fall_deadline == datetime(2026, 11, 3, tzinfo=LOCAL_TIME_ZONE)
+    assert fall_deadline == datetime(2026, 11, 2, tzinfo=LOCAL_TIME_ZONE)
     assert fall_deadline.astimezone(ZoneInfo("UTC")) - fall_now.astimezone(
         ZoneInfo("UTC")
     ) == timedelta(hours=169)
 
+    for local_now in (
+        datetime(2026, 7, 22, 15, tzinfo=LOCAL_TIME_ZONE),
+        datetime(2026, 7, 26, 23, 59, tzinfo=LOCAL_TIME_ZONE),
+    ):
+        assert _next_projection_deadline(local_now, LOCAL_TIME_ZONE) == datetime(
+            2026, 7, 27, tzinfo=LOCAL_TIME_ZONE
+        )
 
-async def test_status_projection_advances_at_tuesday_without_source_io(
+
+async def test_status_projection_checks_current_week_and_advances_at_monday(
     hass: HomeAssistant,
 ) -> None:
     await hass.config.async_set_time_zone("America/New_York")
     entry = _entry()
     entry.add_to_hass(hass)
     event = Event(
-        title="Monday-window storytime",
+        title="Current-week storytime",
         event_date=date(2026, 7, 22),
         start_time=time(10, 30),
         description="Stories and songs for babies with caregivers.",
-        link="https://example.test/events/monday-window-storytime",
+        link="https://example.test/events/current-week-storytime",
         image_url="",
         branch=BRANCHES["CEN"],
         age_categories=("Baby",),
@@ -769,7 +778,7 @@ async def test_status_projection_advances_at_tuesday_without_source_io(
         )
 
     fetch_mock = AsyncMock(side_effect=fetch_feed)
-    monday = datetime(2026, 7, 20, 23, 59, tzinfo=LOCAL_TIME_ZONE)
+    tuesday = datetime(2026, 7, 21, tzinfo=LOCAL_TIME_ZONE)
     scheduled: list[tuple[Callable[[datetime], None], datetime, Mock]] = []
 
     def track_projection(
@@ -790,33 +799,37 @@ async def test_status_projection_advances_at_tuesday_without_source_io(
             "custom_components.free_library_events.sensor.async_track_point_in_time",
             side_effect=track_projection,
         ),
-        patch("homeassistant.util.dt.now", return_value=monday),
+        patch("homeassistant.util.dt.now", return_value=tuesday),
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
         initial = hass.states.get("sensor.free_library_events_status")
         assert initial is not None
         assert initial.state == "ok"
-        assert initial.attributes["next_week_events"] == 1
+        assert initial.attributes["week_events"] == 1
         assert initial.attributes["current_age_coverage_complete"] is True
         cached_data = entry.runtime_data.data
         initial_fetch_count = fetch_mock.await_count
         assert len(scheduled) == 1
-        assert scheduled[0][1] == datetime(2026, 7, 21, tzinfo=LOCAL_TIME_ZONE)
+        assert scheduled[0][1] == datetime(2026, 7, 27, tzinfo=LOCAL_TIME_ZONE)
 
-        scheduled[0][0](datetime(2026, 7, 21, tzinfo=LOCAL_TIME_ZONE))
+        scheduled[0][0](datetime(2026, 7, 27, tzinfo=LOCAL_TIME_ZONE))
         await hass.async_block_till_done()
 
     advanced = hass.states.get("sensor.free_library_events_status")
     assert advanced is not None
     assert advanced.state == "partial"
-    assert advanced.attributes["next_week_events"] == 0
+    assert advanced.attributes["week_events"] == 0
     assert advanced.attributes["current_age_coverage_complete"] is False
     assert advanced.attributes["current_age_coverage_warnings"]
+    assert all(
+        warning.endswith("later events through August 2 may be missing")
+        for warning in advanced.attributes["current_age_coverage_warnings"]
+    )
     assert entry.runtime_data.data is cached_data
     assert fetch_mock.await_count == initial_fetch_count
     assert len(scheduled) == 2
-    assert scheduled[1][1] == datetime(2026, 7, 28, tzinfo=LOCAL_TIME_ZONE)
+    assert scheduled[1][1] == datetime(2026, 8, 3, tzinfo=LOCAL_TIME_ZONE)
 
 
 async def test_unchanged_status_projection_skips_state_write_and_source_io(
@@ -856,20 +869,21 @@ async def test_unchanged_status_projection_skips_state_write_and_source_io(
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
         assert len(scheduled) == 1
+        assert scheduled[0][1] == datetime(2026, 7, 27, tzinfo=LOCAL_TIME_ZONE)
         initial_fetch_count = fetch_mock.await_count
         with patch.object(
             LibraryStatusSensor, "async_write_ha_state", autospec=True
         ) as write_state:
-            scheduled[0][0](datetime(2026, 7, 21, tzinfo=LOCAL_TIME_ZONE))
+            scheduled[0][0](datetime(2026, 7, 27, tzinfo=LOCAL_TIME_ZONE))
 
         write_state.assert_not_called()
         assert len(scheduled) == 2
-        assert scheduled[1][1] == datetime(2026, 7, 28, tzinfo=LOCAL_TIME_ZONE)
+        assert scheduled[1][1] == datetime(2026, 8, 3, tzinfo=LOCAL_TIME_ZONE)
         assert fetch_mock.await_count == initial_fetch_count
         unchanged = hass.states.get("sensor.free_library_events_status")
         assert unchanged is not None
         assert unchanged.state == "ok"
-        assert unchanged.attributes["next_week_events"] == 0
+        assert unchanged.attributes["week_events"] == 0
         assert await hass.config_entries.async_unload(entry.entry_id)
 
     scheduled[1][2].assert_called_once_with()
@@ -912,7 +926,7 @@ async def test_status_projection_reschedules_for_runtime_timezone_change(
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
         assert len(scheduled) == 1
-        assert scheduled[0][1] == datetime(2026, 7, 21, tzinfo=LOCAL_TIME_ZONE)
+        assert scheduled[0][1] == datetime(2026, 7, 27, tzinfo=LOCAL_TIME_ZONE)
         initial_fetch_count = fetch_mock.await_count
 
         with patch.object(
@@ -926,7 +940,7 @@ async def test_status_projection_reschedules_for_runtime_timezone_change(
         assert len(scheduled) == 2
         scheduled[0][2].assert_called_once_with()
         assert scheduled[1][1] == datetime(
-            2026, 7, 21, tzinfo=ZoneInfo("America/Los_Angeles")
+            2026, 7, 27, tzinfo=ZoneInfo("America/Los_Angeles")
         )
         assert fetch_mock.await_count == initial_fetch_count
         assert await hass.config_entries.async_unload(entry.entry_id)
@@ -971,7 +985,7 @@ async def test_status_projection_reschedules_on_failure_recovery_and_unload(
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
         assert len(scheduled) == 1
-        assert scheduled[0][1] == datetime(2026, 7, 21, tzinfo=LOCAL_TIME_ZONE)
+        assert scheduled[0][1] == datetime(2026, 7, 27, tzinfo=LOCAL_TIME_ZONE)
 
         coordinator = entry.runtime_data
         assert coordinator.data is not None
@@ -1051,7 +1065,7 @@ async def test_status_projection_reschedules_on_failure_recovery_and_unload(
         assert timed_out_button.state != STATE_UNAVAILABLE
         assert len(scheduled) == 3
         scheduled[1][2].assert_called_once_with()
-        assert scheduled[2][1] == datetime(2026, 7, 21, tzinfo=LOCAL_TIME_ZONE)
+        assert scheduled[2][1] == datetime(2026, 7, 27, tzinfo=LOCAL_TIME_ZONE)
         assert await hass.config_entries.async_unload(entry.entry_id)
 
     scheduled[2][2].assert_called_once_with()
@@ -1363,7 +1377,7 @@ async def test_setup_entities_action_and_redacted_diagnostics(
         ),
         patch(
             "homeassistant.util.dt.now",
-            return_value=datetime(2026, 7, 17, 12, tzinfo=LOCAL_TIME_ZONE),
+            return_value=datetime(2026, 7, 20, 12, tzinfo=LOCAL_TIME_ZONE),
         ),
         patch(
             "custom_components.free_library_events.sensor.async_track_point_in_time",
@@ -1418,7 +1432,7 @@ async def test_setup_entities_action_and_redacted_diagnostics(
         for key in entity_translations
         if key.startswith(status_prefix)
     } == set(status_state.attributes["options"])
-    assert status_state.attributes["next_week_events"] == 4
+    assert status_state.attributes["week_events"] == 4
     assert status_state.attributes["current_age_coverage_complete"] is True
     assert status_state.attributes["supplemental_age_coverage_complete"] is True
     assert status_state.attributes["expanded_capped_sources"] == {}
@@ -3381,6 +3395,51 @@ def test_supplemental_coverage_separates_failures_from_feed_limits() -> None:
     assert len(limitations) == 1
     assert "Charles Santore Library" in limitations[0]
     assert "later broadly inclusive events may be missing" in limitations[0]
+
+
+@pytest.mark.parametrize(
+    ("evidence", "cause"),
+    (
+        ({"type_shard_failures": ("Storytime",)}, "expansion failed for 1"),
+        (
+            {
+                "type_shard_blockers": (
+                    TypeShardBlocker(
+                        event_type="Storytime",
+                        reason=TYPE_SHARD_BLOCKER_PARSE_INCOMPLETE,
+                        source_count=4,
+                        parsed_count=3,
+                        last_event_date=date(2026, 7, 23),
+                    ),
+                )
+            },
+            "returned unusable evidence for 1",
+        ),
+        ({"type_shards_queried": 3}, "remained limited because"),
+        ({}, "reached its 10-item limit through July 22"),
+    ),
+)
+def test_coverage_warnings_name_the_unproven_date(
+    evidence: dict[str, object], cause: str
+) -> None:
+    feed = BranchFeed(
+        events=(),
+        age_category="Baby",
+        source_count=10,
+        parsed_count=10,
+        last_event_date=date(2026, 7, 22),
+        ordered=True,
+        **evidence,
+    )
+    data = types.SimpleNamespace(source_statuses={"CEN:Baby": feed})
+
+    warnings = coverage_warnings(
+        data, date(2025, 1, 15), date(2026, 7, 20), date(2026, 7, 26)
+    )
+
+    assert len(warnings) == 1
+    assert cause in warnings[0]
+    assert warnings[0].endswith("; later events through July 26 may be missing")
 
 
 async def test_coordinator_recomputes_age_feeds_as_time_advances(

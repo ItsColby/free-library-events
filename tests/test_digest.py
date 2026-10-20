@@ -418,6 +418,12 @@ class DigestTests(unittest.TestCase):
         self.assertEqual(model.next_week_start(date(2026, 7, 20)), date(2026, 7, 20))
         self.assertEqual(model.next_week_start(date(2026, 7, 17)), date(2026, 7, 20))
 
+    def test_current_week_start_returns_the_week_monday(self) -> None:
+        for day in range(20, 27):
+            self.assertEqual(
+                model.current_week_start(date(2026, 7, day)), date(2026, 7, 20)
+            )
+
     def test_feed_title_repairs_library_ampersand_loss(self) -> None:
         self.assertEqual(
             model.clean_title(

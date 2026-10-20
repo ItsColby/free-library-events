@@ -119,7 +119,7 @@ A complete refresh failure stops this sequence before the send action. Partial r
        and not digest.metadata.source_warnings }}
 ```
 
-That condition permits healthy supplemental feed limits. Also require `not digest.metadata.supplemental_age_limitations` if you want to suppress those digests as well. Neither check proves that the publisher listed every event.
+That condition permits healthy supplemental feed limits. Also require `not digest.metadata.supplemental_age_limitations` if you want to suppress those digests as well. Neither check proves that the publisher listed every event. Gate a Tuesday-through-Sunday run on this metadata rather than the **Status** sensor, because that run covers the following week.
 
 For a plain-text notification, send `digest.subject` as `title` and `digest.message` as `message` through your notification action. HTML support varies by notification integration.
 
@@ -163,7 +163,7 @@ The email is limited to 80,000 HTML bytes and at most 100 events. It may shorten
 
 ## Check coverage and recover
 
-Open the **Status** sensor before interpreting an empty calendar or a zero-event digest. Its state describes coverage for the digest week, not the entire cached calendar range.
+Open the **Status** sensor before interpreting an empty calendar or a zero-event digest. Its state describes coverage for the current Monday-through-Sunday week, which is the week a Monday digest covers, not the entire cached calendar range. A digest run Tuesday through Sunday reports its own week's coverage in `source_warnings` and `source_errors`.
 
 | Displayed state | Meaning |
 | --- | --- |
@@ -172,7 +172,7 @@ Open the **Status** sensor before interpreting an empty calendar or a zero-event
 | **Partial** (`partial`) | A relevant source failed, current-age coverage is incomplete, or supplemental data has an operational or parsing problem. Usable events are still available. |
 | **Error** (`error`) | The latest refresh failed completely. Earlier cached data may remain, but it is stale. |
 
-The most useful attributes are `last_refresh` (the cached-data timestamp), `last_attempt` (the latest attempt, including failures), `next_week_events` (age matches for the digest week), and `cached_events` / `cached_events_by_branch` (unfiltered cache counts). `current_age_coverage_complete`, `supplemental_age_coverage_complete`, and the warning/failure lists explain the coverage state. Attempt counts and `last_attempt_error_categories` help distinguish current request failures from older cached results.
+The most useful attributes are `last_refresh` (the cached-data timestamp), `last_attempt` (the latest attempt, including failures), `week_events` (age matches for that week), and `cached_events` / `cached_events_by_branch` (unfiltered cache counts). `current_age_coverage_complete`, `supplemental_age_coverage_complete`, and the warning/failure lists explain the coverage state. Attempt counts and `last_attempt_error_categories` help distinguish current request failures from older cached results.
 
 | Symptom | Next step |
 | --- | --- |
