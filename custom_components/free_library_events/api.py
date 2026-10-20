@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import urllib.parse
 from dataclasses import dataclass, replace
-from datetime import date
+from datetime import date, timedelta
 
 import aiohttp
 
@@ -273,12 +273,25 @@ class LibraryClient:
             event_identity(event) for feed in successful_shards for event in feed.events
         }
         base_prefix_recovered = base_ids <= shard_ids
-        expansion_proves_coverage = (
+        capped_last_dates = [
+            blocker.last_event_date
+            for blocker in blockers
+            if blocker.reason == TYPE_SHARD_BLOCKER_CAPPED
+            and blocker.last_event_date is not None
+        ]
+        expanded_through: date | None = None
+        if (
             not failures
             and len(successful_shards) == len(OFFICIAL_EVENT_TYPES)
             and base_prefix_recovered
-            and not blockers
-        )
+            and len(capped_last_dates) == len(blockers)
+        ):
+            # A capped, date-ordered type feed is complete before its last event date.
+            expanded_through = (
+                min(capped_last_dates) - timedelta(days=1)
+                if capped_last_dates
+                else coverage_end
+            )
         return replace(
             base_feed,
             events=tuple(merged_events),
@@ -286,7 +299,7 @@ class LibraryClient:
             type_shard_failures=tuple(failures),
             type_shard_blockers=tuple(blockers),
             base_prefix_recovered=base_prefix_recovered,
-            expanded_through=coverage_end if expansion_proves_coverage else None,
+            expanded_through=expanded_through,
         )
 
     async def _async_fetch_single(

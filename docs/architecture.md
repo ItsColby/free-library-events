@@ -71,9 +71,9 @@ A `BranchFeed` retains both normalized events and the evidence needed to judge c
 
 - every published row parsed and the feed contains fewer than 10 items; or
 - every published row parsed, the capped feed is date-ordered, and its last event date is **strictly later** than the requested date; or
-- a completed expansion has explicitly proved that horizon.
+- an expansion has explicitly proved coverage through that date.
 
-A capped feed ending on Sunday cannot prove that it includes every Sunday event. Expansion proves coverage only if all official type requests succeed, each type feed proves the horizon, and the union of type feeds recovers every base-feed occurrence. A successful HTTP response alone does not establish those conditions.
+A capped feed ending on Sunday cannot prove that it includes every Sunday event. Expansion proves coverage only if all official type requests succeed, every type feed parses completely in date order, and the union of type feeds recovers every base-feed occurrence. It then proves its requested horizon when each type feed proves that horizon, or otherwise through the day before the earliest last event date among the capped type feeds, so a refresh that cannot reach next Sunday can still prove the current week. Both rest on the publisher returning each feed's earliest events and on every event carrying an official type. A successful HTTP response alone does not establish those conditions.
 
 Expansion still contributes useful recovered rows when proof fails. Failures, malformed or unordered type feeds, capped type feeds, and missing base-prefix recovery remain separate evidence. Bounded examples appear in state attributes and digest metadata; diagnostics retain all structured type-feed blockers. Expansion cannot infer events the publisher did not expose, and it does not scrape event detail pages to fill a gap.
 

@@ -2756,7 +2756,9 @@ async def test_client_records_a_successful_capped_type_shard_blocker() -> None:
         ),
     )
     assert expanded.base_prefix_recovered is True
-    assert expanded.expanded_through is None
+    assert expanded.expanded_through == date(2026, 7, 24)
+    assert expanded.covers_through(date(2026, 7, 24))
+    assert not expanded.covers_through(date(2026, 7, 25))
 
     data = types.SimpleNamespace(
         source_statuses={"CEN:Young Adult": expanded}, source_errors={}
@@ -2770,7 +2772,78 @@ async def test_client_records_a_successful_capped_type_shard_blocker() -> None:
     assert failures == []
     assert len(limitations) == 1
     assert "Community Events returned 10 items through July 25" in limitations[0]
+    assert "coverage is proven through July 24" in limitations[0]
     assert "proving coverage through July 26" in limitations[0]
+
+
+@pytest.mark.parametrize(
+    ("extra_blocker", "expected"),
+    (
+        (None, date(2026, 7, 27)),
+        ("unordered", None),
+        ("failed", None),
+    ),
+)
+async def test_capped_type_shards_prove_through_the_earliest_capped_date(
+    extra_blocker: str | None, expected: date | None
+) -> None:
+    branch = BRANCHES["CEN"]
+    base_event = Event(
+        title="Base event",
+        event_date=date(2026, 7, 21),
+        start_time=time(10, 0),
+        description="Published event",
+        link="https://example.test/events/base",
+        image_url="",
+        branch=branch,
+        age_categories=("Young Adult",),
+    )
+    base_feed = BranchFeed(
+        events=(base_event,),
+        age_category="Young Adult",
+        source_count=10,
+        parsed_count=10,
+        last_event_date=base_event.event_date,
+        ordered=True,
+    )
+    capped_last_dates = {
+        "Community Events": date(2026, 7, 30),
+        "Arts and Crafts Programs": date(2026, 7, 28),
+    }
+
+    async def fetch_single(_branch, age_category, event_type=None):
+        if event_type == "Workshops and Enrichment" and extra_blocker == "failed":
+            raise LibraryApiError(SOURCE_ERROR_REQUEST_FAILED)
+        if event_type in capped_last_dates or (
+            event_type == "Workshops and Enrichment" and extra_blocker
+        ):
+            return BranchFeed(
+                events=(base_event,),
+                age_category=age_category,
+                source_count=10,
+                parsed_count=10,
+                last_event_date=capped_last_dates.get(event_type, date(2026, 7, 31)),
+                ordered=event_type in capped_last_dates,
+            )
+        return BranchFeed(
+            events=(base_event,),
+            age_category=age_category,
+            source_count=1,
+            parsed_count=1,
+            last_event_date=base_event.event_date,
+            ordered=True,
+        )
+
+    client = LibraryClient(None)  # type: ignore[arg-type]
+    client._async_fetch_single = AsyncMock(side_effect=fetch_single)
+
+    expanded = await client.async_expand_feed(
+        branch, "Young Adult", base_feed, date(2026, 8, 2)
+    )
+
+    assert expanded.expanded_through == expected
+    assert expanded.covers_through(date(2026, 7, 26)) is (expected is not None)
+    assert not expanded.covers_through(date(2026, 8, 2))
 
 
 @pytest.mark.parametrize(
@@ -3440,6 +3513,40 @@ def test_coverage_warnings_name_the_unproven_date(
     assert len(warnings) == 1
     assert cause in warnings[0]
     assert warnings[0].endswith("; later events through July 26 may be missing")
+
+
+def test_partial_expansion_proof_clears_only_the_weeks_it_covers() -> None:
+    feed = BranchFeed(
+        events=(),
+        age_category="Baby",
+        source_count=10,
+        parsed_count=10,
+        last_event_date=date(2026, 7, 21),
+        ordered=True,
+        type_shards_queried=len(OFFICIAL_EVENT_TYPES),
+        type_shard_blockers=(
+            TypeShardBlocker(
+                event_type="Community Events",
+                reason=TYPE_SHARD_BLOCKER_CAPPED,
+                source_count=10,
+                parsed_count=10,
+                last_event_date=date(2026, 7, 27),
+            ),
+        ),
+        base_prefix_recovered=True,
+        expanded_through=date(2026, 7, 26),
+    )
+    data = types.SimpleNamespace(source_statuses={"CEN:Baby": feed})
+
+    assert (
+        coverage_warnings(data, date(2025, 1, 15), date(2026, 7, 20), date(2026, 7, 26))
+        == []
+    )
+    (warning,) = coverage_warnings(
+        data, date(2025, 1, 15), date(2026, 7, 27), date(2026, 8, 2)
+    )
+    assert "coverage is proven through July 26" in warning
+    assert warning.endswith("; later events through August 2 may be missing")
 
 
 async def test_coordinator_recomputes_age_feeds_as_time_advances(

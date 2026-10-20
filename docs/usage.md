@@ -153,7 +153,7 @@ Use these metadata groups according to the decision you need to make:
 | `source_counts` | Deduplicated cached events by branch across the fetched date range, before weekly and age filtering. A missing branch is not a confirmed zero. |
 | `source_errors`, `source_warnings` | Unavailable current-age feeds and current-age coverage warnings; operational supplemental failures also appear in `source_warnings`. |
 | `supplemental_age_failures`, `supplemental_age_limitations` | Failures in additional age feeds, separated from healthy but incomplete feed coverage. |
-| `expanded_capped_sources` | Evidence from attempts to recover events beyond a capped base feed, including remaining failures, blockers, and coverage dates. |
+| `expanded_capped_sources` | Evidence from attempts to recover events beyond a capped base feed, including remaining failures, blockers, and `coverage_through`, the date the recovered events are proven complete through, which can be earlier than the requested week's end. |
 | `html_bytes`, `full_card_count`, `compact_card_count`, `email_omitted_count`, `truncated_description_count` | Email size and presentation limits. `email_omitted_count` means matched events omitted from the email, unlike age-filter `omitted_count`. |
 | `distance_priority_used`, `full_card_event_ids` | Whether local branch distance affected space allocation, and which occurrences received full cards. |
 
