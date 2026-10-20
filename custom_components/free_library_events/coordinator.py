@@ -125,6 +125,10 @@ def _type_expansion_limitation_reason(feed: BranchFeed, end_date: date) -> str:
             f"coverage through {_month_day(end_date)} could not be proven "
             f"after querying {feed.type_shards_queried} official event types"
         )
+    if feed.expanded_through is not None:
+        reasons.append(
+            f"coverage is proven through {_month_day(feed.expanded_through)}"
+        )
     return (
         "; ".join(reasons)
         + f"; proving coverage through {_month_day(end_date)} requires "
