@@ -105,7 +105,7 @@ Email highlights are derived from the complete source description before display
 
 ### Age fit
 
-Matching is deterministic and evaluates age **on the event date**. It first considers explicit numeric age wording, then matching publisher categories and specific audience wording, followed by explicit inclusive language. A nonmatching publisher category blocks generic family-oriented inference, while explicit inclusive wording can support a match. Events before the birth date are excluded.
+Matching is deterministic and evaluates age **on the event date**. It first considers explicit numeric age wording, then matching publisher categories and specific audience wording, followed by explicit inclusive language. A nonmatching publisher category blocks generic family-oriented inference, while explicit inclusive wording can support a match. Events before the birth date are excluded. Age and source-category windows consider only dates on or after birth; a wholly pre-birth window has no categories.
 
 Age-group words match whole words. Baby and infant wording must describe an audience or a recognizable program, so incidental animal references and unrelated words do not supply age evidence. Publisher categories and explicit numeric age ranges retain their precedence.
 

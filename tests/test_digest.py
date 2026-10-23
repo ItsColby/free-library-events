@@ -108,6 +108,44 @@ class DigestTests(unittest.TestCase):
             ("Baby", "Toddler", "Preschool", "School Age", "Young Adult", "Adult"),
         )
 
+    def test_age_windows_intersect_the_persons_lifetime(self) -> None:
+        birth_date = date(2026, 10, 23)
+        cases = (
+            (date(2026, 10, 19), date(2026, 10, 22), ()),
+            (date(2026, 10, 19), birth_date, ("Baby",)),
+            (date(2026, 10, 19), date(2026, 10, 25), ("Baby",)),
+            (birth_date, birth_date, ("Baby",)),
+            (date(2026, 10, 24), date(2026, 10, 25), ("Baby",)),
+            (date(2026, 10, 19), date(2027, 7, 22), ("Baby",)),
+            (date(2026, 10, 19), date(2027, 7, 23), ("Baby", "Toddler")),
+        )
+        for start_date, end_date, expected in cases:
+            with self.subTest(start_date=start_date, end_date=end_date):
+                self.assertEqual(
+                    model.age_categories_for_window(birth_date, start_date, end_date),
+                    expected,
+                )
+                self.assertEqual(
+                    model.source_age_categories_for_window(
+                        birth_date, start_date, end_date
+                    ),
+                    ("Baby", "Toddler", "Preschool", "School Age", "Young Adult")
+                    if expected
+                    else (),
+                )
+
+    def test_age_windows_reject_reversed_dates_even_before_birth(self) -> None:
+        for helper in (
+            model.age_categories_for_window,
+            model.source_age_categories_for_window,
+        ):
+            for end_date in (date(2026, 10, 22), date(2026, 10, 25)):
+                with (
+                    self.subTest(helper=helper.__name__, end_date=end_date),
+                    self.assertRaisesRegex(ValueError, "end cannot precede"),
+                ):
+                    helper(date(2026, 10, 23), date(2026, 10, 26), end_date)
+
     def test_official_age_category_precedes_title_only_inference(self) -> None:
         event = model.Event(
             title="Preschool Storytime",
