@@ -448,11 +448,13 @@ def age_categories_for_window(
     start_date: date,
     end_date: date,
 ) -> tuple[str, ...]:
-    """Return official age filters that overlap the person's age in a date range."""
+    """Return age filters for the part of a range on or after birth."""
 
     if end_date < start_date:
         raise ValueError("Age-category window end cannot precede its start")
-    start_months = age_in_months(birth_date, start_date)
+    if end_date < birth_date:
+        return ()
+    start_months = age_in_months(birth_date, max(start_date, birth_date))
     end_months = age_in_months(birth_date, end_date)
     return tuple(
         category
@@ -479,7 +481,9 @@ def source_age_categories_for_window(
     if end_date < start_date:
         raise ValueError("Source age-category window end cannot precede its start")
     categories = set(age_categories_for_window(birth_date, start_date, end_date))
-    if age_in_months(birth_date, start_date) < ADULT_START_MONTHS:
+    if not categories:
+        return ()
+    if age_in_months(birth_date, max(start_date, birth_date)) < ADULT_START_MONTHS:
         categories.update(MINOR_SOURCE_CATEGORIES)
     return tuple(category for category in AGE_CATEGORY_ORDER if category in categories)
 

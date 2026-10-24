@@ -744,6 +744,65 @@ def test_status_projection_deadline_uses_local_monday_across_dst() -> None:
         )
 
 
+@pytest.mark.parametrize("birth_day", range(20, 26))
+async def test_setup_status_for_current_week_newborn(
+    hass: HomeAssistant, birth_day: int
+) -> None:
+    await hass.config.async_set_time_zone("America/New_York")
+    birth_date = date(2026, 10, birth_day)
+    entry = _entry(data=USER_INPUT | {CONF_BIRTH_DATE: birth_date.isoformat()})
+    entry.add_to_hass(hass)
+
+    async def fetch_feed(branch, age_category, _coverage_end=None):
+        events = tuple(
+            Event(
+                title="Baby Storytime",
+                event_date=event_date,
+                start_time=time(10, 30),
+                description="Stories for babies and caregivers.",
+                link=f"https://example.test/events/{event_date.isoformat()}",
+                image_url="",
+                branch=branch,
+                age_categories=(age_category,),
+            )
+            for event_date in (birth_date - timedelta(days=1), birth_date)
+        )
+        return BranchFeed(
+            events=events,
+            age_category=age_category,
+            source_count=2,
+            parsed_count=2,
+            last_event_date=birth_date,
+            ordered=True,
+        )
+
+    with (
+        patch(
+            "custom_components.free_library_events.api.LibraryClient.async_fetch_feed",
+            side_effect=fetch_feed,
+        ),
+        patch(
+            "homeassistant.util.dt.now",
+            return_value=datetime(2026, 10, birth_day, 12, tzinfo=LOCAL_TIME_ZONE),
+        ),
+        patch(
+            "custom_components.free_library_events.sensor.async_track_point_in_time",
+            return_value=Mock(),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.LOADED
+    status = hass.states.get("sensor.free_library_events_status")
+    assert status is not None
+    assert status.state == "ok"
+    assert status.attributes["current_age_coverage_complete"] is True
+    assert status.attributes["supplemental_age_coverage_complete"] is True
+    assert status.attributes["week_events"] == len(BRANCHES)
+    assert status.attributes["cached_events"] == 2 * len(BRANCHES)
+
+
 async def test_status_projection_checks_current_week_and_advances_at_monday(
     hass: HomeAssistant,
 ) -> None:
