@@ -7,6 +7,7 @@ from dataclasses import replace
 from datetime import date, datetime, timedelta
 from typing import Literal
 
+from .const import MAX_CALENDAR_DURATION, MIN_CALENDAR_DURATION
 from .email_render import (
     MIDDLE_DOT,
     bounded_text,
@@ -210,8 +211,11 @@ def build_digest(
         raise ValueError("Choose at least one library branch.")
     if filter_mode not in FILTER_MODES:
         raise ValueError(f"Choose a filter mode from: {', '.join(FILTER_MODES)}")
-    if not 15 <= duration_minutes <= 240:
-        raise ValueError("Enter a calendar duration from 15 to 240 minutes.")
+    if not MIN_CALENDAR_DURATION <= duration_minutes <= MAX_CALENDAR_DURATION:
+        raise ValueError(
+            f"Enter a calendar duration from {MIN_CALENDAR_DURATION} to "
+            f"{MAX_CALENDAR_DURATION} minutes."
+        )
 
     week_start = next_week_start(reference_date)
     week_end = week_start + timedelta(days=6)

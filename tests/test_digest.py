@@ -1769,6 +1769,30 @@ class DigestTests(unittest.TestCase):
         )
         self.assertEqual(matching.classify_event(event, date(2025, 1, 15)), "best")
 
+    def test_and_under_requires_age_evidence(self) -> None:
+        event = model.Event(
+            title="Library program",
+            event_date=date(2026, 7, 20),
+            start_time=time(10),
+            description="",
+            link="",
+            image_url="",
+            branch=model.BRANCHES["CEN"],
+        )
+        birth = date(2022, 9, 15)
+        for description in (
+            "Snacks valued at $20 and under.",
+            "Limited to 10 and under tables.",
+            "Bring 5 and under items to swap.",
+        ):
+            with self.subTest(description=description):
+                self.assertNotEqual(
+                    matching.classify_event(
+                        replace(event, description=description), birth
+                    ),
+                    "best",
+                )
+
     def test_age_matching_requires_age_evidence_and_bounds_source_numbers(self) -> None:
         event = model.Event(
             title="Library program",
