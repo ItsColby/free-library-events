@@ -20,11 +20,11 @@ merges its Actions and pre-commit updates once required checks pass.
 | Change | Implementation and evidence to inspect together |
 | --- | --- |
 | Settings or entry lifecycle | `config.py`, `config_flow.py`, `__init__.py`; config-flow, migration, reload, and unload cases in `test_integration_ha.py` |
-| RSS requests, taxonomy, or source coverage | `api.py`, `coordinator.py`; `test_acquisition_ha.py` and acquisition cases in `test_integration_ha.py` |
+| RSS requests, taxonomy, or source coverage | `api.py`, `coordinator.py`; `test_acquisition_ha.py` |
 | Parsing, matching, deduplication, or email presentation | `model.py`, `matching.py`, `email_render.py`, `digest.py`; `test_digest.py`, plus HA action tests for response orchestration |
 | Calendar or subscription behavior | `calendar_data.py`, `calendar.py`, `webcal.py`; native calendar and HTTP cases in `test_integration_ha.py` |
 | Image download, attachment, or cleanup behavior | `email_images.py`, `__init__.py`; `test_email_images.py` and digest-action cases in `test_integration_ha.py` |
-| Help text or public metadata | `translations/en.json`, `services.yaml`, `icons.json`, `manifest.json`, `hacs.json`; `test_metadata.py` and affected flow/render tests |
+| Help text or public metadata | `translations/en.json` (owns all user-facing text, including action and field names and descriptions), `services.yaml` (fields, defaults and selectors only), `icons.json`, `manifest.json`, `hacs.json`; `test_metadata.py` and affected flow/render tests |
 | Validation itself | `.github/workflows/validate.yaml`, `.pre-commit-config.yaml`, `.gitleaks.toml`, and `pyproject.toml` (including its `dev` and `ha-current` dependency groups) |
 
 Python modules are under `custom_components/free_library_events/`; tests are
@@ -40,11 +40,11 @@ and update the supported-branch documentation before treating it as supported.
 
 ## Run the checks locally
 
-Install pre-commit once as a [uv tool](https://docs.astral.sh/uv/guides/tools/)
-and run the static checks before pushing:
+Install the pinned pre-commit from the `dev` dependency group, as CI does, and
+run the static checks before pushing:
 
 ```bash
-uv tool install pre-commit
+python -m pip install --group dev
 pre-commit install
 pre-commit run --all-files
 ```

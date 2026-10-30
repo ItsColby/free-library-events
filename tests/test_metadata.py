@@ -116,6 +116,7 @@ class HomeAssistantMetadataTests(unittest.TestCase):
             field_keys = set(
                 re.findall(r"^    ([a-z_]+):$", service_block, re.MULTILINE)
             )
+            self.assertNotRegex(service_block, r"(?m)^\s+(name|description):")
             translated = translations["services"][key]
             self.assertIn("name", translated)
             self.assertIn("description", translated)
