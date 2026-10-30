@@ -22,7 +22,7 @@ Age is calculated for each event date, so birthdays need no manual profile updat
 | **Recommended** | Strict matches plus recognized inclusive wording and possible matches, such as an appropriate playgroup. |
 | **Broad** | Recommended matches plus general children's or family wording when stronger evidence does not exclude the event. |
 
-Broad does not override an explicit incompatible age range. For children under three, recognized years-only upper limits of six or greater, such as “6 and under,” receive a Broad rank even when the child meets the stated limit. For minors, the integration also checks other child and teen category feeds to discover inclusive events that were filed under a narrower category. Adult and senior feed selection advances with age. Titles marked canceled, postponed, or rescheduled are excluded. Always consult official details for eligibility, registration, availability, accessibility, and changes.
+Broad does not override an explicit incompatible age range. For children under three, recognized years-only upper limits of six or greater, such as “ages 6 and under,” receive a Broad rank even when the child meets the stated limit. An “and under” limit counts only when an age word or unit accompanies it, such as “ages,” “children” or “months”; a bare “6 and under” is not treated as age evidence. For minors, the integration also checks other child and teen category feeds to discover inclusive events that were filed under a narrower category. Adult and senior feed selection advances with age. Titles marked canceled, postponed, or rescheduled are excluded. Always consult official details for eligibility, registration, availability, accessibility, and changes.
 
 ## Use the calendar
 

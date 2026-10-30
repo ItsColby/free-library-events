@@ -134,6 +134,63 @@ class HomeAssistantMetadataTests(unittest.TestCase):
             {platform: set(keys) for platform, keys in icons["entity"].items()},
         )
 
+    def test_config_error_keys_are_translated(self) -> None:
+        tree = ast.parse((INTEGRATION / "config.py").read_text(encoding="utf-8"))
+        keys: set[str] = set()
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Raise)
+                and isinstance(node.exc, ast.Call)
+                and isinstance(node.exc.func, ast.Name)
+                and node.exc.func.id in {"ValueError", "TypeError"}
+                and node.exc.args
+                and isinstance(node.exc.args[0], ast.Constant)
+            ):
+                keys.add(node.exc.args[0].value)
+            elif (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "_normalize_integer"
+                and isinstance(node.args[1], ast.Constant)
+            ):
+                keys.add(node.args[1].value)
+        translations = _json_file(INTEGRATION / "translations/en.json")
+        translated = set(translations["config"]["error"]) | set(
+            translations["options"]["error"]
+        )
+        self.assertTrue(keys)
+        self.assertEqual(set(), keys - translated)
+
+    def test_copied_limits_match_their_constants(self) -> None:
+        source = (INTEGRATION / "const.py").read_text(encoding="utf-8")
+        namespace: dict[str, object] = {}
+        exec(  # noqa: S102 - evaluates this repository's own constants
+            "\n".join(
+                line
+                for line in source.splitlines()
+                if re.match(r"(MIN|MAX)_(CALENDAR|SCAN|WEBCAL)\w* = ", line)
+            ),
+            namespace,
+        )
+        minutes = f"{namespace['MIN_CALENDAR_DURATION']} to {namespace['MAX_CALENDAR_DURATION']} minutes"
+        seconds = f"{namespace['MIN_SCAN_INTERVAL']} to {namespace['MAX_SCAN_INTERVAL']} seconds"
+        translations = _json_file(INTEGRATION / "translations/en.json")
+        for section in ("config", "options"):
+            errors = translations[section]["error"]
+            self.assertIn(minutes, errors["invalid_calendar_duration"])
+            self.assertIn(seconds, errors["invalid_scan_interval"])
+        dash = chr(0x2013)
+        usage = (ROOT / "docs/usage.md").read_text(encoding="utf-8")
+        self.assertIn(
+            f"{namespace['MIN_CALENDAR_DURATION']}{dash}{namespace['MAX_CALENDAR_DURATION']}",
+            usage,
+        )
+        self.assertIn(
+            f"{namespace['MIN_SCAN_INTERVAL']}{dash}{namespace['MAX_SCAN_INTERVAL']}",
+            usage,
+        )
+        self.assertIn(f"1{dash}{namespace['MAX_WEBCAL_NAME_LENGTH']} c", usage)
+
     def test_translations_hold_no_unresolved_key_references(self) -> None:
         text = (INTEGRATION / "translations/en.json").read_text(encoding="utf-8")
         self.assertNotIn("[%key:", text)

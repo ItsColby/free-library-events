@@ -1769,6 +1769,82 @@ class DigestTests(unittest.TestCase):
         )
         self.assertEqual(matching.classify_event(event, date(2025, 1, 15)), "best")
 
+    def test_and_under_requires_age_evidence(self) -> None:
+        event = model.Event(
+            title="Library program",
+            event_date=date(2026, 7, 20),
+            start_time=time(10),
+            description="",
+            link="",
+            image_url="",
+            branch=model.BRANCHES["CEN"],
+        )
+        birth = date(2022, 9, 15)
+        for description in (
+            "Snacks valued at $20 and under.",
+            "Limited to 10 and under tables.",
+            "Bring 5 and under items to swap.",
+        ):
+            with self.subTest(description=description):
+                self.assertNotEqual(
+                    matching.classify_event(
+                        replace(event, description=description), birth
+                    ),
+                    "best",
+                )
+
+    def test_and_under_age_evidence_survives_preceding_quantities(self) -> None:
+        event = model.Event(
+            title="Library program",
+            event_date=date(2026, 7, 20),
+            start_time=time(10),
+            description="",
+            link="https://example.test/age-evidence",
+            image_url="",
+            branch=model.BRANCHES["CEN"],
+        )
+        birth = date(2022, 9, 15)
+        for prefix in (
+            "Snacks valued at $20 and under.",
+            "Limited to 10 and under tables.",
+            "Bring 5 and under items to swap.",
+        ):
+            for age_text, expected, category in (
+                ("For ages 2 and under.", "exclude", "Preschool"),
+                ("For ages 5 and under.", "best", "School Age"),
+                ("For 24 months and under.", "exclude", "Preschool"),
+                ("For 60 months and under.", "best", "School Age"),
+            ):
+                for mode in model.FILTER_MODES:
+                    with self.subTest(prefix=prefix, age_text=age_text, mode=mode):
+                        candidate = replace(
+                            event,
+                            description=f"{prefix} {age_text}",
+                            age_categories=(category,),
+                        )
+                        self.assertEqual(
+                            matching.classify_event(candidate, birth), expected
+                        )
+                        weekly, selected = digest.select_digest_events(
+                            [candidate],
+                            birth_date=birth,
+                            filter_mode=mode,
+                            week_start=candidate.event_date,
+                            week_end=candidate.event_date,
+                        )
+                        self.assertEqual(weekly, [candidate])
+                        self.assertEqual(
+                            selected, [candidate] if expected == "best" else []
+                        )
+
+        self.assertEqual(
+            matching._explicit_age_fit(
+                "For ages 8 to 12. Snacks $20 and under. For ages 5 and under.",
+                46,
+            ),
+            "exclude",
+        )
+
     def test_age_matching_requires_age_evidence_and_bounds_source_numbers(self) -> None:
         event = model.Event(
             title="Library program",

@@ -1,6 +1,7 @@
 {
   "domain": "free_library_events",
   "name": "Free Library Events",
+  "categories": ["productivity_information.calendars_todos"],
   "codeowners": ["@ItsColby"],
   "config_flow": true,
   "dependencies": ["http"],

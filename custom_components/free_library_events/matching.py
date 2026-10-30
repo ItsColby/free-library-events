@@ -40,7 +40,8 @@ NEWBORN_RANGE_RE = re.compile(
     re.IGNORECASE,
 )
 AGE_AND_UNDER_RE = re.compile(
-    r"\b(?:ages?\s*)?(\d{1,3})\s*(months?|mos?|years?|yrs?)?\s+and under\b",
+    r"\b(?:(?P<context>ages?|children|kids|babies|toddlers|people)\s*)?"
+    r"(?P<value>\d{1,3})\s*(?P<unit>months?|mos?|years?|yrs?)?\s+and under\b",
     re.IGNORECASE,
 )
 UNDER_AGE_RE = re.compile(
@@ -119,10 +120,11 @@ def _explicit_age_fit(text: str, child_months: float) -> FitRank | None:  # noqa
             current_range = alternative
         return "exclude"
 
-    match = AGE_AND_UNDER_RE.search(text)
-    if match:
-        upper_value = int(match.group(1))
-        upper_unit = match.group(2)
+    for match in AGE_AND_UNDER_RE.finditer(text):
+        if not (match.group("context") or match.group("unit")):
+            continue
+        upper_value = int(match.group("value"))
+        upper_unit = match.group("unit")
         upper = _to_months(upper_value, upper_unit)
         margin = 1 if _is_month_unit(upper_unit) else 12
         if child_months < upper + margin:
