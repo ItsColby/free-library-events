@@ -120,8 +120,9 @@ def _explicit_age_fit(text: str, child_months: float) -> FitRank | None:  # noqa
             current_range = alternative
         return "exclude"
 
-    match = AGE_AND_UNDER_RE.search(text)
-    if match and (match.group("context") or match.group("unit")):
+    for match in AGE_AND_UNDER_RE.finditer(text):
+        if not (match.group("context") or match.group("unit")):
+            continue
         upper_value = int(match.group("value"))
         upper_unit = match.group("unit")
         upper = _to_months(upper_value, upper_unit)

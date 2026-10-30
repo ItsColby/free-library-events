@@ -2353,6 +2353,40 @@ async def test_native_calendars_explain_conditional_venue_without_changing_occur
     assert profile[CONF_BIRTH_DATE] not in unfolded
 
 
+@pytest.mark.parametrize("mode", ("Strict", "Recommended", "Broad"))
+@pytest.mark.parametrize(
+    "prefix",
+    (
+        "Snacks valued at $20 and under.",
+        "Limited to 10 and under tables.",
+        "Bring 5 and under items to swap.",
+    ),
+)
+@pytest.mark.parametrize(
+    ("age", "category", "included"),
+    ((2, "Preschool", False), (5, "School Age", True)),
+)
+def test_calendar_age_limits_survive_preceding_quantities(
+    mode: str, prefix: str, age: int, category: str, included: bool
+) -> None:
+    event = Event(
+        title="Library program",
+        event_date=date(2026, 7, 20),
+        start_time=time(10),
+        description=f"{prefix} For ages {age} and under.",
+        link="https://example.test/age-evidence",
+        image_url="",
+        branch=BRANCHES["CEN"],
+        age_categories=(category,),
+    )
+    items = build_calendar_items(
+        (event,),
+        USER_INPUT | {CONF_BIRTH_DATE: "2022-09-15", CONF_FILTER_MODE: mode},
+    )
+
+    assert [item.uid for item in items] == ([event_identity(event)] if included else [])
+
+
 def test_webcal_serializes_current_filtered_events_as_rfc5545() -> None:
     event = Event(
         title="Stories, Songs; and Café Fun",
