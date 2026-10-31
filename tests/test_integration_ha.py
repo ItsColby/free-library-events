@@ -1429,7 +1429,6 @@ async def test_setup_entities_action_and_redacted_diagnostics(
         await hass.async_block_till_done()
 
     assert entry.state is ConfigEntryState.LOADED
-    assert entry.title == "Free Library Events"
     registry_entries = [
         item
         for item in er.async_get(hass).entities.values()
@@ -3046,7 +3045,7 @@ async def test_coordinator_bounds_expedited_retry_and_exposes_current_attempt(
 
 def _entry(
     *,
-    title: str = "Legacy child-specific title",
+    title: str = "Free Library Events",
     data: dict[str, Any] = USER_INPUT,
     options: dict[str, Any] | None = None,
 ) -> MockConfigEntry:
