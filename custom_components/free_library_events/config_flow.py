@@ -165,7 +165,6 @@ class FreeLibraryEventsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = str(err) or "invalid_config"
             else:
                 await self.async_set_unique_id(DOMAIN)
-                self._abort_if_unique_id_configured()
                 return self.async_create_entry(
                     title=NAME,
                     data=data,

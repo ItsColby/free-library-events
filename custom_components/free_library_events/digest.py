@@ -73,7 +73,7 @@ def _display_event(event: Event) -> Event:
     )
 
 
-def _distance_priority(
+def distance_priority(
     event: Event,
     distance_by_branch_code: Mapping[str, float],
 ) -> tuple[float, datetime, str, str]:
@@ -100,7 +100,7 @@ def _render_budgeted_html(
     rendered_events = list(events)
     priority = sorted(
         rendered_events,
-        key=lambda event: _distance_priority(event, distance_by_branch_code),
+        key=lambda event: distance_priority(event, distance_by_branch_code),
     )
     omitted_count = initially_omitted_count
     # The caller caps candidates at MAX_EMAIL_EVENTS. Keep both representations
@@ -235,7 +235,7 @@ def build_digest(
     distances = distance_by_branch_code or {}
     budget_priority = sorted(
         included,
-        key=lambda event: _distance_priority(event, distances),
+        key=lambda event: distance_priority(event, distances),
     )
     initially_omitted_count = max(0, len(budget_priority) - MAX_EMAIL_EVENTS)
     if initially_omitted_count:
