@@ -37,7 +37,6 @@ from .const import (
     CONF_SCAN_INTERVAL,
     CONFIG_ENTRY_MINOR_VERSION,
     DOMAIN,
-    NAME,
     SERVICE_RENDER_DIGEST,
 )
 from .coordinator import (
@@ -200,8 +199,6 @@ async def async_migrate_entry(hass: HomeAssistant, entry: LibraryConfigEntry) ->
 async def async_setup_entry(hass: HomeAssistant, entry: LibraryConfigEntry) -> bool:
     """Set up a Free Library Events config entry."""
 
-    if entry.title != NAME:
-        hass.config_entries.async_update_entry(entry, title=NAME)
     config = entry_config(entry.data, entry.options)
     client = LibraryClient(async_get_clientsession(hass))
     coordinator = LibraryDataCoordinator(
