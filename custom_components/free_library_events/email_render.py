@@ -321,7 +321,7 @@ def _description_html(event: Event) -> str:
 
 
 def _description_paragraphs_html(event: Event) -> str:
-    """Render sanitized rich HTML, with a plain-text fallback for older events."""
+    """Render sanitized rich HTML, with a plain-text fallback when no sanitized rich HTML is available (truncated or HTML-less descriptions)."""
 
     if event.description_html:
         return event.description_html

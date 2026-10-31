@@ -45,7 +45,6 @@
       "invalid_config": "Review the values in this form and try saving again."
     },
     "abort": {
-      "already_configured": "Free Library Events already has an entry. Use Reconfigure on that entry to change the person or branches.",
       "reconfigure_successful": "The person and branch settings have been saved."
     }
   },

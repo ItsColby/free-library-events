@@ -741,15 +741,11 @@ def clean_title(raw_title: str, branch: Branch) -> str:
     return value or "Library event"
 
 
-_ONLINE_EVENT_RE = re.compile(
+_ONLINE_EVENT_PATTERN = (
     r"\b(?:virtual|online)\s+(?:event|program|class|session|workshop|storytime)\b|"
-    r"\b(?:via|on)\s+Zoom\b|\bjoin us online\b",
-    re.IGNORECASE,
+    r"\b(?:via|on)\s+Zoom\b|\bjoin us online\b"
 )
-_IN_PERSON_EVENT_RE = re.compile(
-    r"\bin[ -]person\b|\b(?:at|inside)\s+the\s+library\b",
-    re.IGNORECASE,
-)
+_IN_PERSON_EVENT_PATTERN = r"\bin[ -]person\b|\b(?:at|inside)\s+the\s+library\b"
 
 
 def event_modality(
@@ -758,9 +754,9 @@ def event_modality(
     """Return modality only when the publisher uses explicit event wording."""
 
     searchable = f"{title}\n{description}"
-    online = has_positive_claim(_ONLINE_EVENT_RE.pattern, searchable)
+    online = has_positive_claim(_ONLINE_EVENT_PATTERN, searchable)
     if has_positive_claim(r"\bhybrid\b", searchable) or (
-        online and has_positive_claim(_IN_PERSON_EVENT_RE.pattern, searchable)
+        online and has_positive_claim(_IN_PERSON_EVENT_PATTERN, searchable)
     ):
         return "hybrid"
     if online:

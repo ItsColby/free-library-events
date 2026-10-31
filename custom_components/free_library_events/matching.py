@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from datetime import date
 
 from .model import (
+    ADULT_START_MONTHS,
     AGE_CATEGORY_WINDOWS,
     Event,
     FitRank,
@@ -209,16 +210,20 @@ def classify_event(event: Event, birth_date: date) -> FitRank:  # noqa: C901
     teen_audience = bool(_TEEN_AUDIENCE_RE.search(text))
     adult_audience = bool(_ADULT_AUDIENCE_RE.search(text))
 
-    if child_months < 36 and baby_audience:
-        return "best"
-    if 9 <= child_months < 48 and toddler_audience:
-        return "best"
-    if 30 <= child_months < 72 and preschool_audience:
-        return "best"
-    if 60 <= child_months < 156 and school_age_audience:
-        return "best"
-    if 144 <= child_months < 228 and teen_audience:
-        return "best"
+    windows = {
+        category: (minimum, maximum)
+        for category, minimum, maximum in AGE_CATEGORY_WINDOWS
+    }
+    for category, audience in (
+        ("Baby", baby_audience),
+        ("Toddler", toddler_audience),
+        ("Preschool", preschool_audience),
+        ("School Age", school_age_audience),
+        ("Young Adult", teen_audience),
+    ):
+        minimum, maximum = windows[category]
+        if audience and minimum <= child_months < maximum:
+            return "best"
 
     if child_months < 36 and any(
         term in text
@@ -226,7 +231,7 @@ def classify_event(event: Event, birth_date: date) -> FitRank:  # noqa: C901
     ):
         return "good"
 
-    if child_months < 216 and any(
+    if child_months < ADULT_START_MONTHS and any(
         term in text
         for term in (
             "all children can",
@@ -238,7 +243,7 @@ def classify_event(event: Event, birth_date: date) -> FitRank:  # noqa: C901
         return "good"
 
     if (
-        child_months < 216
+        child_months < ADULT_START_MONTHS
         and any(
             term in text
             for term in (
@@ -273,7 +278,7 @@ def classify_event(event: Event, birth_date: date) -> FitRank:  # noqa: C901
     ):
         return "exclude"
 
-    if child_months < 216 and any(
+    if child_months < ADULT_START_MONTHS and any(
         term in text
         for term in (
             "kid",

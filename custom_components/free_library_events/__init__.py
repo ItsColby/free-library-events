@@ -47,7 +47,7 @@ from .coordinator import (
     source_label,
     supplemental_coverage,
 )
-from .digest import build_digest, select_digest_events
+from .digest import build_digest, distance_priority, select_digest_events
 from .email_images import (
     EMAIL_IMAGE_DIRECTORY,
     IMAGE_CACHE_TTL_SECONDS,
@@ -320,12 +320,7 @@ async def _async_render_digest(call: ServiceCall) -> ServiceResponse:  # noqa: C
             week_end=week_end,
         )
         included_events.sort(
-            key=lambda event: (
-                distance_by_branch_code.get(event.branch.code, float("inf")),
-                event.starts_at,
-                event.branch.name,
-                event.title,
-            )
+            key=lambda event: distance_priority(event, distance_by_branch_code)
         )
         download_batch = await async_download_event_images(
             async_get_clientsession(hass), included_events
