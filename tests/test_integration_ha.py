@@ -172,7 +172,7 @@ async def test_reconfigure_flow_updates_profile_data_only(
         CONF_CHILD_NAME: "Jordan",
         CONF_BRANCHES: ["IND", "PCI"],
     }
-    with patch.object(hass.config_entries, "async_reload", new_callable=AsyncMock):
+    with patch.object(hass.config_entries, "async_schedule_reload") as schedule_reload:
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"], updated_profile
         )
@@ -181,6 +181,7 @@ async def test_reconfigure_flow_updates_profile_data_only(
     assert result["reason"] == "reconfigure_successful"
     assert entry.data == updated_profile | {"future_profile": {"enabled": True}}
     assert entry.options == BEHAVIOR_INPUT
+    schedule_reload.assert_called_once_with(entry.entry_id)
 
 
 async def test_reconfigure_flow_does_not_reload_unchanged_profile(
