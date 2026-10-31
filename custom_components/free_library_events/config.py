@@ -33,19 +33,6 @@ from .const import (
 from .model import BRANCHES, FILTER_MODES, Branch, normalize_child_name
 
 
-def default_config() -> dict[str, Any]:
-    """Return defaults for the branch selection and optional settings."""
-
-    return {
-        CONF_BRANCHES: list(BRANCHES),
-        CONF_FILTER_MODE: DEFAULT_FILTER_MODE,
-        CONF_CALENDAR_DURATION: DEFAULT_CALENDAR_DURATION,
-        CONF_SCAN_INTERVAL: DEFAULT_SCAN_INTERVAL,
-        CONF_PUBLISH_WEBCAL: False,
-        CONF_WEBCAL_NAME: DEFAULT_WEBCAL_NAME,
-    }
-
-
 def normalize_profile(values: Mapping[str, Any]) -> dict[str, Any]:
     """Normalize required profile and source-selection config-entry data."""
 

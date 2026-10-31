@@ -24,7 +24,6 @@ from homeassistant.helpers.selector import (
 )
 
 from .config import (
-    default_config,
     entry_options,
     entry_profile,
     normalize_options,
@@ -174,7 +173,9 @@ class FreeLibraryEventsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="user",
-            data_schema=_profile_schema({**default_config(), **(user_input or {})}),
+            data_schema=_profile_schema(
+                {CONF_BRANCHES: list(BRANCHES), **(user_input or {})}
+            ),
             errors=errors,
         )
 
