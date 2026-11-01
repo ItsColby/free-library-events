@@ -281,16 +281,12 @@ async def test_options_flow_enables_and_rotates_webcal_feed(
     result = await hass.config_entries.options.async_init(entry.entry_id)
     assert result["type"] is FlowResultType.MENU
     assert result["menu_options"] == ["behavior", "webcal", "regenerate_webcal"]
-    labels = json.loads(
-        (
-            Path(__file__).resolve().parents[1]
-            / "custom_components"
-            / "free_library_events"
-            / "translations"
-            / "en.json"
-        ).read_text(encoding="utf-8")
-    )["options"]["step"]["init"]["menu_options"]
-    assert all(labels[option].strip() for option in result["menu_options"])
+    option_translations = await async_get_translations(hass, "en", "options", {DOMAIN})
+    menu_prefix = f"component.{DOMAIN}.options.step.init.menu_options."
+    assert all(
+        option_translations.get(f"{menu_prefix}{option}", "").strip()
+        for option in result["menu_options"]
+    )
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"next_step_id": "regenerate_webcal"}
     )
