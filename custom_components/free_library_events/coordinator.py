@@ -49,6 +49,9 @@ from .model import (
 _LOGGER = logging.getLogger(__name__)
 SOURCE_AGE_HORIZON = timedelta(days=90)
 MAX_TYPE_EXPANSIONS_PER_REFRESH = 12
+# Two sources' type feeds keep every request slot busy without queueing the
+# rest of the refresh against each expansion's timeout.
+MAX_CONCURRENT_TYPE_EXPANSIONS = 2
 TYPE_EXPANSION_TIMEOUT_SECONDS = 90
 MAX_TYPE_FAILURE_EXAMPLES = 3
 EXPEDITED_RETRY_SECONDS = 5 * 60
@@ -299,21 +302,27 @@ async def async_expand_source(
     age_category: str,
     base_feed: BranchFeed,
     coverage_end: date,
+    expansion_slots: asyncio.Semaphore,
 ) -> BranchFeed:
-    """Expand one capped source without allowing a stalled refresh."""
+    """Expand one capped source without allowing a stalled refresh.
 
-    try:
-        return await asyncio.wait_for(
-            client.async_expand_feed(
-                branch,
-                age_category,
-                base_feed,
-                coverage_end,
-            ),
-            timeout=TYPE_EXPANSION_TIMEOUT_SECONDS,
-        )
-    except TimeoutError:
-        raise LibraryApiError(SOURCE_ERROR_EXPANSION_TIMEOUT) from None
+    The timeout starts only once an expansion slot is held, so waiting behind
+    other sources does not consume this source's budget.
+    """
+
+    async with expansion_slots:
+        try:
+            return await asyncio.wait_for(
+                client.async_expand_feed(
+                    branch,
+                    age_category,
+                    base_feed,
+                    coverage_end,
+                ),
+                timeout=TYPE_EXPANSION_TIMEOUT_SECONDS,
+            )
+        except TimeoutError:
+            raise LibraryApiError(SOURCE_ERROR_EXPANSION_TIMEOUT) from None
 
 
 @dataclass(frozen=True, slots=True)
@@ -675,10 +684,15 @@ class LibraryDataCoordinator(DataUpdateCoordinator[LibraryData]):
             today,
             coverage_end,
         )
+        expansion_slots = asyncio.Semaphore(MAX_CONCURRENT_TYPE_EXPANSIONS)
         expanded_results = await asyncio.gather(
             *(
                 async_expand_source(
-                    self._client, *request_by_key[key], statuses[key], coverage_end
+                    self._client,
+                    *request_by_key[key],
+                    statuses[key],
+                    coverage_end,
+                    expansion_slots=expansion_slots,
                 )
                 for key in expansion_keys
             ),
