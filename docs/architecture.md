@@ -65,7 +65,7 @@ This 90-day interval selects sources. It does not promise 90 days of events. Cov
 | Source trust | HTTPS on the two allow-listed Free Library hosts, with no URL credentials or nondefault port; at most 2 redirects, each revalidated |
 | Source payload | At most 256 KiB per response; parsing runs off the event loop |
 | Adaptive expansion | At most 12 branch/category sources per refresh, prioritizing the digest week's relevant ages, then nearby age windows |
-| Expansion lifetime | Each selected source has a 90-second expansion timeout |
+| Expansion lifetime | Up to 2 sources expand at once, each with a 90-second timeout that starts once it holds an expansion slot; all expansions end 300 seconds after the phase starts, keeping the base-feed phase plus expansions under the 600-second refresh wait. A source cut off by either limit reports `expansion_timeout` and discards its fetched shards |
 
 A `BranchFeed` retains both normalized events and the evidence needed to judge completeness: published and parsed item counts, ordering, last event date, and any event-type expansion results. The modeled publisher cap is 10 items. A feed proves coverage through a date when:
 
@@ -233,7 +233,7 @@ Normalization is shared by UI and runtime reads. It rejects unsupported branch c
 
 Entries migrated to the current shape are the only supported ones: an entry below or above the current minor version of entry version 1 is rejected rather than rewritten, and older releases reject newer entries. Earlier shapes (per-branch booleans, combined settings) are no longer migrated; install a release that still migrates them first.
 
-The config entry unique ID remains `free_library_events`, and the integration keeps a generic service-device identity `(free_library_events, free_library_events)`. Entity unique IDs are `free_library_events_calendar`, `free_library_events_status`, and `free_library_events_refresh`. These are registry identities, not promises about user-visible entity IDs, which Home Assistant users may rename. Profile reconfiguration and option updates use native reload behavior; unchanged profile data avoids an unnecessary reload.
+The config entry unique ID remains `free_library_events`, and the integration keeps a generic service-device identity `(free_library_events, free_library_events)`. Entity unique IDs are `free_library_events_calendar`, `free_library_events_status`, and `free_library_events_refresh`. These are registry identities, not promises about user-visible entity IDs, which Home Assistant users may rename. Profile reconfiguration and option updates use native reload behavior; unchanged profile data avoids an unnecessary reload. An options save whose changed keys are only the WebCal publish flag, name, and token skips the reload (`automatic_reload = False` in `_save_options`), because the calendar view reads those from the entry on each request.
 
 Changes should follow the owner that establishes the behavior. Parser or matching changes must remain consistent across digest, status counts, and both calendar outputs. Calendar formatting belongs in the shared calendar projection before either adapter. Acquisition changes must preserve coverage evidence and bounded request work. Publication changes must preserve token revocation, loaded-entry checks, and conditional-response semantics. Image changes must preserve attachment/CID agreement and disposable-file ownership.
 

@@ -55,8 +55,12 @@ from custom_components.free_library_events.calendar_data import (
 )
 from custom_components.free_library_events.config import (
     entry_config,
+    entry_options,
     normalize_options,
     normalize_profile,
+)
+from custom_components.free_library_events.config_flow import (
+    FreeLibraryEventsOptionsFlow,
 )
 from custom_components.free_library_events.const import (
     ATTR_EMBED_IMAGES,
@@ -391,7 +395,7 @@ async def test_webcal_rotation_survives_url_recovery(
             assert result["type"] is FlowResultType.CREATE_ENTRY
             assert entry.options[CONF_PUBLISH_WEBCAL] is False
             assert CONF_WEBCAL_TOKEN not in entry.options
-            assert async_reload.await_count == 1
+            async_reload.assert_not_awaited()
         else:
             assert result["step_id"] == "webcal_url"
             assert new_token in result["description_placeholders"]["webcal_url"]
@@ -409,7 +413,7 @@ async def test_webcal_rotation_survives_url_recovery(
                 assert result["type"] is FlowResultType.CREATE_ENTRY
                 assert entry.options[CONF_WEBCAL_TOKEN] == new_token
                 assert entry.options[CONF_WEBCAL_NAME] == retry_input[CONF_WEBCAL_NAME]
-                assert async_reload.await_count == 1
+                async_reload.assert_not_awaited()
         generate_token.assert_called_once_with(32)
         assert entry.options["future_behavior"] == {"enabled": True}
 
@@ -2607,6 +2611,102 @@ async def test_webcal_view_is_token_gated_dynamic_and_unloads(
     assert await hass.config_entries.async_unload(entry.entry_id)
     response = await client.get(WEBCAL_PATH.format(token=token))
     assert response.status == 404
+
+
+async def test_webcal_only_options_edit_applies_live_without_reload(
+    hass: HomeAssistant,
+    hass_client_no_auth: ClientSessionGenerator,
+) -> None:
+    token = "live-synthetic-subscription-token"
+    entry = _entry(
+        title="Free Library Events",
+        data=USER_INPUT,
+        options={
+            **BEHAVIOR_INPUT,
+            CONF_PUBLISH_WEBCAL: True,
+            CONF_WEBCAL_TOKEN: token,
+            CONF_WEBCAL_NAME: "Original Library Events",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    async def fetch_feed(_branch, age_category, _coverage_end=None):
+        return empty_feed(age_category)
+
+    with patch(
+        "custom_components.free_library_events.api.LibraryClient.async_fetch_feed",
+        side_effect=fetch_feed,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+    coordinator = entry.runtime_data
+    client = await hass_client_no_auth()
+    hass.config.external_url = "https://ha.example.test"
+
+    async def edit_webcal(user_input: dict[str, Any]) -> None:
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], {"next_step_id": "webcal"}
+        )
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], user_input
+        )
+        if result["type"] is FlowResultType.FORM:
+            result = await hass.config_entries.options.async_configure(
+                result["flow_id"], {}
+            )
+        assert result["type"] is FlowResultType.CREATE_ENTRY
+        await hass.async_block_till_done()
+
+    await edit_webcal(
+        {CONF_PUBLISH_WEBCAL: True, CONF_WEBCAL_NAME: "Renamed Library Events"}
+    )
+    assert entry.state is ConfigEntryState.LOADED
+    assert entry.runtime_data is coordinator
+    response = await client.get(WEBCAL_PATH.format(token=token))
+    assert response.status == 200
+    assert "X-WR-CALNAME:Renamed Library Events" in await response.text()
+
+    await edit_webcal(
+        {CONF_PUBLISH_WEBCAL: False, CONF_WEBCAL_NAME: "Renamed Library Events"}
+    )
+    assert entry.state is ConfigEntryState.LOADED
+    assert entry.runtime_data is coordinator
+    response = await client.get(WEBCAL_PATH.format(token=token))
+    assert response.status == 404
+
+
+@pytest.mark.parametrize("sparse", (False, True), ids=("full", "sparse"))
+@pytest.mark.parametrize(
+    ("changes", "reloads"),
+    (
+        ({CONF_WEBCAL_NAME: "Renamed"}, False),
+        ({CONF_PUBLISH_WEBCAL: False, CONF_WEBCAL_TOKEN: "other"}, False),
+        ({CONF_FILTER_MODE: "Strict"}, True),
+        ({CONF_WEBCAL_NAME: "Renamed", CONF_SCAN_INTERVAL: 43200}, True),
+    ),
+)
+async def test_options_flow_reloads_unless_only_webcal_keys_change(
+    hass: HomeAssistant, changes: dict[str, Any], reloads: bool, sparse: bool
+) -> None:
+    webcal_options = {
+        CONF_PUBLISH_WEBCAL: True,
+        CONF_WEBCAL_TOKEN: "synthetic-token",
+        CONF_WEBCAL_NAME: "Library Events",
+    }
+    # Sparse entries stored only the webcal keys; setup applied the defaults.
+    options = webcal_options if sparse else {**BEHAVIOR_INPUT, **webcal_options}
+    entry = _entry(title="Free Library Events", data=PROFILE_INPUT, options=options)
+    entry.add_to_hass(hass)
+    flow = FreeLibraryEventsOptionsFlow()
+    flow.hass = hass
+    flow.handler = entry.entry_id
+
+    flow._save_options(
+        {**entry_options(entry.data, entry.options), **webcal_options, **changes}
+    )
+
+    assert flow.automatic_reload is reloads
 
 
 async def test_coordinator_recomputes_age_feeds_as_time_advances(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import itertools
 import os
 import tempfile
 import unittest
@@ -226,6 +227,53 @@ class EmailImageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([request[0] for request in session.requests], [first_url])
         self.assertEqual(batch.images, ())
         self.assertEqual(batch.failure_count, 1)
+
+    async def test_never_requests_off_domain_redirect_targets(self) -> None:
+        first_url = "https://libwww.freelibrary.org/images/start.png"
+        foreign_url = "https://example.test/image.png"
+        session = _Session({first_url: _Response(b"", 302, {"Location": foreign_url})})
+
+        batch = await email_images.async_download_event_images(
+            session,  # type: ignore[arg-type]
+            [_event("Off-domain redirect", first_url)],
+        )
+
+        self.assertEqual([request[0] for request in session.requests], [first_url])
+        self.assertEqual(batch.images, ())
+        self.assertEqual(batch.fallback_urls, ())
+        self.assertEqual(batch.failure_count, 1)
+        self.assertEqual(
+            batch.failure_examples,
+            ("Off-domain redirect: unsafe or excessive image redirect",),
+        )
+
+    async def test_stops_following_redirects_at_the_hop_limit(self) -> None:
+        urls = [
+            f"https://libwww.freelibrary.org/images/hop{index}.png"
+            for index in range(email_images.MAX_IMAGE_REDIRECTS + 3)
+        ]
+        session = _Session(
+            {
+                url: _Response(b"", 302, {"Location": next_url})
+                for url, next_url in itertools.pairwise(urls)
+            }
+        )
+
+        batch = await email_images.async_download_event_images(
+            session,  # type: ignore[arg-type]
+            [_event("Redirect chain", urls[0])],
+        )
+
+        self.assertEqual(
+            [request[0] for request in session.requests],
+            urls[: email_images.MAX_IMAGE_REDIRECTS + 1],
+        )
+        self.assertEqual(batch.images, ())
+        self.assertEqual(batch.failure_count, 1)
+        self.assertEqual(
+            batch.failure_examples,
+            ("Redirect chain: unsafe or excessive image redirect",),
+        )
 
     def test_reads_jpeg_dimensions(self) -> None:
         jpeg = (

@@ -49,7 +49,15 @@ from .model import (
 _LOGGER = logging.getLogger(__name__)
 SOURCE_AGE_HORIZON = timedelta(days=90)
 MAX_TYPE_EXPANSIONS_PER_REFRESH = 12
+# One expansion's 19 requests already fill the 8 request slots; a second fills
+# the last partial round (about 4.75 rounds for two against 6 in sequence), so 2
+# is a pipelining choice, not an optimum. Each expansion's timeout starts once it
+# holds a slot, and every expansion ends by TOTAL_TYPE_EXPANSION_TIMEOUT_SECONDS
+# after the phase starts, which keeps the base-feed phase (80 s or more) plus
+# expansions under REQUEST_REFRESH_TIMEOUT_SECONDS.
+MAX_CONCURRENT_TYPE_EXPANSIONS = 2
 TYPE_EXPANSION_TIMEOUT_SECONDS = 90
+TOTAL_TYPE_EXPANSION_TIMEOUT_SECONDS = 300
 MAX_TYPE_FAILURE_EXAMPLES = 3
 EXPEDITED_RETRY_SECONDS = 5 * 60
 REQUEST_REFRESH_TIMEOUT_SECONDS = 10 * 60
@@ -299,21 +307,36 @@ async def async_expand_source(
     age_category: str,
     base_feed: BranchFeed,
     coverage_end: date,
+    expansion_slots: asyncio.Semaphore,
+    deadline: float,
 ) -> BranchFeed:
-    """Expand one capped source without allowing a stalled refresh."""
+    """Expand one capped source without allowing a stalled refresh.
 
-    try:
-        return await asyncio.wait_for(
-            client.async_expand_feed(
-                branch,
-                age_category,
-                base_feed,
-                coverage_end,
-            ),
-            timeout=TYPE_EXPANSION_TIMEOUT_SECONDS,
-        )
-    except TimeoutError:
-        raise LibraryApiError(SOURCE_ERROR_EXPANSION_TIMEOUT) from None
+    The per-source timeout starts only once an expansion slot is held, so
+    waiting behind other sources does not consume this source's budget, and is
+    capped by the loop-time deadline shared by the whole expansion phase.
+    Shards fetched by an expansion that times out are discarded.
+    """
+
+    async with expansion_slots:
+        try:
+            return await asyncio.wait_for(
+                client.async_expand_feed(
+                    branch,
+                    age_category,
+                    base_feed,
+                    coverage_end,
+                ),
+                timeout=max(
+                    0.0,
+                    min(
+                        TYPE_EXPANSION_TIMEOUT_SECONDS,
+                        deadline - asyncio.get_running_loop().time(),
+                    ),
+                ),
+            )
+        except TimeoutError:
+            raise LibraryApiError(SOURCE_ERROR_EXPANSION_TIMEOUT) from None
 
 
 @dataclass(frozen=True, slots=True)
@@ -675,10 +698,19 @@ class LibraryDataCoordinator(DataUpdateCoordinator[LibraryData]):
             today,
             coverage_end,
         )
+        expansion_slots = asyncio.Semaphore(MAX_CONCURRENT_TYPE_EXPANSIONS)
+        expansion_deadline = (
+            asyncio.get_running_loop().time() + TOTAL_TYPE_EXPANSION_TIMEOUT_SECONDS
+        )
         expanded_results = await asyncio.gather(
             *(
                 async_expand_source(
-                    self._client, *request_by_key[key], statuses[key], coverage_end
+                    self._client,
+                    *request_by_key[key],
+                    statuses[key],
+                    coverage_end,
+                    expansion_slots=expansion_slots,
+                    deadline=expansion_deadline,
                 )
                 for key in expansion_keys
             ),
