@@ -55,6 +55,7 @@ from custom_components.free_library_events.calendar_data import (
 )
 from custom_components.free_library_events.config import (
     entry_config,
+    entry_options,
     normalize_options,
     normalize_profile,
 )
@@ -2675,6 +2676,7 @@ async def test_webcal_only_options_edit_applies_live_without_reload(
     assert response.status == 404
 
 
+@pytest.mark.parametrize("sparse", (False, True), ids=("full", "sparse"))
 @pytest.mark.parametrize(
     ("changes", "reloads"),
     (
@@ -2685,21 +2687,24 @@ async def test_webcal_only_options_edit_applies_live_without_reload(
     ),
 )
 async def test_options_flow_reloads_unless_only_webcal_keys_change(
-    hass: HomeAssistant, changes: dict[str, Any], reloads: bool
+    hass: HomeAssistant, changes: dict[str, Any], reloads: bool, sparse: bool
 ) -> None:
-    options = {
-        **BEHAVIOR_INPUT,
+    webcal_options = {
         CONF_PUBLISH_WEBCAL: True,
         CONF_WEBCAL_TOKEN: "synthetic-token",
         CONF_WEBCAL_NAME: "Library Events",
     }
+    # Sparse entries stored only the webcal keys; setup applied the defaults.
+    options = webcal_options if sparse else {**BEHAVIOR_INPUT, **webcal_options}
     entry = _entry(title="Free Library Events", data=PROFILE_INPUT, options=options)
     entry.add_to_hass(hass)
     flow = FreeLibraryEventsOptionsFlow()
     flow.hass = hass
     flow.handler = entry.entry_id
 
-    flow._save_options({**options, **changes})
+    flow._save_options(
+        {**entry_options(entry.data, entry.options), **webcal_options, **changes}
+    )
 
     assert flow.automatic_reload is reloads
 

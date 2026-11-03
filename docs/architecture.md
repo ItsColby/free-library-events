@@ -65,7 +65,7 @@ This 90-day interval selects sources. It does not promise 90 days of events. Cov
 | Source trust | HTTPS on the two allow-listed Free Library hosts, with no URL credentials or nondefault port; at most 2 redirects, each revalidated |
 | Source payload | At most 256 KiB per response; parsing runs off the event loop |
 | Adaptive expansion | At most 12 branch/category sources per refresh, prioritizing the digest week's relevant ages, then nearby age windows |
-| Expansion lifetime | Each selected source has a 90-second expansion timeout |
+| Expansion lifetime | Up to 2 sources expand at once, each with a 90-second timeout that starts once it holds an expansion slot; all expansions end 300 seconds after the phase starts, keeping the base-feed phase plus expansions under the 600-second refresh wait. A source cut off by either limit reports `expansion_timeout` and discards its fetched shards |
 
 A `BranchFeed` retains both normalized events and the evidence needed to judge completeness: published and parsed item counts, ordering, last event date, and any event-type expansion results. The modeled publisher cap is 10 items. A feed proves coverage through a date when:
 

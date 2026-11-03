@@ -1278,6 +1278,62 @@ async def test_coordinator_bounds_a_stalled_type_expansion(
     assert status.type_shard_failures == (SOURCE_ERROR_EXPANSION_TIMEOUT,)
 
 
+async def test_stalled_type_expansions_end_by_the_total_deadline(
+    hass: HomeAssistant,
+) -> None:
+    async def fetch_feed(_branch, age_category):
+        return BranchFeed(
+            events=(),
+            age_category=age_category,
+            source_count=10,
+            parsed_count=10,
+            last_event_date=date(2026, 7, 24),
+            ordered=True,
+        )
+
+    async def expand_feed(*_args):
+        await asyncio.sleep(60)
+
+    client = types.SimpleNamespace(
+        async_fetch_feed=AsyncMock(side_effect=fetch_feed),
+        async_expand_feed=AsyncMock(side_effect=expand_feed),
+    )
+    # A minor has five source categories per branch, so four branches select the
+    # full 12 expansions.
+    branches = tuple(BRANCHES.values())
+    coordinator = LibraryDataCoordinator(
+        hass,
+        _entry(),
+        client,
+        branches,
+        date(2018, 1, 1),
+        timedelta(hours=6),
+    )
+    module = "custom_components.free_library_events.coordinator."
+
+    with (
+        patch(
+            module + "dt_util.now",
+            return_value=datetime(2026, 7, 18, tzinfo=LOCAL_TIME_ZONE),
+        ),
+        patch(module + "TYPE_EXPANSION_TIMEOUT_SECONDS", 0.2),
+        patch(module + "TOTAL_TYPE_EXPANSION_TIMEOUT_SECONDS", 0.5),
+    ):
+        started = asyncio.get_running_loop().time()
+        data = await coordinator._async_update_data()
+        elapsed = asyncio.get_running_loop().time() - started
+
+    # Six waves of 0.2 s would take 1.2 s without the total deadline.
+    assert elapsed < 0.9
+    assert client.async_expand_feed.await_count < MAX_TYPE_EXPANSIONS_PER_REFRESH
+    timed_out = [
+        status
+        for status in data.source_statuses.values()
+        if status.type_shard_failures == (SOURCE_ERROR_EXPANSION_TIMEOUT,)
+    ]
+    assert len(timed_out) == MAX_TYPE_EXPANSIONS_PER_REFRESH
+
+
 async def test_type_expansion_timeout_excludes_queueing_behind_other_sources(
     hass: HomeAssistant,
 ) -> None:
