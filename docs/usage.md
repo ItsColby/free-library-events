@@ -6,7 +6,7 @@ After [installation](../README.md#install-and-add-your-profile), use the integra
 
 Open **Free Library Events** in **Settings > Devices & services**. Use **Reconfigure** to change **Person's display name**, **Person's birth date**, or **Library branches**. The name must contain 1–80 characters, the birth date must be valid and no later than today, and at least one supported branch must remain selected. Only one person and one integration entry are supported.
 
-Use **Configure > Matching and timing** for these options. Saving changed settings reloads the integration.
+Use **Configure > Matching and timing** for these options. Saving changed settings reloads the integration, except that changing only the calendar subscription (its name, on or off, or its private address) applies immediately without a reload.
 
 | Setting | Default | Allowed values and effect |
 | --- | --- | --- |

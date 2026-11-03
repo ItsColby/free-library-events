@@ -206,11 +206,35 @@ class FreeLibraryEventsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
 
+# The calendar view reads these from the entry on every request, so changing only
+# them needs no reload.
+WEBCAL_ONLY_OPTIONS = frozenset(
+    {CONF_PUBLISH_WEBCAL, CONF_WEBCAL_NAME, CONF_WEBCAL_TOKEN}
+)
+_MISSING = object()
+
+
 class FreeLibraryEventsOptionsFlow(config_entries.OptionsFlowWithReload):
     """Manage optional behavior and calendar publication."""
 
     _pending_options: dict[str, Any] | None = None
     _pending_owner: tuple[dict[str, Any], dict[str, Any]] | None = None
+
+    def _save_options(self, options: dict[str, Any]) -> ConfigFlowResult:
+        """Save options, reloading unless only live-read webcal keys changed."""
+
+        # Stored options may omit defaults that setup already applied.
+        current = {
+            **self.config_entry.options,
+            **entry_options(self.config_entry.data, self.config_entry.options),
+        }
+        changed = {
+            key
+            for key in current.keys() | options.keys()
+            if current.get(key, _MISSING) != options.get(key, _MISSING)
+        }
+        self.automatic_reload = not changed <= WEBCAL_ONLY_OPTIONS
+        return self.async_create_entry(data=options)
 
     def _entry_owner(self) -> tuple[dict[str, Any], dict[str, Any]]:
         """Return the complete mutable config-entry owner."""
@@ -271,8 +295,8 @@ class FreeLibraryEventsOptionsFlow(config_entries.OptionsFlowWithReload):
             except (TypeError, ValueError) as err:
                 errors["base"] = str(err) or "invalid_config"
             else:
-                return self.async_create_entry(
-                    data=updated_entry_options(self.config_entry.options, options)
+                return self._save_options(
+                    updated_entry_options(self.config_entry.options, options)
                 )
 
         return self.async_show_form(
@@ -301,8 +325,8 @@ class FreeLibraryEventsOptionsFlow(config_entries.OptionsFlowWithReload):
                 errors["base"] = str(err) or "invalid_config"
             else:
                 if not options[CONF_PUBLISH_WEBCAL]:
-                    return self.async_create_entry(
-                        data=updated_entry_options(self.config_entry.options, options)
+                    return self._save_options(
+                        updated_entry_options(self.config_entry.options, options)
                     )
                 if not options.get(CONF_WEBCAL_TOKEN):
                     options[CONF_WEBCAL_TOKEN] = token_urlsafe(32)
@@ -346,7 +370,7 @@ class FreeLibraryEventsOptionsFlow(config_entries.OptionsFlowWithReload):
                 return self.async_abort(reason="options_changed")
             pending_options = self._pending_options
             self._clear_pending_options()
-            return self.async_create_entry(data=pending_options)
+            return self._save_options(pending_options)
         token = self._pending_options[CONF_WEBCAL_TOKEN]
         try:
             urls = webcal_subscription_urls(self.hass, token)
