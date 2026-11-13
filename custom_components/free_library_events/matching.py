@@ -165,8 +165,7 @@ _BABY_AUDIENCE_SUBJECT = (
 _BABY_AUDIENCE_RE = re.compile(
     # Anchor age inference to a program, eligibility statement or invitation.
     # Topic phrases such as "care for babies" or "their infants" are not enough.
-    rf"\b{_BABY_TERM}(?:\s*(?:&|and|/)\s*toddlers?)?[ -]+{_BABY_PROGRAM}\b"
-    r"|\b(?:baby\s*(?:&|and)\s*me|read,?\s+baby,?\s+read|lap[ -]sit)\b"
+    r"\b(?:baby\s*(?:&|and)\s*me|read,?\s+baby,?\s+read|lap[ -]sit)\b"
     rf"|(?:^|[.!?]\s+)(?:(?:(?:this|the|a|our)\s+)?{_BABY_PROGRAM}"
     rf"(?:\s+(?:(?:and|&)\s+)?{_BABY_PROGRAM})*\s+(?:(?:is|are)\s+)?)?"
     r"(?:(?:designed|intended|suitable|appropriate|recommended|perfect)\s+)?"
@@ -177,11 +176,57 @@ _BABY_AUDIENCE_RE = re.compile(
     rf"{_BABY_AUDIENCE_CONTINUATION}",
     re.MULTILINE,
 )
-_TODDLER_AUDIENCE_RE = re.compile(r"\b(?:toddlers?|twos)\b")
-_PRESCHOOL_AUDIENCE_RE = re.compile(r"\bpre-?school(?:ers?)?\b")
-_SCHOOL_AGE_AUDIENCE_RE = re.compile(r"\bschool[ -]aged?\b")
-_TEEN_AUDIENCE_RE = re.compile(r"\bteen(?:s|age(?:rs?)?)?\b")
 _ADULT_AUDIENCE_RE = re.compile(r"\badults?\b")
+_GROUP_TERMS = (
+    ("Toddler", r"(?:toddlers?|twos)"),
+    ("Preschool", r"pre-?school(?:ers?)?"),
+    ("School Age", r"school[ -]aged?"),
+    ("Young Adult", r"teen(?:s|age(?:rs?)?)?"),
+)
+_ANY_GROUP = rf"(?:{_BABY_TERM}|{'|'.join(term for _, term in _GROUP_TERMS)})(?:\s+(?:children|kids))?"
+_GROUP_PROGRAM = (
+    rf"(?:{_BABY_PROGRAM}|crafts?|games?|club|(?:process\s+)?art(?:\s+studio)?)"
+)
+
+
+def _program_title_pattern(term: str) -> re.Pattern[str]:
+    return re.compile(
+        rf"^(?!.*\bfor\s+(?:(?:the|their)\s+)?(?:parents?|caregivers?)\b)"
+        rf"(?:family\s+)?(?:{_ANY_GROUP}\s*(?:,\s*(?:(?:and|or)\s+)?|"
+        rf"(?:and|or|&|/)\s*))*{term}\b[^\n]*\b{_GROUP_PROGRAM}\b"
+    )
+
+
+_BABY_PROGRAM_TITLE = _program_title_pattern(_BABY_TERM)
+
+
+def _audience_pattern(term: str) -> re.Pattern[str]:
+    """Recognize an age group as participants, not just a topic."""
+
+    audience = rf"{term}(?:\s+(?:children|kids))?"
+    return re.compile(
+        rf"(?:^|[.!?]\s+)(?:(?:(?:this|the|a|our)\s+)?{_GROUP_PROGRAM}"
+        rf"(?:\s+(?:(?:and|&)\s+)?{_GROUP_PROGRAM})*\s+(?:(?:is|are)\s+)?)?"
+        r"(?:(?:designed|intended|suitable|appropriate|recommended|perfect)\s+)?"
+        rf"(?:for|open to)\s+(?:{_ANY_GROUP}(?:\s*,\s*(?:(?:and|or)\s+)?|\s+(?:and|or)\s+|\s*&\s*))*"
+        rf"{audience}{_BABY_AUDIENCE_CONTINUATION}"
+        rf"|(?:^|[.!?]\s+){audience}\s+"
+        r"(?:(?:(?:are|is)\s+)?welcome|(?:can|may)\s+(?:attend|join|participate|enjoy))\b"
+        rf"|(?:^|[.!?]\s+)(?:bring|join us with)\s+(?:your\s+)?{audience}"
+        rf"{_BABY_AUDIENCE_CONTINUATION}",
+        re.MULTILINE,
+    )
+
+
+_GROUP_AUDIENCES = tuple(
+    (
+        category,
+        re.compile(rf"\b{term}\b"),
+        _audience_pattern(term),
+        _program_title_pattern(term),
+    )
+    for category, term in _GROUP_TERMS
+)
 
 
 def classify_event(event: Event, birth_date: date) -> FitRank:  # noqa: C901
@@ -201,13 +246,11 @@ def classify_event(event: Event, birth_date: date) -> FitRank:  # noqa: C901
     ):
         return "best"
 
+    audience_text = f"{event.title}\n{event.description}".lower()
     baby_audience = bool(
-        _BABY_AUDIENCE_RE.search(f"{event.title}\n{event.description}".lower())
+        _BABY_AUDIENCE_RE.search(audience_text)
+        or _BABY_PROGRAM_TITLE.search(event.title.lower())
     )
-    toddler_audience = bool(_TODDLER_AUDIENCE_RE.search(text))
-    preschool_audience = bool(_PRESCHOOL_AUDIENCE_RE.search(text))
-    school_age_audience = bool(_SCHOOL_AGE_AUDIENCE_RE.search(text))
-    teen_audience = bool(_TEEN_AUDIENCE_RE.search(text))
     adult_audience = bool(_ADULT_AUDIENCE_RE.search(text))
 
     windows = {
@@ -216,10 +259,15 @@ def classify_event(event: Event, birth_date: date) -> FitRank:  # noqa: C901
     }
     for category, audience in (
         ("Baby", baby_audience),
-        ("Toddler", toddler_audience),
-        ("Preschool", preschool_audience),
-        ("School Age", school_age_audience),
-        ("Young Adult", teen_audience),
+        *(
+            (
+                category,
+                bool(
+                    pattern.search(audience_text) or title.search(event.title.lower())
+                ),
+            )
+            for category, _, pattern, title in _GROUP_AUDIENCES
+        ),
     ):
         minimum, maximum = windows[category]
         if audience and minimum <= child_months < maximum:
@@ -269,10 +317,7 @@ def classify_event(event: Event, birth_date: date) -> FitRank:  # noqa: C901
     if any(
         (
             baby_audience,
-            toddler_audience,
-            preschool_audience,
-            school_age_audience,
-            teen_audience,
+            *(bare.search(text) for _, bare, _, _ in _GROUP_AUDIENCES),
             adult_audience,
         )
     ):
