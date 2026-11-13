@@ -107,7 +107,7 @@ Email highlights are derived from the complete source description before display
 
 Matching is deterministic and evaluates age **on the event date**. It first considers explicit numeric age wording, then matching publisher categories and specific audience wording, followed by explicit inclusive language. A nonmatching publisher category blocks generic family-oriented inference, while explicit inclusive wording can support a match. Events before the birth date are excluded. Age and source-category windows consider only dates on or after birth; a wholly pre-birth window has no categories.
 
-Age-group words match whole words. Baby and infant wording must describe an audience or a recognizable program, so incidental animal references and unrelated words do not supply age evidence. Publisher categories and explicit numeric age ranges retain their precedence.
+Age-group words match whole words. Baby, infant, toddler, preschool, school-age, and teen wording must describe an audience or a recognizable program to establish a match, so incidental references do not supply positive age evidence. Publisher categories and explicit numeric age ranges retain their precedence.
 
 Explicit numeric ranges joined directly by `or`, such as “ages 3 to 5 or ages 6 to 8,” can describe alternative eligible ages. Each range must state its age context or units; intervening roles, session qualifiers, and paragraph breaks do not extend the first audience range. This conservative rule does not infer a combined range from unrelated ages elsewhere in the description.
 

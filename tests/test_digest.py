@@ -8,7 +8,18 @@ from datetime import date, datetime, time
 from itertools import permutations
 from unittest.mock import MagicMock, patch
 
-from custom_components.free_library_events import digest, email_render, matching, model
+from custom_components.free_library_events import (
+    calendar_data,
+    digest,
+    email_render,
+    matching,
+    model,
+)
+from custom_components.free_library_events.const import (
+    CONF_BIRTH_DATE,
+    CONF_CALENDAR_DURATION,
+    CONF_FILTER_MODE,
+)
 
 
 def naive_datetime(*parts: int) -> datetime:
@@ -252,6 +263,7 @@ class DigestTests(unittest.TestCase):
             "Meet animal babies and their parents.",
             "Stories about how animals care for babies.",
             "Make blankets for infants.",
+            "Learn how to organize baby activities.",
             "Babysitting stories and an infantry exhibit.",
         ):
             with self.subTest(description=description):
@@ -349,6 +361,241 @@ class DigestTests(unittest.TestCase):
             with self.subTest(description=description):
                 event = replace(base, description=description)
                 self.assertEqual(matching.classify_event(event, birth_date), "best")
+
+    def test_age_group_audiences_require_participation_context(self) -> None:
+        base = model.Event(
+            title="Community Program",
+            event_date=date(2026, 9, 17),
+            start_time=time(10),
+            description="",
+            link="https://example.test/community-program",
+            image_url="",
+            branch=model.BRANCHES["PCI"],
+            age_categories=("Adult",),
+        )
+        cases = (
+            ("toddler", "toddlers", date(2024, 9, 17), "School Age"),
+            ("preschool", "preschoolers", date(2022, 9, 17), "Young Adult"),
+            ("school-age", "school-age children", date(2018, 9, 17), "Toddler"),
+            ("teen", "teenagers", date(2012, 9, 17), "Toddler"),
+        )
+        for adjective, group, birth, category in cases:
+            base = replace(base, age_categories=(category,))
+            for description in (
+                f"For parents of {group}. Adults only.",
+                f"For parents of babies and {group}. Adults only.",
+                f"Discuss the needs of {group}.",
+                f"This program is not for {group}.",
+                f"Learn how to organize {adjective} activities.",
+                f"This is not a {adjective} program.",
+            ):
+                with self.subTest(description=description):
+                    event = replace(base, description=description)
+                    self.assertEqual(matching.classify_event(event, birth), "exclude")
+                    self.assertEqual(
+                        matching.classify_event(
+                            replace(event, age_categories=()), birth
+                        ),
+                        "exclude",
+                    )
+                    _, selected = digest.select_digest_events(
+                        [event],
+                        birth_date=birth,
+                        filter_mode="Broad",
+                        week_start=event.event_date,
+                        week_end=event.event_date,
+                    )
+                    self.assertEqual(selected, [])
+                    self.assertEqual(
+                        calendar_data.build_calendar_items(
+                            [event],
+                            {
+                                CONF_BIRTH_DATE: birth.isoformat(),
+                                CONF_FILTER_MODE: "Broad",
+                                CONF_CALENDAR_DURATION: 60,
+                            },
+                        ),
+                        (),
+                    )
+            for title, description in (
+                (f"{adjective.title()} Storytime", "Stories and songs."),
+                (f"{adjective.title()} Games", "Play together."),
+                (f"{adjective.title()} Games: Board Games", "Play together."),
+                (f"{adjective.title()} Storytime - Fall Session", "Stories."),
+                (f"{adjective.title()} Board Games", "Play together."),
+                (f"{adjective.title()} Storytime with caregivers", "Stories."),
+                ("Community Program", f"For {group}."),
+                ("Community Program", f"Open to {group}."),
+                ("Community Program", f"{group.title()} are welcome."),
+            ):
+                with self.subTest(title=title, description=description):
+                    event = replace(base, title=title, description=description)
+                    self.assertEqual(matching.classify_event(event, birth), "best")
+                    _, selected = digest.select_digest_events(
+                        [event],
+                        birth_date=birth,
+                        filter_mode="Strict",
+                        week_start=event.event_date,
+                        week_end=event.event_date,
+                    )
+
+                    self.assertEqual(selected, [event])
+                    self.assertEqual(
+                        len(
+                            calendar_data.build_calendar_items(
+                                [event],
+                                {
+                                    CONF_BIRTH_DATE: birth.isoformat(),
+                                    CONF_FILTER_MODE: "Strict",
+                                    CONF_CALENDAR_DURATION: 60,
+                                },
+                            )
+                        ),
+                        1,
+                    )
+
+            with self.subTest(title="Parent Workshop"):
+                event = replace(
+                    base, title=f"Parent Workshop: {adjective.title()} Activities"
+                )
+                self.assertEqual(matching.classify_event(event, birth), "exclude")
+            for program in ("Activities", "Games"):
+                for role in ("Parents", "Caregivers"):
+                    with self.subTest(program=program, role=role):
+                        event = replace(
+                            base,
+                            title=f"{adjective.title()} {program} for {role}",
+                            description="Learn how to support your child.",
+                        )
+                        self.assertEqual(
+                            matching.classify_event(event, birth), "exclude"
+                        )
+                        _, selected = digest.select_digest_events(
+                            [event],
+                            birth_date=birth,
+                            filter_mode="Broad",
+                            week_start=event.event_date,
+                            week_end=event.event_date,
+                        )
+                        self.assertEqual(selected, [])
+                        self.assertEqual(
+                            calendar_data.build_calendar_items(
+                                [event],
+                                {
+                                    CONF_BIRTH_DATE: birth.isoformat(),
+                                    CONF_FILTER_MODE: "Broad",
+                                    CONF_CALENDAR_DURATION: 60,
+                                },
+                            ),
+                            (),
+                        )
+
+        toddler = replace(
+            base,
+            age_categories=("School Age",),
+            description="For babies and toddlers with caregivers.",
+        )
+        self.assertEqual(matching.classify_event(toddler, date(2023, 5, 17)), "best")
+        baby = replace(
+            base,
+            age_categories=("School Age",),
+            title="Baby Activities for Parents",
+            description="Learn how to support your child.",
+        )
+        baby_birth = date(2025, 11, 17)
+        self.assertEqual(matching.classify_event(baby, baby_birth), "exclude")
+        _, selected = digest.select_digest_events(
+            [baby],
+            birth_date=baby_birth,
+            filter_mode="Broad",
+            week_start=baby.event_date,
+            week_end=baby.event_date,
+        )
+        self.assertEqual(selected, [])
+        self.assertEqual(
+            calendar_data.build_calendar_items(
+                [baby],
+                {
+                    CONF_BIRTH_DATE: baby_birth.isoformat(),
+                    CONF_FILTER_MODE: "Broad",
+                    CONF_CALENDAR_DURATION: 60,
+                },
+            ),
+            (),
+        )
+        cases = (
+            ("For toddlers and preschoolers.", date(2021, 9, 17)),
+            ("For preschoolers and school-age children.", date(2016, 9, 17)),
+            ("For school-age children and teenagers.", date(2010, 9, 17)),
+            ("For babies, toddlers, and preschoolers.", date(2021, 9, 17)),
+            ("Bring your toddler.", date(2024, 9, 17)),
+        )
+        for description, birth in cases:
+            with self.subTest(description=description):
+                self.assertEqual(
+                    matching.classify_event(
+                        replace(
+                            base, age_categories=("Adult",), description=description
+                        ),
+                        birth,
+                    ),
+                    "best",
+                )
+
+    def test_coordinated_and_family_program_titles_match_each_audience(self) -> None:
+        base = model.Event(
+            title="",
+            event_date=date(2026, 9, 17),
+            start_time=time(10),
+            description="Stories and songs.",
+            link="https://example.test/coordinated-program",
+            image_url="",
+            branch=model.BRANCHES["PCI"],
+        )
+        cases = (
+            ("Toddler and Baby Storytime", date(2026, 1, 17), "School Age"),
+            ("Family Baby Storytime", date(2025, 9, 17), "School Age"),
+            ("Baby and Toddler Storytime", date(2023, 3, 17), "School Age"),
+            ("Toddler and Preschool Storytime", date(2021, 9, 17), "Toddler"),
+            ("Preschool and School-age Storytime", date(2016, 9, 17), "Toddler"),
+            ("School-age and Teen Games", date(2012, 9, 17), "Toddler"),
+        )
+        for title, birth, category in cases:
+            with self.subTest(title=title):
+                event = replace(base, title=title, age_categories=(category,))
+                self.assertEqual(matching.classify_event(event, birth), "best")
+                _, selected = digest.select_digest_events(
+                    [event],
+                    birth_date=birth,
+                    filter_mode="Strict",
+                    week_start=event.event_date,
+                    week_end=event.event_date,
+                )
+                self.assertEqual(selected, [event])
+                config = {
+                    CONF_BIRTH_DATE: birth.isoformat(),
+                    CONF_FILTER_MODE: "Strict",
+                    CONF_CALENDAR_DURATION: 60,
+                }
+                self.assertEqual(
+                    len(calendar_data.build_calendar_items([event], config)), 1
+                )
+                parent_event = replace(event, title=f"{title} for Parents")
+                self.assertEqual(
+                    matching.classify_event(parent_event, birth), "exclude"
+                )
+                _, selected = digest.select_digest_events(
+                    [parent_event],
+                    birth_date=birth,
+                    filter_mode="Broad",
+                    week_start=event.event_date,
+                    week_end=event.event_date,
+                )
+                self.assertEqual(selected, [])
+                config[CONF_FILTER_MODE] = "Broad"
+                self.assertEqual(
+                    calendar_data.build_calendar_items([parent_event], config), ()
+                )
 
     def test_merge_events_retains_richer_safe_source_fields(self) -> None:
         base = model.Event(

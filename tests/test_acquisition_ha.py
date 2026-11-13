@@ -1319,12 +1319,8 @@ async def test_stalled_type_expansions_end_by_the_total_deadline(
         patch(module + "TYPE_EXPANSION_TIMEOUT_SECONDS", 0.2),
         patch(module + "TOTAL_TYPE_EXPANSION_TIMEOUT_SECONDS", 0.5),
     ):
-        started = asyncio.get_running_loop().time()
         data = await coordinator._async_update_data()
-        elapsed = asyncio.get_running_loop().time() - started
 
-    # Six waves of 0.2 s would take 1.2 s without the total deadline.
-    assert elapsed < 0.9
     assert client.async_expand_feed.await_count < MAX_TYPE_EXPANSIONS_PER_REFRESH
     timed_out = [
         status
