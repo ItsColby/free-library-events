@@ -51,6 +51,7 @@ from .digest import build_digest, distance_priority, select_digest_events
 from .email_images import (
     EMAIL_IMAGE_DIRECTORY,
     IMAGE_CACHE_TTL_SECONDS,
+    SUBTYPE_EXTENSIONS,
     ImageDownloadBatch,
     StoredImageBundle,
     async_download_event_images,
@@ -66,10 +67,7 @@ from .webcal import async_register_webcal_view
 _LOGGER = logging.getLogger(__name__)
 
 _SMTP_IMAGE_CONTENT_TYPES = {
-    ".gif": "image/gif",
-    ".jpg": "image/jpeg",
-    ".png": "image/png",
-    ".webp": "image/webp",
+    extension: f"image/{subtype}" for subtype, extension in SUBTYPE_EXTENSIONS.items()
 }
 
 PLATFORMS: tuple[Platform, ...] = (

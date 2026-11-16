@@ -9,6 +9,7 @@ from datetime import date
 from .model import (
     ADULT_START_MONTHS,
     AGE_CATEGORY_WINDOWS,
+    FILTER_MODE_FITS,
     Event,
     FitRank,
     age_in_months,
@@ -342,13 +343,10 @@ def classify_event(event: Event, birth_date: date) -> FitRank:  # noqa: C901
 
 
 def include_fit(fit: FitRank, filter_mode: str) -> bool:
-    if filter_mode == "Strict":
-        return fit == "best"
-    if filter_mode == "Recommended":
-        return fit in {"best", "good", "possible"}
-    if filter_mode == "Broad":
-        return fit in {"best", "good", "possible", "broad"}
-    raise ValueError(f"Unsupported filter mode: {filter_mode}")
+    try:
+        return fit in FILTER_MODE_FITS[filter_mode]
+    except KeyError:
+        raise ValueError(f"Unsupported filter mode: {filter_mode}") from None
 
 
 def matching_events(

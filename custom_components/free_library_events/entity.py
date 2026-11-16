@@ -5,6 +5,7 @@ from __future__ import annotations
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 
 from .const import DOMAIN, NAME
+from .model import PUBLISHER_ORIGIN
 
 
 def service_device_info() -> DeviceInfo:
@@ -15,5 +16,5 @@ def service_device_info() -> DeviceInfo:
         name=NAME,
         manufacturer="Free Library of Philadelphia",
         entry_type=DeviceEntryType.SERVICE,
-        configuration_url="https://libwww.freelibrary.org/calendar/",
+        configuration_url=f"{PUBLISHER_ORIGIN}/calendar/",
     )

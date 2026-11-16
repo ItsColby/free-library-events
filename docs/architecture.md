@@ -51,13 +51,13 @@ The principal owners are:
 
 ## Acquisition must prove its horizon
 
-A source is a branch and official age-category pair, keyed as `branch_code:age_category`. The supported branch codes are `SWK`, `IND`, `CEN`, and `PCI`. Their public metadata and RSS URL construction live in `model.py`.
+A source is a branch and official age-category pair, keyed as `branch_code:age_category`. Branch public metadata and RSS URL construction live in `model.py`.
 
-Every refresh recomputes age-category selection from the configured birth date and Home Assistant's current local date through 90 days ahead. For a minor, the plan also includes all five child and teen categories so explicit inclusive wording can be discovered outside the most obvious category. Adult and senior source selection follows the overlapping local age windows. A window crossing a life-stage boundary retains the categories needed on both sides.
+Every refresh recomputes age-category selection from the configured birth date and Home Assistant's current local date through 90 days ahead. For a minor, the plan also includes all minor categories so explicit inclusive wording can be discovered outside the most obvious category. Adult and senior source selection follows the overlapping local age windows. A window crossing a life-stage boundary retains the categories needed on both sides.
 
 This 90-day interval selects sources. It does not promise 90 days of events. Coverage recovery targets the Sunday at the end of the digest week, and the publisher's capped feeds can leave that shorter horizon unproven.
 
-`LibraryClient` uses Home Assistant's shared HTTP session. Base feeds are acquired concurrently, then the coordinator selects unresolved capped sources for expansion across the 19 event types in `OFFICIAL_EVENT_TYPES`.
+`LibraryClient` uses Home Assistant's shared HTTP session. Base feeds are acquired concurrently, then the coordinator selects unresolved capped sources for expansion across the event types in `OFFICIAL_EVENT_TYPES`.
 
 | Bound | Runtime behavior |
 | --- | --- |
@@ -222,7 +222,7 @@ Invalid stored configuration produces `config: null` and the fixed `invalid_conf
 
 ## Persistent identity and change boundaries
 
-Config entry version `1.3` separates required profile data from behavior options:
+The current config entry version separates required profile data from behavior options:
 
 | Owner | Values |
 | --- | --- |

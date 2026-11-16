@@ -9,14 +9,20 @@ from datetime import date, timedelta
 
 import aiohttp
 
-from .model import Branch, Event, event_identity, merge_events, parse_feed
+from .model import (
+    TRUSTED_PUBLISHER_HOSTS,
+    Branch,
+    Event,
+    event_identity,
+    merge_events,
+    parse_feed,
+)
 
 RSS_ITEM_LIMIT = 10
 MAX_RSS_RESPONSE_BYTES = 256 * 1024
 MAX_RSS_REQUEST_CONCURRENCY = 8
 MAX_RSS_REDIRECTS = 2
 TRANSIENT_HTTP_STATUSES = frozenset({408, 425, 429, 500, 502, 503, 504})
-TRUSTED_RSS_HOSTS = frozenset({"libwww.freelibrary.org", "www.freelibrary.org"})
 OFFICIAL_EVENT_TYPES = (
     "Arts and Crafts Programs",
     "Author Events",
@@ -122,7 +128,7 @@ def _is_trusted_rss_url(url: str) -> bool:
         return False
     return (
         parsed.scheme == "https"
-        and (parsed.hostname or "").casefold() in TRUSTED_RSS_HOSTS
+        and (parsed.hostname or "").casefold() in TRUSTED_PUBLISHER_HOSTS
         and parsed.username is None
         and parsed.password is None
         and port in (None, 443)
