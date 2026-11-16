@@ -6,7 +6,7 @@ Matching runs locally against published age ranges, categories, and descriptions
 
 ## Is this integration for you?
 
-You need Home Assistant **2026.11.1 or newer** and internet access to the library's public feeds. No library account or API key is required. One integration entry supports one person, from infancy through adulthood, and any selection of these four branches:
+You need Home Assistant **2026.11.1 or newer** and internet access to the library's public feeds. No library account or API key is required. One integration entry supports one person, from infancy through adulthood, and any selection of these branches:
 
 | Branch | Official calendar |
 | --- | --- |
@@ -24,7 +24,7 @@ With the built-in [Marketplace](https://www.home-assistant.io/integrations/marke
 1. In **Settings > Marketplace**, select **Add from link**, enter `https://github.com/ItsColby/free-library-events`, and select **Add**. If prompted, connect GitHub through device sign-in.
 2. Open **Free Library Events** from the list, install it, and restart Home Assistant when prompted.
 3. In **Settings > Devices & services**, select **Add integration**, then **Free Library Events**.
-4. Enter **Person's display name**, **Person's birth date**, and **Library branches**. All four branches are selected initially; keep at least one. Submit the form.
+4. Enter **Person's display name**, **Person's birth date**, and **Library branches**. All branches are selected initially; keep at least one. Submit the form.
 
 For a manual installation, copy the release's `custom_components/free_library_events` directory into the `custom_components` directory inside your Home Assistant configuration directory. Restart Home Assistant, then complete steps 3–4. Configure the integration through the UI; there is no `free_library_events:` YAML configuration.
 

@@ -13,7 +13,7 @@
         "data_description": {
           "child_name": "Use a name of up to 80 characters for the digest heading. It stays in Home Assistant unless you share the generated digest.",
           "birth_date": "Age is calculated separately for each event date. Home Assistant uses it to choose library age feeds and apply matching rules; requests contain age categories, not the birth date or name.",
-          "branches": "Choose one or more of the four listed branches. The integration fetches events for these branches."
+          "branches": "Choose one or more of the listed branches. The integration fetches events for these branches."
         }
       },
       "reconfigure": {
@@ -27,7 +27,7 @@
         "data_description": {
           "child_name": "Use a name of up to 80 characters for the digest heading. It stays in Home Assistant unless you share the generated digest.",
           "birth_date": "Age is calculated separately for each event date. Home Assistant uses it to choose library age feeds and apply matching rules; requests contain age categories, not the birth date or name.",
-          "branches": "Choose one or more of the four listed branches. The integration fetches events for these branches."
+          "branches": "Choose one or more of the listed branches. The integration fetches events for these branches."
         }
       }
     },

@@ -14,7 +14,12 @@ from html.parser import HTMLParser
 from typing import Literal
 
 TIMEZONE = "America/New_York"
-FILTER_MODES = ("Strict", "Recommended", "Broad")
+FILTER_MODE_FITS: dict[str, frozenset[str]] = {
+    "Strict": frozenset({"best"}),
+    "Recommended": frozenset({"best", "good", "possible"}),
+    "Broad": frozenset({"best", "good", "possible", "broad"}),
+}
+FILTER_MODES = tuple(FILTER_MODE_FITS)
 EN_DASH = "\N{EN DASH}"
 MAX_CHILD_NAME_LENGTH = 80
 MAX_DESCRIPTION_LINKS = 50
@@ -22,7 +27,8 @@ MAX_EVENT_DESCRIPTION_LENGTH = 50_000
 MAX_EVENT_TITLE_LENGTH = 500
 MAX_PARSED_RSS_ITEMS = 100
 MAX_URL_LENGTH = 2_048
-TRUSTED_IMAGE_HOSTS = frozenset({"libwww.freelibrary.org", "www.freelibrary.org"})
+PUBLISHER_ORIGIN = "https://libwww.freelibrary.org"
+TRUSTED_PUBLISHER_HOSTS = frozenset({"libwww.freelibrary.org", "www.freelibrary.org"})
 
 # Stable source taxonomy with intentionally overlapping local windows. The
 # library publishes these category names but does not publish numeric bounds.
@@ -40,14 +46,12 @@ AGE_CATEGORY_ORDER = {
     category: index
     for index, (category, _minimum, _maximum) in enumerate(AGE_CATEGORY_WINDOWS)
 }
-MINOR_SOURCE_CATEGORIES = (
-    "Baby",
-    "Toddler",
-    "Preschool",
-    "School Age",
-    "Young Adult",
-)
 ADULT_START_MONTHS = 18 * 12
+MINOR_SOURCE_CATEGORIES = tuple(
+    category
+    for category, minimum, _maximum in AGE_CATEGORY_WINDOWS
+    if minimum < ADULT_START_MONTHS
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,7 +66,7 @@ class Branch:
 
     @property
     def rss_url(self) -> str:
-        return f"https://libwww.freelibrary.org/rss/eventsrss.cfm?location={self.code}"
+        return f"{PUBLISHER_ORIGIN}/rss/eventsrss.cfm?location={self.code}"
 
     def rss_url_for_age(self, age_category: str) -> str:
         """Return the official custom feed for this branch and age category."""
@@ -81,7 +85,7 @@ class Branch:
 
     @property
     def calendar_url(self) -> str:
-        return f"https://libwww.freelibrary.org/calendar/?location_code={self.code}"
+        return f"{PUBLISHER_ORIGIN}/calendar/?location_code={self.code}"
 
 
 BRANCHES = {
@@ -782,7 +786,7 @@ def clean_image_url(raw_url: str, base_url: str = "") -> str:
     return (
         url
         if parsed.scheme == "https"
-        and hostname in TRUSTED_IMAGE_HOSTS
+        and hostname in TRUSTED_PUBLISHER_HOSTS
         and port in (None, 443)
         else ""
     )

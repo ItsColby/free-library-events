@@ -30,7 +30,7 @@ MAX_FAILURE_EXAMPLES = 3
 
 _MANAGED_MARKER = ".managed-by-free-library-events"
 _RUN_DIRECTORY_PATTERN = re.compile(r"^run-[0-9a-f]{32}$")
-_SUBTYPE_EXTENSIONS = {
+SUBTYPE_EXTENSIONS = {
     "gif": ".gif",
     "jpeg": ".jpg",
     "png": ".png",
@@ -98,7 +98,7 @@ def _image_extension(content: bytes) -> str:
         subtype = MIMEImage(content).get_content_subtype()
     except TypeError:
         return ""
-    return _SUBTYPE_EXTENSIONS.get(subtype, "")
+    return SUBTYPE_EXTENSIONS.get(subtype, "")
 
 
 def _valid_dimensions(width: int, height: int) -> tuple[int, int] | None:
