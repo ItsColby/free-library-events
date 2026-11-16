@@ -19,10 +19,10 @@ The integration supplies a **Calendar**, a **Status** sensor, a **Refresh events
 
 ## Install and add your profile
 
-With [HACS installed](https://hacs.xyz/docs/use/download/download/):
+With the built-in [Marketplace](https://www.home-assistant.io/integrations/marketplace/):
 
-1. In HACS, open the three-dot menu and select **Custom repositories**. Add `https://github.com/ItsColby/free-library-events` with type **Integration**. See [HACS custom repository instructions](https://hacs.xyz/docs/faq/custom_repositories/).
-2. Find **Free Library Events**, download it, and restart Home Assistant when prompted. HACS explains the [download and restart steps](https://hacs.xyz/docs/use/repositories/dashboard/).
+1. In **Settings > Marketplace**, select **Add from link**, enter `https://github.com/ItsColby/free-library-events`, and select **Add**. If prompted, connect GitHub through device sign-in.
+2. Open **Free Library Events** from the list, install it, and restart Home Assistant when prompted.
 3. In **Settings > Devices & services**, select **Add integration**, then **Free Library Events**.
 4. Enter **Person's display name**, **Person's birth date**, and **Library branches**. All four branches are selected initially; keep at least one. Submit the form.
 
