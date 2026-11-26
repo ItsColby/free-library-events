@@ -572,12 +572,11 @@ class LibraryDataCoordinator(DataUpdateCoordinator[LibraryData]):
                 translation_domain=DOMAIN,
                 translation_key="library_refresh_failed",
             )
-        if self._refresh_completion is None:
-            self._refresh_completion = self.hass.loop.create_future()
-        completion = self._refresh_completion
-        # Scheduling through Core keeps its concurrency/cooldown behavior and
-        # prevents a cancelled caller from cancelling the shared source refresh.
-        self._debounced_refresh.async_schedule_call()
+        if (completion := self._refresh_completion) is None:
+            completion = self._refresh_completion = self.hass.loop.create_future()
+            # Schedule only when no attempt is pending or in flight. A second
+            # call to the debouncer could otherwise queue another acquisition.
+            self._debounced_refresh.async_schedule_call()
         try:
             async with asyncio.timeout(REQUEST_REFRESH_TIMEOUT_SECONDS):
                 await asyncio.shield(completion)
@@ -620,6 +619,18 @@ class LibraryDataCoordinator(DataUpdateCoordinator[LibraryData]):
         return remove_listener
 
     async def _async_update_data(self) -> LibraryData:
+        """Let response consumers join an attempt initiated by any entry point."""
+
+        if self._refresh_completion is None:
+            self._refresh_completion = self.hass.loop.create_future()
+        try:
+            return await self._async_fetch_data()
+        except asyncio.CancelledError:
+            # Core may propagate cancellation without invoking its finish hook.
+            self._async_resolve_refresh_completion()
+            raise
+
+    async def _async_fetch_data(self) -> LibraryData:
         """Fetch every selected branch, retaining partial successes."""
 
         self._notify_consecutive_failure_attempt = False

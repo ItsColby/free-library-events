@@ -218,9 +218,12 @@ class LibraryClient:
         branch: Branch,
         age_category: str,
     ) -> BranchFeed:
-        """Fetch one official branch-and-age feed."""
+        """Fetch a branch-and-age feed with usable rows or a valid empty channel."""
 
-        return await self._async_fetch_single(branch, age_category)
+        feed = await self._async_fetch_single(branch, age_category)
+        if feed.source_count and not feed.parsed_count:
+            raise LibraryApiError(SOURCE_ERROR_INVALID_FEED)
+        return feed
 
     async def async_expand_feed(
         self,
@@ -253,12 +256,12 @@ class LibraryClient:
                 continue
             successful_shards.append(result)
             events.extend(result.events)
-            if result.covers_through(coverage_end):
-                continue
             if result.parsed_count != result.source_count:
                 reason = TYPE_SHARD_BLOCKER_PARSE_INCOMPLETE
             elif not result.ordered:
                 reason = TYPE_SHARD_BLOCKER_UNORDERED
+            elif result.covers_through(coverage_end):
+                continue
             elif result.last_event_date is None:
                 reason = TYPE_SHARD_BLOCKER_MISSING_BOUNDARY
             else:

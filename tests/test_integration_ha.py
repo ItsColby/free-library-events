@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, Mock, patch
 from zoneinfo import ZoneInfo
 
 import pytest
+from freezegun.api import FrozenDateTimeFactory
 from homeassistant.components.calendar import CalendarEvent
 from homeassistant.config_entries import (
     SOURCE_RECONFIGURE,
@@ -23,15 +24,19 @@ from homeassistant.config_entries import (
     ConfigEntryState,
 )
 from homeassistant.const import STATE_UNAVAILABLE
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.network import NoURLAvailableError
 from homeassistant.helpers.translation import async_get_translations
-from homeassistant.helpers.update_coordinator import UpdateFailed
+from homeassistant.helpers.update_coordinator import (
+    REQUEST_REFRESH_DEFAULT_COOLDOWN,
+    UpdateFailed,
+)
 from pytest_homeassistant.common import (
     MockConfigEntry,
+    async_fire_time_changed,
 )
 from pytest_homeassistant.typing import ClientSessionGenerator
 
@@ -44,10 +49,13 @@ from custom_components.free_library_events import (
 )
 from custom_components.free_library_events.api import (
     OFFICIAL_EVENT_TYPES,
+    SOURCE_ERROR_INVALID_FEED,
+    SOURCE_ERROR_PARSE_FAILED,
     SOURCE_ERROR_REQUEST_FAILED,
     SOURCE_ERROR_UNEXPECTED,
     BranchFeed,
     LibraryApiError,
+    LibraryClient,
 )
 from custom_components.free_library_events.calendar import LibraryCalendar
 from custom_components.free_library_events.calendar_data import (
@@ -110,6 +118,7 @@ from custom_components.free_library_events.webcal import (
 from tests.feed_support import empty_feed
 
 LOCAL_TIME_ZONE = ZoneInfo("America/New_York")
+AFTER_REFRESH_COOLDOWN = timedelta(seconds=REQUEST_REFRESH_DEFAULT_COOLDOWN + 1)
 
 USER_INPUT = {
     CONF_CHILD_NAME: "Avery",
@@ -1829,6 +1838,7 @@ async def test_render_digest_rejects_superseded_entry_during_refresh(
 
 async def test_digest_and_button_wait_for_an_inflight_refresh(
     hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
 ) -> None:
     entry = _entry()
     entry.add_to_hass(hass)
@@ -1868,7 +1878,7 @@ async def test_digest_and_button_wait_for_an_inflight_refresh(
         patch(
             "custom_components.free_library_events.api.LibraryClient.async_fetch_feed",
             side_effect=fetch_feed,
-        ),
+        ) as fetch,
         patch(
             "custom_components.free_library_events.sensor.async_track_point_in_time",
             return_value=Mock(),
@@ -1882,6 +1892,7 @@ async def test_digest_and_button_wait_for_an_inflight_refresh(
         await hass.async_block_till_done()
         coordinator = entry.runtime_data
         prior_data = coordinator.data
+        fetch.reset_mock()
         wait_for_refresh = coordinator.async_request_refresh_and_wait
 
         async def tracked_wait() -> None:
@@ -1927,6 +1938,11 @@ async def test_digest_and_button_wait_for_an_inflight_refresh(
             assert response["metadata"]["included_count"] == 4
             assert "Newly refreshed storytime" in response["html"]
             assert coordinator.data is not prior_data
+            freezer.tick(AFTER_REFRESH_COOLDOWN)
+            async_fire_time_changed(hass)
+            await hass.async_block_till_done(wait_background_tasks=True)
+            assert coordinator.last_attempt is not None
+            assert fetch.await_count == coordinator.last_attempt.requested_source_count
         finally:
             release_source.set()
             for task in pending_tasks:
@@ -1934,6 +1950,180 @@ async def test_digest_and_button_wait_for_an_inflight_refresh(
                     task.cancel()
             await asyncio.gather(*pending_tasks, return_exceptions=True)
             assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+@pytest.mark.freeze_time(ignore=["aiohttp.web_log"])
+@pytest.mark.parametrize("recovery_trigger", ("button", "scheduled"))
+async def test_refresh_replaces_partial_data_retains_failed_cache_and_recovers(
+    hass: HomeAssistant,
+    hass_client_no_auth: ClientSessionGenerator,
+    freezer: FrozenDateTimeFactory,
+    recovery_trigger: str,
+) -> None:
+    freezer.move_to(datetime(2026, 7, 20, 12, tzinfo=UTC))
+    branch = BRANCHES["CEN"]
+    other_branch = BRANCHES["IND"]
+    branch_url = branch.rss_url_for_age("Adult")
+    other_url = other_branch.rss_url_for_age("Adult")
+    token = "synthetic-refresh-recovery-token"
+    entry = _entry(
+        data={
+            **USER_INPUT,
+            CONF_BIRTH_DATE: "1980-01-15",
+            CONF_BRANCHES: [branch.code, other_branch.code],
+        },
+        options={CONF_PUBLISH_WEBCAL: True, CONF_WEBCAL_TOKEN: token},
+    )
+    entry.add_to_hass(hass)
+
+    def item(title: str, day: int) -> str:
+        return (
+            f"<item><title>{title}</title><startdate>07/{day}/26</startdate>"
+            f"<starttime>10:30 AM</starttime></item>"
+        )
+
+    def feed(*items: str) -> bytes:
+        return f"<rss><channel>{''.join(items)}</channel></rss>".encode()
+
+    bad_row = "<item><title>Undated event</title></item>"
+    not_rss = b"<html>Source unavailable</html>"
+    payloads = {
+        branch_url: feed(item("Original event", 26)),
+        other_url: feed(item("Other branch event", 26)),
+    }
+
+    async def press_refresh() -> None:
+        await hass.services.async_call(
+            "button",
+            "press",
+            {"entity_id": "button.free_library_events_refresh_events"},
+            blocking=True,
+        )
+
+    async def digest(*, force_refresh: bool = False) -> ServiceResponse:
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_RENDER_DIGEST,
+            {ATTR_FORCE_REFRESH: force_refresh},
+            blocking=True,
+            return_response=True,
+        )
+        assert response is not None
+        return response
+
+    with patch.object(
+        LibraryClient, "_async_get", side_effect=lambda url: payloads[url]
+    ) as fetch:
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        coordinator = entry.runtime_data
+        client = await hass_client_no_auth()
+        path = WEBCAL_PATH.format(token=token)
+        status_id = "sensor.free_library_events_status"
+        calendar_id = "calendar.free_library_events_calendar"
+        assert hass.states.get(status_id).state == "ok"
+        assert coordinator.last_attempt.successful_source_count == 2
+
+        payloads.update(
+            {
+                branch_url: feed(item("Partial replacement", 26), bad_row),
+                other_url: not_rss,
+            }
+        )
+        await press_refresh()
+        partial = hass.states.get(status_id)
+        assert partial.state == "partial"
+        assert partial.attributes["last_attempt_successful_sources"] == 1
+        assert partial.attributes["last_attempt_error_categories"] == {
+            SOURCE_ERROR_INVALID_FEED: 1
+        }
+        retained = coordinator.data
+        assert [event.title for event in retained.events] == ["Partial replacement"]
+        assert (
+            hass.states.get(calendar_id).attributes["message"] == "Partial replacement"
+        )
+        response = await client.get(path)
+        assert response.status == 200
+        body = await response.text()
+        assert "SUMMARY:Partial replacement" in body
+        assert "Original event" not in body
+        assert "Other branch event" not in body
+        etag = response.headers["ETag"]
+
+        payloads[branch_url] = feed(bad_row)
+        freezer.tick(AFTER_REFRESH_COOLDOWN)
+        async_fire_time_changed(hass)
+        with pytest.raises(HomeAssistantError) as failure:
+            await press_refresh()
+        assert failure.value.translation_key == "manual_refresh_failed"
+        failed = hass.states.get(status_id)
+        assert failed.state == "error"
+        assert failed.attributes["last_attempt_error_categories"] == {
+            SOURCE_ERROR_INVALID_FEED: 2
+        }
+        assert failed.attributes["last_attempt_retryable_failures"] == 0
+        assert failed.attributes["last_refresh"] == partial.attributes["last_refresh"]
+        assert failed.attributes["last_attempt"] > partial.attributes["last_attempt"]
+        assert hass.states.get(calendar_id).state == STATE_UNAVAILABLE
+        assert coordinator.data is retained
+        response = await client.get(path, headers={"If-None-Match": etag})
+        assert response.status == 304
+        calls_before_read = fetch.await_count
+        assert (await digest())["metadata"]["included_count"] == 1
+        assert fetch.await_count == calls_before_read
+        payloads[other_url] = b""
+        freezer.tick(AFTER_REFRESH_COOLDOWN)
+        async_fire_time_changed(hass)
+        with pytest.raises(HomeAssistantError) as failure:
+            await digest(force_refresh=True)
+        assert failure.value.translation_key == "library_refresh_failed"
+        failed_again = hass.states.get(status_id)
+        assert (
+            failed_again.attributes["last_attempt"] > failed.attributes["last_attempt"]
+        )
+        assert failed_again.attributes["last_attempt_error_categories"] == {
+            SOURCE_ERROR_INVALID_FEED: 1,
+            SOURCE_ERROR_PARSE_FAILED: 1,
+        }
+
+        # A genuinely empty source is complete. Repeated rows collapse, while
+        # the next Monday remains outside this Monday's digest and status week.
+        recovered = item("Recovered Sunday event", 26)
+        payloads[branch_url] = feed(recovered, recovered, item("Next Monday event", 27))
+        payloads[other_url] = feed()
+        calls_before_recovery = fetch.await_count
+        if recovery_trigger == "scheduled":
+            freezer.tick(timedelta(seconds=USER_INPUT[CONF_SCAN_INTERVAL]))
+            async_fire_time_changed(hass)
+            await hass.async_block_till_done(wait_background_tasks=True)
+        else:
+            freezer.tick(AFTER_REFRESH_COOLDOWN)
+            async_fire_time_changed(hass)
+            await press_refresh()
+        assert fetch.await_count == calls_before_recovery + 2
+        assert entry.runtime_data is coordinator
+        assert entry.state is ConfigEntryState.LOADED
+        status = hass.states.get(status_id)
+        assert status.state == "ok"
+        assert status.attributes["week_events"] == 1
+        assert status.attributes["cached_events"] == 2
+        assert status.attributes["last_attempt_error_categories"] == {}
+        assert (
+            hass.states.get(calendar_id).attributes["message"]
+            == "Recovered Sunday event"
+        )
+        response = await client.get(path, headers={"If-None-Match": etag})
+        assert response.status == 200
+        body = await response.text()
+        assert body.count("BEGIN:VEVENT") == 2
+        assert body.count("SUMMARY:Recovered Sunday event") == 1
+        assert "SUMMARY:Next Monday event" in body
+        assert "Partial replacement" not in body
+        response = await digest()
+        assert response["metadata"]["included_count"] == 1
+        assert "Recovered Sunday event" in response["html"]
+        assert "Next Monday event" not in response["html"]
+        assert await hass.config_entries.async_unload(entry.entry_id)
 
 
 @pytest.fixture
