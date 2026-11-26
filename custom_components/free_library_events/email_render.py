@@ -6,7 +6,7 @@ import html
 import re
 import urllib.parse
 from collections.abc import Mapping, Sequence
-from datetime import date, timedelta
+from datetime import date
 from itertools import groupby
 
 from .model import (
@@ -16,6 +16,7 @@ from .model import (
     Branch,
     Event,
     HTMLDescriptionSanitizer,
+    event_calendar_span,
     event_identity,
     format_age,
     format_event_time,
@@ -207,7 +208,7 @@ def google_calendar_url(
 ) -> str:
     """Return a bounded creation URL, or omit it if required context cannot fit."""
 
-    end = event.end_at or event.starts_at + timedelta(minutes=duration_minutes)
+    start, end = event_calendar_span(event, duration_minutes)
     location_note = event_location_note(event)
     context_parts = (
         [location_note, f"Hosted by {event.branch.name}"] if location_note else []
@@ -221,7 +222,7 @@ def google_calendar_url(
     parameters = {
         "action": "TEMPLATE",
         "text": bounded_text(event.title, MAX_DISPLAY_TITLE_LENGTH),
-        "dates": f"{event.starts_at:%Y%m%dT%H%M%S}/{end:%Y%m%dT%H%M%S}",
+        "dates": f"{start:%Y%m%dT%H%M%SZ}/{end:%Y%m%dT%H%M%SZ}",
         "ctz": TIMEZONE,
         "location": event_calendar_location(event),
         "details": "",

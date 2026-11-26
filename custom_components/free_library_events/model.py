@@ -9,11 +9,13 @@ import urllib.parse
 import xml.etree.ElementTree as ET
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from html.parser import HTMLParser
 from typing import Literal
+from zoneinfo import ZoneInfo
 
 TIMEZONE = "America/New_York"
+LIBRARY_TIME_ZONE = ZoneInfo(TIMEZONE)
 FILTER_MODE_FITS: dict[str, frozenset[str]] = {
     "Strict": frozenset({"best"}),
     "Recommended": frozenset({"best", "good", "possible"}),
@@ -158,6 +160,27 @@ class Event:
 
 
 type FitRank = Literal["best", "good", "possible", "broad", "exclude"]
+
+
+def _library_time_to_utc(wall_time: datetime) -> datetime:
+    """Use the first occurrence of a repeated source time and roll gaps forward."""
+    return wall_time.replace(tzinfo=LIBRARY_TIME_ZONE).astimezone(UTC)
+
+
+def event_calendar_span(
+    event: Event, duration_minutes: int
+) -> tuple[datetime, datetime]:
+    """Resolve an occurrence to the same instants for all calendar exports."""
+    wall_start = event.starts_at
+    start = _library_time_to_utc(wall_start)
+    if event.end_at is None:
+        return start, start + timedelta(minutes=duration_minutes)
+
+    end = _library_time_to_utc(event.end_at)
+    if end <= start:
+        # A skipped start hour can map past the stated end. Keep the stated span.
+        end = start + (event.end_at - wall_start)
+    return start, end
 
 
 def _safe_http_url(value: str, base_url: str = "") -> str:
@@ -517,9 +540,17 @@ def format_time(value: time) -> str:
 def format_event_time(event: Event) -> str:
     """Return a start time and any confident official end time."""
 
-    if event.end_at:
-        return f"{format_time(event.start_time)} {EN_DASH} {format_time(event.end_at.time())}"
-    return format_time(event.start_time)
+    start, end = event_calendar_span(event, duration_minutes=0)
+    local_start = start.astimezone(LIBRARY_TIME_ZONE)
+    start_label = format_time(local_start.time())
+    if event.end_at is None:
+        return start_label
+    local_end = end.astimezone(LIBRARY_TIME_ZONE)
+    end_label = format_time(local_end.time())
+    if local_start.utcoffset() != local_end.utcoffset():
+        start_label += f" {local_start:%Z}"
+        end_label += f" {local_end:%Z}"
+    return f"{start_label} {EN_DASH} {end_label}"
 
 
 TIME_RANGE_RE = re.compile(
@@ -593,6 +624,8 @@ def explicit_end_at(
             continue
         start_at = datetime.combine(event_date, start_time)
         end_at = datetime.combine(event_date, source_end)
+        if source_end < start_time:
+            end_at += timedelta(days=1)
         if timedelta(minutes=15) <= end_at - start_at <= timedelta(hours=8):
             return end_at
     start_at = datetime.combine(event_date, start_time)
@@ -600,7 +633,8 @@ def explicit_end_at(
         if duration_match := pattern.search(description):
             duration = timedelta(minutes=int(duration_match.group("minutes")))
             if timedelta(minutes=15) <= duration <= timedelta(hours=8):
-                return start_at + duration
+                end_at = _library_time_to_utc(start_at) + duration
+                return end_at.astimezone(LIBRARY_TIME_ZONE).replace(tzinfo=None)
     return None
 
 

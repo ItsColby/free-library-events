@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
-from zoneinfo import ZoneInfo
+from datetime import date, datetime
 
 from .const import (
     CONF_BIRTH_DATE,
@@ -20,9 +19,7 @@ from .email_render import (
     related_link_lines,
 )
 from .matching import classify_event, include_fit
-from .model import TIMEZONE, Event, event_identity, event_is_active
-
-LIBRARY_TIME_ZONE = ZoneInfo(TIMEZONE)
+from .model import Event, event_calendar_span, event_identity, event_is_active
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,12 +50,10 @@ def build_calendar_items(
         fit = classify_event(event, birth_date)
         if not include_fit(fit, filter_mode):
             continue
-        start = event.starts_at.replace(tzinfo=LIBRARY_TIME_ZONE)
+        start, end = event_calendar_span(event, duration)
         if event.end_at:
-            end = event.end_at.replace(tzinfo=LIBRARY_TIME_ZONE)
             end_note = None
         else:
-            end = start + timedelta(minutes=duration)
             end_note = (
                 "No end time was found in the parsed feed. This calendar entry uses "
                 f"{duration} minutes as a fallback; check the official listing for its duration."
@@ -89,4 +84,4 @@ def build_calendar_items(
                 url=details_url,
             )
         )
-    return tuple(items)
+    return tuple(sorted(items, key=lambda item: item.start))

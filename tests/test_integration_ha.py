@@ -2221,8 +2221,48 @@ async def test_calendar_converts_only_events_overlapping_the_requested_range(
         )
 
     assert construct.call_count == len(expected_hours)
-    assert [event.start.hour for event in events] == expected_hours
+    assert [
+        event.start_datetime_local.astimezone(LOCAL_TIME_ZONE).hour for event in events
+    ] == expected_hours
     assert all(isinstance(event, CalendarEvent) for event in events)
+
+
+async def test_calendar_overlaps_the_second_repeated_hour(
+    hass: HomeAssistant, selection_calendar: LibraryCalendar
+) -> None:
+    event = replace(
+        selection_calendar.coordinator.data.events[0],
+        event_date=date(2026, 11, 1),
+        start_time=time(1, 30),
+        end_at=None,
+    )
+    selection_calendar.coordinator.data.events = (event,)
+    second_115 = datetime(2026, 11, 1, 1, 15, tzinfo=LOCAL_TIME_ZONE, fold=1)
+    second_130 = second_115.replace(minute=30)
+    with patch(
+        "custom_components.free_library_events.calendar.dt_util.now",
+        return_value=second_115,
+    ):
+        current = selection_calendar.event
+
+    assert current is not None
+    assert current.start == datetime(2026, 11, 1, 5, 30, tzinfo=UTC)
+    assert current.end == datetime(2026, 11, 1, 6, 30, tzinfo=UTC)
+    assert await selection_calendar.async_get_events(hass, second_115, second_130) == [
+        current
+    ]
+    assert (
+        await selection_calendar.async_get_events(
+            hass, second_130, second_130.replace(minute=45)
+        )
+        == []
+    )
+    webcal = render_icalendar(
+        build_calendar_items((event,), selection_calendar._entry.data),
+        fetched_at=datetime(2026, 11, 1, tzinfo=UTC),
+        refresh_seconds=3600,
+    )
+    assert "DTSTART:20261101T053000Z\r\nDTEND:20261101T063000Z\r\n" in webcal
 
 
 async def test_calendar_handles_missing_snapshot(
