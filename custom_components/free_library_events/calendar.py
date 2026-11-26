@@ -11,11 +11,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
-from .calendar_data import (
-    LIBRARY_TIME_ZONE,
-    LibraryCalendarItem,
-    build_calendar_items,
-)
+from .calendar_data import LibraryCalendarItem, build_calendar_items
 from .config import entry_config
 from .const import DOMAIN
 from .coordinator import LibraryDataCoordinator
@@ -79,7 +75,7 @@ class LibraryCalendar(CoordinatorEntity[LibraryDataCoordinator], CalendarEntity)
     def event(self) -> CalendarEvent | None:
         """Return the current or next age-matched event."""
 
-        now = dt_util.now(LIBRARY_TIME_ZONE)
+        now = dt_util.now()
         item = next(
             (item for item in self._calendar_items() if item.end > now),
             None,

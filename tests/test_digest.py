@@ -4,7 +4,7 @@ import unittest
 import urllib.parse
 import xml.etree.ElementTree as ET
 from dataclasses import replace
-from datetime import date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 from itertools import permutations
 from unittest.mock import MagicMock, patch
 
@@ -47,6 +47,143 @@ def rss(items: list[dict[str, str]]) -> str:
 
 
 class DigestTests(unittest.TestCase):
+    def test_calendar_and_digest_use_the_same_snapshot_occurrences(self) -> None:
+        sunday = date(2026, 7, 26)
+        monday = date(2026, 7, 27)
+        event = model.Event(
+            "Family Night",
+            sunday,
+            time(23),
+            "All ages. Runs from 11 p.m. to 12:30 a.m.",
+            "https://example.org/events/family-night",
+            "",
+            model.BRANCHES["CEN"],
+            end_at=model.explicit_end_at(
+                sunday, time(23), "Runs from 11 p.m. to 12:30 a.m."
+            ),
+        )
+        moved = replace(event, start_time=time(22), end_at=None)
+        duplicate = replace(event, age_categories=("Baby",))
+        next_week = replace(event, event_date=monday, end_at=None)
+        config = {
+            CONF_BIRTH_DATE: "2025-01-15",
+            CONF_FILTER_MODE: "Broad",
+            CONF_CALENDAR_DURATION: 60,
+        }
+        snapshot = model.merge_events([event, duplicate, moved, next_week])
+        items = calendar_data.build_calendar_items(snapshot, config)
+        _, included = digest.select_digest_events(
+            snapshot,
+            birth_date=date(2025, 1, 15),
+            filter_mode="Broad",
+            week_start=date(2026, 7, 20),
+            week_end=sunday,
+        )
+        self.assertEqual(
+            [item.uid for item in items],
+            [model.event_identity(row) for row in (moved, event, next_week)],
+        )
+        self.assertEqual(
+            [model.event_identity(row) for row in included],
+            [item.uid for item in items[:2]],
+        )
+        self.assertEqual(
+            items[1].end.astimezone(UTC), datetime(2026, 7, 27, 4, 30, tzinfo=UTC)
+        )
+        link = urllib.parse.urlparse(email_render.google_calendar_url(event, 60))
+        self.assertEqual(
+            urllib.parse.parse_qs(link.query)["dates"],
+            ["20260727T030000Z/20260727T043000Z"],
+        )
+
+    def test_calendar_and_digest_link_keep_elapsed_duration_at_dst(self) -> None:
+        config = {
+            CONF_BIRTH_DATE: "2025-01-15",
+            CONF_FILTER_MODE: "Broad",
+            CONF_CALENDAR_DURATION: 60,
+        }
+        for day, hour, utc_start, utc_end in (
+            (date(2026, 3, 8), 1, "20260308T063000Z", "20260308T073000Z"),
+            (date(2026, 3, 8), 2, "20260308T073000Z", "20260308T083000Z"),
+            (date(2026, 11, 1), 1, "20261101T053000Z", "20261101T063000Z"),
+        ):
+            with self.subTest(day=day, hour=hour):
+                event = model.Event(
+                    "Family Night",
+                    day,
+                    time(hour, 30),
+                    "All ages.",
+                    "",
+                    "",
+                    model.BRANCHES["CEN"],
+                )
+                explicit = model.explicit_end_at(
+                    day, event.start_time, "A 60-minute program."
+                )
+                self.assertIsNotNone(explicit)
+                for row in (event, replace(event, end_at=explicit)):
+                    item = calendar_data.build_calendar_items([row], config)[0]
+                    url = urllib.parse.urlparse(
+                        email_render.google_calendar_url(row, 60)
+                    )
+                    self.assertEqual(
+                        [
+                            value.strftime("%Y%m%dT%H%M%SZ")
+                            for value in (item.start, item.end)
+                        ],
+                        [utc_start, utc_end],
+                    )
+                    self.assertEqual(
+                        urllib.parse.parse_qs(url.query)["dates"],
+                        [f"{utc_start}/{utc_end}"],
+                    )
+
+    def test_digest_labels_clock_changes_in_published_ranges(self) -> None:
+        for day, start, description, label in (
+            (
+                date(2026, 3, 8),
+                time(1, 45),
+                "From 1:45 a.m. to 3:15 a.m.",
+                "1:45 AM EST \N{EN DASH} 3:15 AM EDT",
+            ),
+            (
+                date(2026, 11, 1),
+                time(1, 45),
+                "From 1:45 a.m. to 2:15 a.m.",
+                "1:45 AM EDT \N{EN DASH} 2:15 AM EST",
+            ),
+            (
+                date(2026, 11, 1),
+                time(1, 45),
+                "A 30-minute program.",
+                "1:45 AM EDT \N{EN DASH} 1:15 AM EST",
+            ),
+        ):
+            with self.subTest(day=day, description=description):
+                event = model.Event(
+                    "Family Night",
+                    day,
+                    start,
+                    description,
+                    "",
+                    "",
+                    model.BRANCHES["CEN"],
+                    age_categories=("Baby",),
+                    end_at=model.explicit_end_at(day, start, description),
+                )
+                payload = digest.build_digest(
+                    child_name="Avery",
+                    birth_date=date(2025, 1, 15),
+                    filter_mode="Recommended",
+                    duration_minutes=60,
+                    selected_branches=(event.branch,),
+                    reference_date=day - timedelta(days=6),
+                    events=(event,),
+                    source_counts={},
+                )
+                self.assertIn(label, str(payload["html"]))
+                self.assertIn(label, str(payload["message"]))
+
     def test_custom_feed_combines_branch_with_singular_age_parameter(self) -> None:
         url = model.BRANCHES["CEN"].rss_url_for_age("Baby")
 
@@ -3265,11 +3402,11 @@ class DigestTests(unittest.TestCase):
                         self.assertEqual(
                             query["dates"],
                             [
-                                "20260720T100000/"
+                                "20260720T140000Z/"
                                 + (
-                                    "20260720T113000"
+                                    "20260720T153000Z"
                                     if explicit_end
-                                    else "20260720T110000"
+                                    else "20260720T150000Z"
                                 )
                             ],
                         )
