@@ -352,6 +352,37 @@ async def test_completion_wait_fails_promptly_when_coordinator_unloads(
     await hass.async_block_till_done()
 
 
+async def test_cancelled_refresh_releases_its_waiter_and_allows_retry(
+    hass: HomeAssistant,
+) -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+    coordinator = _blocked_failure_coordinator(hass, started, release)
+    refresh = asyncio.create_task(coordinator.async_refresh())
+    await started.wait()
+    waiter = asyncio.create_task(
+        coordinator.async_request_refresh_and_wait(), eager_start=True
+    )
+    try:
+        refresh.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await refresh
+        assert coordinator._refresh_completion is None
+        await waiter
+        assert coordinator.last_update_success is False
+
+        coordinator._client.async_fetch_feed.side_effect = (
+            lambda _branch, age_category: empty_feed(age_category)
+        )
+        await coordinator.async_request_refresh_and_wait()
+        assert coordinator.last_update_success is True
+    finally:
+        release.set()
+        waiter.cancel()
+        await asyncio.gather(waiter, return_exceptions=True)
+        await coordinator.async_shutdown()
+
+
 async def test_completion_wait_timeout_does_not_cancel_source_refresh(
     hass: HomeAssistant,
 ) -> None:
@@ -736,7 +767,9 @@ async def test_capped_type_shards_prove_through_the_earliest_capped_date(
 @pytest.mark.parametrize(
     ("reason", "source_count", "parsed_count", "last_event_date", "ordered"),
     (
+        (TYPE_SHARD_BLOCKER_PARSE_INCOMPLETE, 1, 0, None, True),
         (TYPE_SHARD_BLOCKER_PARSE_INCOMPLETE, 10, 9, date(2026, 7, 27), True),
+        (TYPE_SHARD_BLOCKER_UNORDERED, 2, 2, date(2026, 7, 24), False),
         (TYPE_SHARD_BLOCKER_UNORDERED, 10, 10, date(2026, 7, 27), False),
         (TYPE_SHARD_BLOCKER_MISSING_BOUNDARY, 10, 10, None, True),
     ),

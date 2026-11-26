@@ -81,7 +81,7 @@ Expansion still contributes useful recovered rows when proof fails. Failures, ma
 
 `parse_feed` produces frozen `Event` records. It reads the publisher's event date and start time, extracts safe text and links from description HTML, and retains sanitized rich description markup for email. It recognizes explicit end times or durations, venue and room wording, and positive online or hybrid event wording. Recognized negations, such as “not a virtual program,” do not supply online attendance evidence. Unknown end times remain unknown until a calendar projection supplies a labeled placeholder.
 
-The parser requires an RSS document with exactly one channel, so XML error or challenge pages cannot become successful empty feeds. A valid channel with no items remains a valid empty feed. The parser skips individual rows with unusable dates, times, or oversized fields while retaining the original published count. It limits processing to 100 RSS items and rejects XML DTD and entity declarations, including multibyte encodings. Content limits and skipped rows therefore remain visible as incomplete parsing rather than silently becoming a complete smaller feed.
+The parser requires an RSS document with exactly one channel, so XML error or challenge pages cannot become successful empty feeds. A valid channel with no items remains a valid empty feed. The parser skips individual rows with unusable dates, times, or oversized fields while retaining the original published count. A base feed whose published rows all fail parsing counts as an invalid source. Type-feed expansion retains published and parsed counts for its coverage diagnostics. The parser limits processing to 100 RSS items and rejects XML DTD and entity declarations, including multibyte encodings. Skipped rows and processing limits leave coverage incomplete.
 
 Ordinary event and description links must be bounded HTTP(S) URLs without embedded credentials. Automatically loaded images have the narrower publisher-hosted HTTPS boundary. Source HTML is sanitized rather than copied into email as executable markup. Venue and modality evidence also controls calendar locations and directions links so an online event does not acquire an invented physical destination.
 
@@ -162,7 +162,7 @@ The current-age and supplemental coverage attributes describe the retained snaps
 
 The first failure in a complete-failure streak can receive a five-minute expedited retry only when all failures are retryable transport/HTTP failures and setup has finished. Policy, TLS, parsing, and unsafe-source failures do not qualify. Later failures in the same streak use Core's normal scheduling; any successful base-source refresh resets the streak. Setup retry scheduling belongs to Home Assistant Core.
 
-Manual refresh and forced digest rendering use the coordinator's shared, debounced completion wait. They wait for an actual completed attempt, including work already in flight. A canceled caller or ten-minute wait timeout does not cancel the shared source refresh. Unload releases waiters and prevents them from treating an unloaded coordinator as a successful result.
+Manual refresh and forced digest rendering use the coordinator's shared, debounced completion wait. Requests that arrive during an active refresh share that acquisition and wait for its outcome. A canceled caller or ten-minute wait timeout does not cancel the shared source refresh. Unload releases waiters and prevents them from treating an unloaded coordinator as a successful result.
 
 Consumers expose failure differently:
 
